@@ -24,6 +24,7 @@ from myinvestor import (  # noqa: F401
     cli_gains,
     cli_income,
     cli_invest,
+    cli_portfolios,
     cli_schema,
     cli_snapshot,
     cli_state,

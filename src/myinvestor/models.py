@@ -333,7 +333,8 @@ class SecuritiesAccount(_Model):
     cash_account_id: str | None = None
     account_type: str | None = None
     status: str | None = None
-    portfolio_name: str | None = None
+    portfolio_name: str | None = None  # managed portfolios (`SECURITIES_PORTFOLIO`): catalog `name`, `METAL`
+    portfolio_profile_type: str | None = None  # managed portfolios: `VERY_AGGRESSIVE`…
     amount: Decimal | None = None
     market_value: Decimal | None = None
     total_invested: Decimal | None = None

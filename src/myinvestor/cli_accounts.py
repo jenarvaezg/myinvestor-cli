@@ -37,6 +37,7 @@ from myinvestor.models import (
     stable_ids,
 )
 from myinvestor.output import OutputFormat, normalize_row, print_json, render
+from myinvestor.portfolios import is_portfolio, own_cash, portfolio_title
 from myinvestor.psd2 import Span, free_start, split_range
 from myinvestor.sent_transfers import with_beneficiaries
 from myinvestor.signature import INAPP, can_start
@@ -120,6 +121,8 @@ def filter_owner(accounts: list[CashAccount], owner: Ownership | None) -> list[C
 
 
 POSITION_TOTAL = "total"  # `producto` of the total row in JSON/CSV/TSV ("TOTAL" in the table)
+# Keys of a managed portfolio's row (`null` in the rest); the table only shows `efectivo`, and only if some has it.
+PORTFOLIO_KEYS = ("cartera", "perfil", "efectivo", "efectivo_id")
 
 
 def _latest(days: Iterable[date | None]) -> str | None:
@@ -151,6 +154,48 @@ def _securities_position(sec: SecuritiesAccount) -> dict[str, Any]:
         "rentab": sec.total_return,
         "fecha_valor": _latest(inv.liquidation_value_date for inv in sec.investments),
     }
+
+
+def _portfolio_position(sec: SecuritiesAccount, cash: CashAccount | None, today: date) -> dict[str, Any]:
+    """A managed portfolio with its own cash account: `valor` = its funds + that cash (`efectivo`)."""
+    row = _securities_position(sec)
+    with_cash = (
+        {
+            "valor": (sec.market_value or Decimal(0)) + cash.balance,
+            "fecha_valor": row["fecha_valor"] or today.isoformat(),
+        }
+        if cash
+        else {}
+    )
+    return {
+        **row,
+        **with_cash,
+        "nombre": portfolio_title(sec),
+        "cartera": sec.portfolio_name,
+        "perfil": sec.portfolio_profile_type,
+        "efectivo": cash.balance if cash else None,
+        "efectivo_id": cash.account_id if cash else None,
+    }
+
+
+def _position_rows(cash: list[CashAccount], securities: list[SecuritiesAccount], today: date) -> list[dict[str, Any]]:
+    """Cash accounts, then securities accounts; a portfolio's own cash account goes inside the portfolio."""
+    owned = own_cash(securities, cash)
+    grouped = {a.account_id for a in owned.values()}
+    blank = dict.fromkeys(PORTFOLIO_KEYS)
+    rows = [{**_cash_position(acc, today), **blank} for acc in cash if acc.account_id not in grouped]
+    return rows + [
+        _portfolio_position(sec, owned.get(sec.account_id), today)
+        if is_portfolio(sec)
+        else {**_securities_position(sec), **blank}
+        for sec in securities
+    ]
+
+
+def _table_columns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The table keeps the columns it always had, plus `efectivo` when a portfolio has its own cash."""
+    shown = {"efectivo"} if any(r.get("efectivo") is not None for r in rows) else set()
+    return [{k: v for k, v in r.items() if k not in PORTFOLIO_KEYS or k in shown} for r in rows]
 
 
 def _pension_position(pen: PensionAccount, plans: list[PensionPlanPosition]) -> dict[str, Any]:
@@ -187,17 +232,23 @@ def position(fmt: FormatOpt = OutputFormat.table) -> None:
     `fecha_valor` es el VL más reciente de las inversiones de cada producto (hoy, en el efectivo).
     En JSON/CSV/TSV cada fila lleva además `consultado_en` (fecha y hora de la consulta, con zona)
     y la última es el total, con `producto: "total"`.
+
+    Una cartera del roboadvisor sale como «Cartera METAL (muy agresiva)» y su cuenta de efectivo propia
+    va dentro de ella: su `valor` suma ese efectivo (columna `efectivo`) en vez de listarlo aparte.
     """
     consulted = now_local()
+    blank = dict.fromkeys(PORTFOLIO_KEYS)
     with build_client() as client:
-        rows = [_cash_position(acc, consulted.date()) for acc in client.cash_accounts()]
-        rows += [_securities_position(sec) for sec in client.securities_accounts()]
-        rows += [_pension_position(pen, client.pension_plans(pen.account_id)) for pen in client.pension_accounts()]
+        rows = _position_rows(client.cash_accounts(), client.securities_accounts(), consulted.date())
+        rows += [
+            {**_pension_position(pen, client.pension_plans(pen.account_id)), **blank}
+            for pen in client.pension_accounts()
+        ]
     if fmt is OutputFormat.table:
-        rows.append(_total_row(rows, POSITION_TOTAL.upper()))
-        render(rows, fmt, title=f"Posición global a {consulted:%Y-%m-%d %H:%M}")
+        rows.append({**_total_row(rows, POSITION_TOTAL.upper()), **blank})
+        render(_table_columns(rows), fmt, title=f"Posición global a {consulted:%Y-%m-%d %H:%M}")
         return
-    rows.append(_total_row(rows, POSITION_TOTAL))
+    rows.append({**_total_row(rows, POSITION_TOTAL), **blank})
     render([{**r, "consultado_en": iso_moment(consulted)} for r in rows], fmt)
 
 

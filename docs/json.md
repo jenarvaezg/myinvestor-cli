@@ -82,12 +82,16 @@ Salida: lista de objetos.
 |---|---|---|---|---|
 | `producto` | string | no | sí | `efectivo`, `valores`, `pensiones` o `total` (última fila) |
 | `id` | string | no | sí | id de la cuenta; `""` en el total |
-| `nombre` | string | sí | sí | `""` en el total |
-| `valor` | number (€, 2 decimales) | sí | sí |  |
+| `nombre` | string | sí | sí | `""` en el total; en una cartera del roboadvisor, `Cartera METAL (muy agresiva)` |
+| `valor` | number (€, 2 decimales) | sí | sí | en una cartera, sus fondos + el saldo de su cuenta de efectivo propia (`efectivo`) |
 | `invertido` | number (€, 2 decimales) | sí | sí | `null` en efectivo y en el total |
 | `ganancia` | number (€, 2 decimales) | sí | sí | `null` en efectivo y en el total |
 | `rentab` | number (exacto) | sí | sí | en %; `null` en efectivo y en el total |
 | `fecha_valor` | date `AAAA-MM-DD` | sí | sí | VL más reciente del producto (hoy en efectivo; `null` en el total) |
+| `cartera` | string | sí | sí | `portfolioName` de una cartera del roboadvisor (`METAL`); `null` en el resto |
+| `perfil` | string | sí | sí | `portfolioProfileType` de la cartera (`VERY_AGGRESSIVE`…); `null` en el resto |
+| `efectivo` | number (€, 2 decimales) | sí | sí | saldo de la cuenta de efectivo propia de la cartera, ya sumado en `valor` |
+| `efectivo_id` | string | sí | sí | id de esa cuenta de efectivo, que ya no sale como fila aparte |
 | `consultado_en` | datetime ISO 8601 con zona | no | sí | fecha y hora de la consulta (la misma en todas las filas) |
 
 ### `accounts` — `myinvestor.accounts/1`
@@ -188,6 +192,8 @@ Salida: lista de objetos.
 | `valor` | number (€, 2 decimales) | sí | sí |  |
 | `ganancia` | number (€, 2 decimales) | sí | sí |  |
 | `rentab` | number (exacto) | sí | sí | rentabilidad total, en % |
+| `cartera` | string | sí | sí | `portfolioName` si la cuenta es una cartera del roboadvisor (`METAL`); si no, `null` |
+| `perfil` | string | sí | sí | `portfolioProfileType` de esa cartera (`VERY_AGGRESSIVE`…); si no, `null` |
 | `peso` | number (exacto) | sí | sí | % sobre el valor de las posiciones listadas, a 2 decimales |
 | `ter` | number (exacto) | sí | sí | solo con `--ter`; TER de la ficha del fondo, en %; `null` en acciones y ETF |
 | `consultado_en` | datetime ISO 8601 con zona | no | sí | fecha y hora de la consulta (la misma en todas las filas) |
@@ -318,6 +324,71 @@ Salida: lista de objetos.
 | `fecha` | date `AAAA-MM-DD` | no | sí |  |
 | `vl` | number (exacto) | no | sí | valor liquidativo (`marketValue`), en `moneda` |
 | `moneda` | string | sí | sí | divisa del fondo, de su ficha; `null` si no se ha podido leer |
+
+### `portfolios` — `myinvestor.portfolios/1`
+
+Catálogo del roboadvisor; con CARTERA, su composición; con `--mine`, una fila por cartera contratada.
+
+Salida: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `id` | integer | no | sí | id de la cartera en el catálogo |
+| `nombre` | string | no | sí | `name`: `METAL`… (el `portfolioName` de una cartera contratada) |
+| `perfil` | string | sí | sí | `CONSERVATIVE`, `MODERATE`, `DYNAMIC`, `AGGRESSIVE` o `VERY_AGGRESSIVE` |
+| `renta_fija_pct` | number (exacto) | sí | sí | `fixedIncome`, en % |
+| `renta_variable_pct` | number (exacto) | sí | sí | `variableIncome`, en % |
+| `rentab` | number (exacto) | sí | sí | `profitability`: % acumulado (no anual) entre `rentab_desde` y `rentab_hasta`, unos 3 años |
+| `rentab_desde` | date `AAAA-MM-DD` | sí | sí | `profitabilityFrom` (llega como DD/MM/AAAA); `null` si no se puede leer |
+| `rentab_hasta` | date `AAAA-MM-DD` | sí | sí | `profitabilityTo` |
+| `horizonte_anos` | integer | sí | sí | `recommendedTimeHorizon`: horizonte recomendado, en años |
+| `fondos` | integer | no | sí | número de fondos de la composición objetivo |
+
+Con `CARTERA`: un objeto.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `cartera` | object | no | sí |  |
+| `cartera.id` | integer | no | sí | id de la cartera en el catálogo |
+| `cartera.nombre` | string | no | sí | `name`: `METAL`… (el `portfolioName` de una cartera contratada) |
+| `cartera.perfil` | string | sí | sí | `CONSERVATIVE`, `MODERATE`, `DYNAMIC`, `AGGRESSIVE` o `VERY_AGGRESSIVE` |
+| `cartera.renta_fija_pct` | number (exacto) | sí | sí | `fixedIncome`, en % |
+| `cartera.renta_variable_pct` | number (exacto) | sí | sí | `variableIncome`, en % |
+| `cartera.rentab` | number (exacto) | sí | sí | `profitability`: % acumulado (no anual) entre `rentab_desde` y `rentab_hasta`, unos 3 años |
+| `cartera.rentab_desde` | date `AAAA-MM-DD` | sí | sí | `profitabilityFrom` (llega como DD/MM/AAAA); `null` si no se puede leer |
+| `cartera.rentab_hasta` | date `AAAA-MM-DD` | sí | sí | `profitabilityTo` |
+| `cartera.horizonte_anos` | integer | sí | sí | `recommendedTimeHorizon`: horizonte recomendado, en años |
+| `cartera.fondos` | integer | no | sí | número de fondos de la composición objetivo |
+| `cartera.descripcion` | string | sí | sí | `description` |
+| `cartera.benchmark` | string | sí | sí | `codBenchmark` |
+| `fondos` | array de objetos | no | sí | composición objetivo |
+| `fondos[].isin` | string | no | sí |  |
+| `fondos[].nombre` | string | sí | sí |  |
+| `fondos[].categoria` | string | sí | sí |  |
+| `fondos[].categoria_myinvestor` | string | sí | sí | `myInvestorCategory` |
+| `fondos[].moneda` | string | sí | sí |  |
+| `fondos[].peso` | number (exacto) | sí | sí | `percentage`: peso objetivo en la cartera, en % |
+
+Con `--mine`: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `cuenta` | string | no | sí | id de la cuenta de valores (`SECURITIES_PORTFOLIO`) |
+| `cartera` | string | sí | sí | `portfolioName` |
+| `perfil` | string | sí | sí | `portfolioProfileType` |
+| `valor` | number (€, 2 decimales) | sí | sí | valor de mercado de sus fondos (`marketValue`) |
+| `efectivo` | number (€, 2 decimales) | sí | sí | saldo de su cuenta de efectivo propia (`cashAccountId`) |
+| `posiciones` | array de objetos | no | sí | objetivo frente a real, por ISIN |
+| `posiciones[].isin` | string | no | sí |  |
+| `posiciones[].nombre` | string | sí | sí |  |
+| `posiciones[].objetivo_pct` | number (exacto) | sí | sí | peso en el catálogo (0 si el fondo no está en él); `null` si la cartera no está |
+| `posiciones[].real_pct` | number (exacto) | sí | sí | % sobre el valor de los fondos de la cartera (sin su efectivo); `null` si está vacía |
+| `posiciones[].desviacion_pct` | number (exacto) | sí | sí | `real_pct - objetivo_pct`, en puntos |
+| `posiciones[].valor` | number (€, 2 decimales) | no | sí | valor de mercado de la posición (0 si no se tiene) |
+| `rentabilidad_anual` | array de objetos | no | no (informativo) | `years` de `…/v3/portfolios/{id}/returns/summary` (últimos 3; forma sin verificar con datos reales) |
+| `rentabilidad_anual[].periodo` | string | no | sí | año, `AAAA` |
+| `rentabilidad_anual[].importe` | number (€, 2 decimales) | sí | sí | `amount` |
+| `rentabilidad_anual[].rentab` | number (exacto) | sí | sí | `percentage`, tal cual |
 
 ### `feed` — `myinvestor.feed/1`
 

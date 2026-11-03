@@ -16,6 +16,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - Nuevos `myinvestor.fund-filters/1` y `myinvestor.pension-plans/1`; `myinvestor.funds/1` no cambia con los filtros (#6).
 - Nuevo `myinvestor.fund-history/1`: filas `{fecha, vl, moneda}`. `myinvestor.funds/1` gana `moneda` (divisa del fondo; compatible) (#7).
 - `myinvestor.upcoming/1` y la sección `upcoming` de `myinvestor.snapshot/1` ganan `estado` (`programada` o `en_curso`) (compatible: ningún campo cambia de significado). En `myinvestor.holds/1` y `pending.holds` de `snapshot`, `importe` es siempre negativo, que es lo que ya mandaba la API (#58, #57).
+- Nuevo `myinvestor.portfolios/1` (catálogo; con CARTERA, objeto `{cartera, fondos}`; con `--mine`, filas con `posiciones` y `rentabilidad_anual`). `myinvestor.position/1` gana `cartera`, `perfil`, `efectivo` y `efectivo_id`, y `myinvestor.holdings/1`, `cartera` y `perfil` (compatible: claves añadidas, `null` fuera de las carteras del roboadvisor). En `position`, el `valor` de una cartera incluye el saldo de su cuenta de efectivo propia, que deja de salir como fila `efectivo` aparte (#6).
 
 ### Añadido
 
@@ -42,6 +43,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - Filtros del buscador en `funds` (`--category`, `--manager`, `--currency`, `--asset-type`, `--region`, `--min-ter`/`--max-ter`, `--risk N[-M]`, `--rating`, `--esg`, `--hedged`), `fund-filters [FILTRO] [--pension]` (valores válidos de cada filtro) y `pension-plans [TEXTO]` (catálogo de planes de pensiones con TER y rentabilidades, con filtros) (#6).
 - `fund-history ISIN [--since] [--until] [--every day|week|month]`: valor liquidativo de cualquier fondo del catálogo desde su inicio (`…/funds/{isin}/graphs/INIT_GRAPH`), con la variación frente al primer punto en la tabla; README: `INIT_GRAPH` es el único `graphType` válido y no hay más de un año de historial de las posiciones propias. `funds` añade `moneda`, y en las tablas los importes y precios de una fila con `moneda` salen en esa moneda (antes, siempre «€»: un fondo en USD salía en euros) (#7).
 - `upcoming`: `estado` en cada fila (`programada`: aportaciones y transferencias; `en_curso`: órdenes y retenciones, aunque su fecha haya pasado) y `--future-only`, que deja solo lo programado; la regla para no contar dos veces lo de `pending` en `snapshot` está en docs/snapshot.md (#58).
+- `portfolios [CARTERA] [--mine]`: catálogo de carteras del roboadvisor (perfil, % RF/RV, rentabilidad, horizonte), composición objetivo de una y, con `--mine`, desviación de tus carteras frente a los pesos objetivo y su rentabilidad anual. `position` muestra una cartera contratada como «Cartera METAL (muy agresiva)» con su cuenta de efectivo propia dentro (ya no sale suelta) y `holdings` añade `cartera` y `perfil` (#6).
 
 ### Cambiado
 

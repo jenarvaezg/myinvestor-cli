@@ -55,12 +55,14 @@ from myinvestor.models import (
     SecuritiesAccount,
     SentTransfer,
 )
+from myinvestor.portfolios import AnnualReturn, Portfolio, annual_returns
 from myinvestor.session import Session
 from myinvestor.signature import SIGNATURE_HEADER, SignatureUI, Signer, parse_signature_request
 from myinvestor.stores import SessionStore
 
 CPERF = "/cperf-server/api"
 FUND_PAGE_SIZE = 50
+PORTFOLIO_RETURN_YEARS = 3  # `limit` of the web's returns summary (page 1)
 SIGNATURE_PREFIX = "/signature/api/"
 SIGNER_METHODS = frozenset({"GET", "POST"})
 BLOCKED_BACKOFF = (30.0, 120.0, 300.0)  # waits before each retry after an Imperva block; then the last again
@@ -517,6 +519,17 @@ class MyInvestorClient:
         """Valid values of a searcher filter, spelled exactly as the API sends them (blanks included)."""
         data = self.get_data(f"{CPERF}/v2/masters/{domain.value}/searcher/filters/{kind.path}")
         return [v for v in data if isinstance(v, str)] if isinstance(data, list) else []
+
+    # ---- robo-advisor portfolios ------------------------------------------
+
+    def portfolios(self) -> list[Portfolio]:
+        """The robo-advisor catalog, each portfolio with its target funds and weights."""
+        return [Portfolio.model_validate(p) for p in self._list(f"{CPERF}/v2/portfolios")]
+
+    def portfolio_annual_returns(self, account_id: str) -> list[AnnualReturn]:
+        """Yearly return of a contracted portfolio (its securities `accountId`), as the web asks for it."""
+        params = {"page": 1, "limit": PORTFOLIO_RETURN_YEARS}
+        return annual_returns(self.get_data(f"{CPERF}/v3/portfolios/{seg(account_id)}/returns/summary", params))
 
     # ---- documents (PDF) ----------------------------------------------------
 
