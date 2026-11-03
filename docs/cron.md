@@ -188,7 +188,7 @@ Un re-login que pide código y falla con 13 no toca la contraseña ni pausa nada
 
 ## Script de ejemplo
 
-`~/bin/myinvestor-diario.sh` (`chmod 700`): guarda en JSON la posición, los movimientos nuevos desde la ejecución anterior y lo que viene en los próximos 14 días (`upcoming`: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre); reintenta los errores de red y avisa según el código de salida. Usa `status --offline`, `position`, `movements --new`, `state mark`, `upcoming` y `doctor`. Ninguna de esas órdenes pide segundo factor (`movements --new` nunca sale de la ventana de 90 días).
+`~/bin/myinvestor-diario.sh` (`chmod 700`): guarda en JSON la posición, los movimientos nuevos desde la ejecución anterior y lo que viene en los próximos 14 días (`upcoming`: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre); reintenta los errores de red y avisa según el código de salida. Usa `status --offline`, `position`, `movements --new`, `state mark`, `upcoming`, `export` y `doctor`. Ninguna de esas órdenes pide segundo factor (`movements --new` nunca sale de la ventana de 90 días, y `export` sin firma deja anotado lo que falte).
 
 ```bash
 #!/usr/bin/env bash
@@ -271,6 +271,10 @@ react movements $rc
 fetch upcoming "$DATA/proximo-$day.json" upcoming --days 14 -f json   # sale con 0 aunque falte saldo
 react upcoming $?
 
+# Histórico local en CSV: solo añade lo nuevo (la primera vez, hazla a mano en una terminal).
+mi --retry-blocked 2 export "$DATA/historico" --allow-partial
+react export $?
+
 # 3. Un error sin clasificar: deja el diagnóstico en el log.
 [[ $first_error -ne 1 ]] || mi doctor >&2
 
@@ -278,7 +282,9 @@ log "fin: código $first_error"
 exit "$first_error"
 ```
 
-Cada `movimientos-*.json` lleva solo lo que no salió en la ejecución anterior (la primera vez, los últimos 30 días). Con `--no-mark` + `state mark movements` se marca como visto solo cuando ya está guardado: si algo falla por el camino, la siguiente ejecución lo vuelve a sacar; y si la máquina pasa unos días apagada, pide desde el último día consultado (menos 3 de margen), sin salir de la ventana de 90 días (ver [Solo lo nuevo](../README.md#solo-lo-nuevo---new---since-date-y---since-id)). El `id` de cada movimiento es estable, así que los ficheros se pueden juntar sin duplicados (ver [Movimientos: campos e id](../README.md#movimientos-campos-e-id)). `orders --new` y `contributions --new` hacen lo mismo con las órdenes que cambian de estado y las aportaciones que se ejecutan. En `proximo-*.json`, una fila con `falta` distinto de `null` es una aportación que la cuenta de cargo no cubre: el script puede avisar con ella.
+Cada `movimientos-*.json` lleva solo lo que no salió en la ejecución anterior (la primera vez, los últimos 30 días). Con `--no-mark` + `state mark movements` se marca como visto solo cuando ya está guardado: si algo falla por el camino, la siguiente ejecución lo vuelve a sacar; y si la máquina pasa unos días apagada, pide desde el último día consultado (menos 3 de margen), sin salir de la ventana de 90 días (ver [Solo lo nuevo](../README.md#solo-lo-nuevo---new---since-date-y---since-id)). El `id` de cada movimiento es estable, así que los ficheros se pueden juntar sin duplicados (ver [Movimientos: campos e id](../README.md#movimientos-campos-e-id)). `orders --new` y `contributions --new` hacen lo mismo con las órdenes que cambian de estado y las aportaciones que se ejecutan.
+
+`export` mantiene en `$DATA/historico` un histórico completo (movimientos, órdenes, aportaciones, cartera y cuentas) al que cada ejecución solo añade filas nuevas. La primera vez pide todo lo anterior a los últimos 90 días, con una aprobación en la app por cuenta: hazla una vez a mano en una terminal (`myinvestor export ~/myinvestor-datos/historico`). Desde cron, con `MYINVESTOR_NO_SIGNATURE=1`, nunca pide firma: si un día falta algo que la necesita (p. ej. tras más de 90 días sin ejecutarse), queda como hueco en `historico/manifest.json` y `--allow-partial` evita que salga con 13 (ver [Exportar el histórico](../README.md#exportar-el-histórico-export)). En `proximo-*.json`, una fila con `falta` distinto de `null` es una aportación que la cuenta de cargo no cubre: el script puede avisar con ella.
 
 ## Logs sin secretos y rotación
 
