@@ -49,10 +49,12 @@ from tests.conftest import API, CASH_UUID, CPERF, cash_account, flow, investment
 from tests.test_cli_fund_transfers import fund_transfer, pension_transfer
 from tests.test_cli_gains import (
     added_values,
+    etc_trades,
     execution,
     fund_lots,
     gains_api,
     lot,
+    mock_broker,
     mock_holdings,
     order_detail,
 )
@@ -412,6 +414,7 @@ def lots_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> No
 
 def gains_contract_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> None:
     gains_api(mock_api)
+    mock_broker(mock_api, etc_trades())
 
 
 # ---- one case per variant of every contract ------------------------------------------------------

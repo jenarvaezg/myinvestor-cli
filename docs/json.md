@@ -213,7 +213,7 @@ Salida: lista de objetos.
 | `nombre` | string | sí | sí |  |
 | `operacion` | string | sí | sí | `operationType` |
 | `estado` | string | sí | sí | `IN_PROGRESS`, `EXECUTED`… |
-| `importe` | number (€, 2 decimales) | sí | sí |  |
+| `importe` | number (€, 2 decimales) | sí | sí | `cash`: el importe estimado al dar la orden; lo liquidado, en `order REF` |
 | `participaciones` | number (exacto) | sí | sí |  |
 
 ### `pensions` — `myinvestor.pensions/1`
@@ -677,7 +677,7 @@ Salida: lista de objetos.
 
 ### `gains` — `myinvestor.gains/1`
 
-Una fila por ejecución de un reembolso o traspaso de salida y, al final, `plusvalias`, `minusvalias` y `total` (solo reembolsos).
+Una fila por ejecución de un reembolso o traspaso de salida de fondos o de una venta del bróker y, al final, `plusvalias`, `minusvalias` y `total` (reembolsos y ventas con `resultado`).
 
 Salida: lista de objetos.
 
@@ -687,16 +687,17 @@ Salida: lista de objetos.
 | `fecha` | date `AAAA-MM-DD` | sí | sí | fecha de ejecución; `null` en los totales |
 | `ref` | string | sí | sí | referencia de la orden; `null` en los totales |
 | `isin` | string | sí | sí |  |
-| `fondo` | string | sí | sí |  |
-| `operacion` | string | sí | sí | `operationType` de la orden |
+| `fondo` | string | sí | sí | nombre del fondo o del valor |
+| `operacion` | string | sí | sí | `operationType` de la orden; en las ventas del bróker (acciones, ETF, ETC), `SALE_VARIABLE_INCOME_CASH` |
 | `traspaso` | boolean | sí | sí | traspaso entre fondos: no suma en los totales |
 | `participaciones` | number (exacto) | sí | sí |  |
-| `vl` | number (exacto) | sí | sí |  |
-| `bruto` | number (€, 2 decimales) | sí | sí |  |
+| `vl` | number (exacto) | sí | sí | VL del fondo o precio de la venta, en la divisa del producto |
+| `bruto` | number (€, 2 decimales) | sí | sí | de la ejecución (lo liquidado), en la divisa del producto |
 | `comisiones` | number (€, 2 decimales) | sí | sí |  |
 | `retenciones` | number (€, 2 decimales) | sí | sí |  |
-| `neto` | number (€, 2 decimales) | sí | sí |  |
-| `resultado` | number (€, 2 decimales) | sí | sí | `taxResult`; en los totales, la suma de los reembolsos |
+| `neto` | number (€, 2 decimales) | sí | sí | de la ejecución, en euros |
+| `coste` | number (€, 2 decimales) | sí | sí | coste FIFO con comisiones (solo ventas del bróker; `null` si no se puede calcular) |
+| `resultado` | number (€, 2 decimales) | sí | sí | `taxResult` en los fondos; `neto` - `coste` en el bróker (`null` si falta el coste: no suma). En los totales, la suma de los reembolsos y las ventas |
 
 ### `fund-transfers` — `myinvestor.fund-transfers/1`
 
@@ -862,7 +863,7 @@ Salida: un objeto.
 | `pending.orders[].nombre` | string | sí | sí |  |
 | `pending.orders[].operacion` | string | sí | sí | `operationType` |
 | `pending.orders[].estado` | string | sí | sí | `IN_PROGRESS`, `EXECUTED`… |
-| `pending.orders[].importe` | number (€, 2 decimales) | sí | sí |  |
+| `pending.orders[].importe` | number (€, 2 decimales) | sí | sí | `cash`: el importe estimado al dar la orden; lo liquidado, en `order REF` |
 | `pending.orders[].participaciones` | number (exacto) | sí | sí |  |
 | `pending.holds` | array de objetos | no | sí | como `holds` |
 | `pending.holds[].cuenta` | string | no | sí | alias de la cuenta (o su id si no tiene) |
@@ -942,7 +943,7 @@ Salida: un objeto.
 | `new.orders[].nombre` | string | sí | sí |  |
 | `new.orders[].operacion` | string | sí | sí | `operationType` |
 | `new.orders[].estado` | string | sí | sí | `IN_PROGRESS`, `EXECUTED`… |
-| `new.orders[].importe` | number (€, 2 decimales) | sí | sí |  |
+| `new.orders[].importe` | number (€, 2 decimales) | sí | sí | `cash`: el importe estimado al dar la orden; lo liquidado, en `order REF` |
 | `new.orders[].participaciones` | number (exacto) | sí | sí |  |
 | `new.pension_orders` | array de objetos | sí | sí | `null` si la sección ha fallado (ver `errors`) |
 | `new.pension_orders[].fecha` | date `AAAA-MM-DD` | no | sí |  |
@@ -952,7 +953,7 @@ Salida: un objeto.
 | `new.pension_orders[].nombre` | string | sí | sí |  |
 | `new.pension_orders[].operacion` | string | sí | sí | `operationType` |
 | `new.pension_orders[].estado` | string | sí | sí | `IN_PROGRESS`, `EXECUTED`… |
-| `new.pension_orders[].importe` | number (€, 2 decimales) | sí | sí |  |
+| `new.pension_orders[].importe` | number (€, 2 decimales) | sí | sí | `cash`: el importe estimado al dar la orden; lo liquidado, en `order REF` |
 | `new.pension_orders[].participaciones` | number (exacto) | sí | sí |  |
 | `delta` | object | sí | sí | `null` sin foto anterior |
 | `delta.desde` | datetime ISO 8601 con zona | no | sí | `as_of` de la foto anterior |

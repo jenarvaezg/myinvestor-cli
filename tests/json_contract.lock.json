@@ -676,6 +676,7 @@
       "comisiones": "amount|null",
       "retenciones": "amount|null",
       "neto": "amount|null",
+      "coste": "amount|null",
       "resultado": "amount|null"
     }
   },
