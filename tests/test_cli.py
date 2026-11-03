@@ -4,7 +4,7 @@ import csv
 import io
 import json
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -86,6 +86,11 @@ def mock_portfolio(mock_api: respx.MockRouter) -> None:
     mock_api.get(f"{CPERF}/v2/pension-accounts/self").respond(
         200, json=ok([{"accountId": "301", "marketValue": 2000.0, "totalInvested": 1500.0, "profit": 500.0}])
     )
+    plans = [
+        {"dgsCode": "N0001", "marketValue": 1500.0, "liquidationValueDate": "2026-10-30T00:00:00.000Z"},
+        {"dgsCode": "N0002", "marketValue": 500.0, "liquidationValueDate": "2026-10-29T00:00:00.000Z"},
+    ]
+    mock_api.get(f"{CPERF}/v2/pension-accounts/301").respond(200, json=ok(plans))
 
 
 def test_position_json(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
@@ -99,9 +104,49 @@ def test_position_json(mock_api: respx.MockRouter, store: MemorySessionStore) ->
         ("efectivo", Decimal("1000.30")),
         ("valores", Decimal("1100.55")),
         ("pensiones", Decimal("2000.00")),
+        ("total", Decimal("5101.15")),
     ]
     assert '"valor": 1000.30' in result.stdout
     assert all(r["invertido"] is None or isinstance(r["invertido"], Decimal) for r in rows)
+
+
+def test_position_json_has_value_dates_and_query_time(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_portfolio(mock_api)
+    before = datetime.now().astimezone().replace(microsecond=0)
+
+    rows = json_rows("position")
+
+    today = date.today().isoformat()
+    # securities: latest NAV date of its funds/stocks; pensions: latest of its plans; cash: live balance
+    assert [r["fecha_valor"] for r in rows] == [today, today, "2026-11-02", "2026-10-30", None]
+    [consulted] = {r["consultado_en"] for r in rows}
+    moment = datetime.fromisoformat(consulted)
+    assert moment.tzinfo is not None and before <= moment <= datetime.now().astimezone()
+    assert len(consulted) == len("2026-11-03T09:00:12+01:00")
+
+
+def test_position_csv_ends_with_total(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_portfolio(mock_api)
+    rows = list(csv.DictReader(io.StringIO(invoke("position", "-f", "csv").stdout)))
+    assert (rows[-1]["producto"], rows[-1]["valor"], rows[-1]["fecha_valor"]) == ("total", "5101.15", "")
+    assert "consultado_en" in rows[0]
+
+
+def test_position_table_shows_value_date_but_not_query_time(
+    mock_api: respx.MockRouter, store: MemorySessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mock_portfolio(mock_api)
+    monkeypatch.setenv("COLUMNS", "60")
+    result = invoke("position")
+    assert "2026-10-30" in result.stdout and "consultado_en" not in result.stdout
+    assert f"Posición global a {date.today().isoformat()}" in result.stdout
+
+
+def test_holdings_json_has_query_time(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_portfolio(mock_api)
+    rows = json_rows("holdings")
+    assert all(datetime.fromisoformat(r["consultado_en"]).tzinfo is not None for r in rows)
+    assert "consultado_en" not in invoke("holdings").stdout
 
 
 def json_rows(*args: str) -> list[dict[str, Any]]:

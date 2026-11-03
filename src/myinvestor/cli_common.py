@@ -199,6 +199,16 @@ def build_client(store: SessionStore | None = None) -> MyInvestorClient:
     )
 
 
+def now_local() -> datetime:
+    """Current time in the user's timezone: when a snapshot (`position`, `holdings`) was taken."""
+    return datetime.now().astimezone()
+
+
+def iso_moment(moment: datetime) -> str:
+    """`2026-11-03T09:00:12+01:00`: ISO 8601 to the second, with the UTC offset."""
+    return moment.isoformat(timespec="seconds")
+
+
 def local_time(moment: datetime | None) -> str:
     """Token expiry is UTC; show it in the user's timezone."""
     return moment.astimezone().strftime("%H:%M %Z") if moment else "?"

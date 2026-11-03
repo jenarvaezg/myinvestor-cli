@@ -23,13 +23,14 @@ from myinvestor.json_output import decimal_literal, dumps
 # euro amounts rounded to cents and per-unit prices, participations and percentages untouched.
 MONEY_COLUMNS = frozenset(
     {"importe", "saldo", "retenido", "disponible", "valor", "invertido", "ganancia", "vl", "coste_medio", "total"}
+    | {"intereses", "dividendos", "bruto", "retenciones", "neto", "comisiones"}
 )
 PRICE_COLUMNS = frozenset({"vl", "coste_medio"})
 AMOUNT_COLUMNS = MONEY_COLUMNS - PRICE_COLUMNS
 PERCENT_COLUMNS = frozenset({"rentab", "rentab_ytd", "ter", "1a", "3a", "5a", "ytd"})
-QUANTITY_COLUMNS = frozenset({"participaciones"})
+QUANTITY_COLUMNS = frozenset({"participaciones", "movimientos"})
 NUMERIC_COLUMNS = MONEY_COLUMNS | PERCENT_COLUMNS | QUANTITY_COLUMNS
-DATE_COLUMNS = frozenset({"fecha", "valor_fecha", "fecha_vl", "proxima"})
+DATE_COLUMNS = frozenset({"fecha", "valor_fecha", "fecha_vl", "fecha_valor", "proxima", "consultado_en", "periodo"})
 MAX_QUANTITY_DECIMALS = 6
 CENTS = Decimal("0.01")
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -10,11 +11,28 @@ from typing import Annotated, Any
 import typer
 from rich.markup import escape
 
-from myinvestor.cli_common import FormatOpt, TerminalSignatureUI, app, build_client, err, parse_day
+from myinvestor.cli_common import (
+    FormatOpt,
+    TerminalSignatureUI,
+    app,
+    build_client,
+    err,
+    iso_moment,
+    now_local,
+    parse_day,
+)
 from myinvestor.client import MyInvestorClient, Statement
 from myinvestor.config import FREE_FLOWS_DAYS
 from myinvestor.errors import InputError, PartialResultError, SignatureError, SignatureRequired
-from myinvestor.models import CashAccount, Flow, Ownership, stable_ids
+from myinvestor.models import (
+    CashAccount,
+    Flow,
+    Ownership,
+    PensionAccount,
+    PensionPlanPosition,
+    SecuritiesAccount,
+    stable_ids,
+)
 from myinvestor.output import OutputFormat, print_json, render
 from myinvestor.psd2 import Span, free_start, split_range
 
@@ -37,6 +55,25 @@ OwnerOpt = Annotated[
     typer.Option(
         "--owner",
         help="Filtrar cuentas: me (soy titular), junior (cuenta de un menor) u other (el resto).",
+    ),
+]
+
+
+# Shared by `movements` and `income`: how to handle the part of a range that needs a second factor.
+FreeOnlyOpt = Annotated[
+    bool,
+    typer.Option(
+        "--free-only",
+        "--clip",
+        help=f"Solo lo que MyInvestor da sin segundo factor: recorta --from a los últimos {FREE_FLOWS_DAYS} "
+        "días (lo avisa en stderr).",
+    ),
+]
+AllowPartialOpt = Annotated[
+    bool,
+    typer.Option(
+        "--allow-partial",
+        help="Si falta un tramo que pide firma, salir con 0 (con aviso en stderr) en vez de con 13.",
     ),
 ]
 
@@ -66,65 +103,86 @@ def filter_owner(accounts: list[CashAccount], owner: Ownership | None) -> list[C
     return accounts if owner is None else [a for a in accounts if a.ownership is owner]
 
 
-def _total_row(label: str, **values: Any) -> dict[str, Any]:
-    return {"producto": label, **values}
+POSITION_TOTAL = "total"  # `producto` of the total row in JSON/CSV/TSV ("TOTAL" in the table)
+
+
+def _latest(days: Iterable[date | None]) -> str | None:
+    known = [d for d in days if d]
+    return max(known).isoformat() if known else None
+
+
+def _cash_position(acc: CashAccount, today: date) -> dict[str, Any]:
+    return {
+        "producto": "efectivo",
+        "id": acc.account_id,
+        "nombre": acc.alias,
+        "valor": acc.balance,
+        "invertido": None,
+        "ganancia": None,
+        "rentab": None,
+        "fecha_valor": today.isoformat(),  # the balance is live
+    }
+
+
+def _securities_position(sec: SecuritiesAccount) -> dict[str, Any]:
+    return {
+        "producto": "valores",
+        "id": sec.account_id,
+        "nombre": sec.portfolio_name or sec.cod_account,
+        "valor": sec.market_value,
+        "invertido": sec.total_invested,
+        "ganancia": sec.profit,
+        "rentab": sec.total_return,
+        "fecha_valor": _latest(inv.liquidation_value_date for inv in sec.investments),
+    }
+
+
+def _pension_position(pen: PensionAccount, plans: list[PensionPlanPosition]) -> dict[str, Any]:
+    return {
+        "producto": "pensiones",
+        "id": pen.account_id,
+        "nombre": pen.external_account_code,
+        "valor": pen.market_value,
+        "invertido": pen.total_invested,
+        "ganancia": pen.profit,
+        "rentab": pen.total_return,
+        "fecha_valor": _latest(p.liquidation_value_date for p in plans),
+    }
+
+
+def _total_row(rows: list[dict[str, Any]], label: str) -> dict[str, Any]:
+    total = sum((r["valor"] or Decimal(0) for r in rows), Decimal(0))
+    return {
+        "producto": label,
+        "id": "",
+        "nombre": "",
+        "valor": total,
+        "invertido": None,
+        "ganancia": None,
+        "rentab": None,
+        "fecha_valor": None,
+    }
 
 
 @app.command()
 def position(fmt: FormatOpt = OutputFormat.table) -> None:
-    """Posición global: efectivo, cuentas de valores y planes de pensiones."""
-    rows: list[dict[str, Any]] = []
+    """Posición global: efectivo, cuentas de valores y planes de pensiones, con el total.
+
+    `fecha_valor` es el VL más reciente de las inversiones de cada producto (hoy, en el efectivo).
+    En JSON/CSV/TSV cada fila lleva además `consultado_en` (fecha y hora de la consulta, con zona)
+    y la última es el total, con `producto: "total"`.
+    """
+    consulted = now_local()
     with build_client() as client:
-        for acc in client.cash_accounts():
-            rows.append(
-                {
-                    "producto": "efectivo",
-                    "id": acc.account_id,
-                    "nombre": acc.alias,
-                    "valor": acc.balance,
-                    "invertido": None,
-                    "ganancia": None,
-                    "rentab": None,
-                }
-            )
-        for sec in client.securities_accounts():
-            rows.append(
-                {
-                    "producto": "valores",
-                    "id": sec.account_id,
-                    "nombre": sec.portfolio_name or sec.cod_account,
-                    "valor": sec.market_value,
-                    "invertido": sec.total_invested,
-                    "ganancia": sec.profit,
-                    "rentab": sec.total_return,
-                }
-            )
-        for pen in client.pension_accounts():
-            rows.append(
-                {
-                    "producto": "pensiones",
-                    "id": pen.account_id,
-                    "nombre": pen.external_account_code,
-                    "valor": pen.market_value,
-                    "invertido": pen.total_invested,
-                    "ganancia": pen.profit,
-                    "rentab": pen.total_return,
-                }
-            )
-    total = sum((r["valor"] or Decimal(0) for r in rows), Decimal(0))
+        rows = [_cash_position(acc, consulted.date()) for acc in client.cash_accounts()]
+        rows += [_securities_position(sec) for sec in client.securities_accounts()]
+        rows += [_pension_position(pen, client.pension_plans(pen.account_id)) for pen in client.pension_accounts()]
     if fmt is OutputFormat.table:
-        rows.append(
-            {
-                "producto": "TOTAL",
-                "id": "",
-                "nombre": "",
-                "valor": total,
-                "invertido": None,
-                "ganancia": None,
-                "rentab": None,
-            }
-        )
-    render(rows, fmt, title="Posición global")
+        rows.append(_total_row(rows, POSITION_TOTAL.upper()))
+        render(rows, fmt, title=f"Posición global a {consulted:%Y-%m-%d %H:%M}")
+        return
+    rows.append(_total_row(rows, POSITION_TOTAL))
+    render([{**r, "consultado_en": iso_moment(consulted)} for r in rows], fmt)
 
 
 @app.command()
@@ -190,22 +248,8 @@ def movements(
             f"--from/--to/--days (por defecto, los últimos {DEFAULT_MOVEMENT_DAYS} días).",
         ),
     ] = None,
-    free_only: Annotated[
-        bool,
-        typer.Option(
-            "--free-only",
-            "--clip",
-            help=f"Solo lo que MyInvestor da sin segundo factor: recorta --from a los últimos {FREE_FLOWS_DAYS} "
-            "días (lo avisa en stderr).",
-        ),
-    ] = False,
-    allow_partial: Annotated[
-        bool,
-        typer.Option(
-            "--allow-partial",
-            help="Si falta un tramo que pide firma, salir con 0 (con aviso en stderr) en vez de con 13.",
-        ),
-    ] = False,
+    free_only: FreeOnlyOpt = False,
+    allow_partial: AllowPartialOpt = False,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
     """Movimientos de las cuentas de efectivo.

@@ -34,12 +34,13 @@ myinvestor logout [--forget-device]
 ## Uso
 
 ```bash
-myinvestor position                               # efectivo + cuentas de valores + planes, con total
+myinvestor position                               # efectivo + cuentas de valores + planes, con total y fecha de valor
 myinvestor accounts [--owner me|junior|other]     # cuentas de efectivo: tipo, tu rol, titular, disponible, retenido, saldo
 myinvestor movements [-a "Mi cuenta"] [--from 2026-10-01 --to 2026-10-31 | --days 60] [-s nómina] [--oldest-first] [--owner me|junior|other] [--free-only] [--allow-partial]
 myinvestor movements --id <id> [--from … | --days …]   # un solo movimiento, con todos sus campos
 myinvestor holds                                  # saldo retenido (p. ej. por órdenes en curso)
 myinvestor balance-history [--from 2026-01-01]    # saldo diario total del efectivo
+myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|year|type|account] [-a …] [--free-only] [--allow-partial]   # intereses, dividendos, retenciones y comisiones
 
 myinvestor holdings [-a 123456] [--kind fondos|broker]   # posiciones: participaciones, coste, VL, valor, rentabilidad
 myinvestor orders [--all | --from 2025-01-01 --to …] [--status EXECUTED] [--pension]
@@ -57,7 +58,7 @@ myinvestor raw /cperf-server/api/v2/cash-accounts/self [-p clave=valor]   # GET 
 Todas las órdenes de listado aceptan `-f table|json|csv|tsv`:
 
 - **`table`** (por defecto): importes en formato español (`-12,50 €`). Las fechas y los importes nunca se cortan ni se parten; los textos largos (conceptos, nombres) se parten en varias líneas para caber en la terminal. Si ni así cabe, la tabla se sale del ancho antes que recortar un dato. Se respeta `COLUMNS`, y si la salida no es una terminal (cron, una tubería, el `!` de Claude Code, un agente) la tabla ocupa lo que necesite en vez de limitarse a 80 columnas. Con `--wide` (o `MYINVESTOR_WIDE=1`) cada fila va en una sola línea: `myinvestor --wide movements | less -S`.
-- **`json`**: los importes son **números** JSON, no texto (`"importe": -12.50`), escritos con el valor exacto del `Decimal`, sin pasar por coma flotante. Importes y saldos (`importe`, `saldo`, `disponible`, `retenido`, `valor`, `invertido`, `ganancia`, `total`) van redondeados a 2 decimales; participaciones, VL, coste medio y porcentajes conservan la precisión de la API. `raw` y `fund` también devuelven números. En Python, `json.loads(texto, parse_float=Decimal)` los recupera sin pérdida.
+- **`json`**: los importes son **números** JSON, no texto (`"importe": -12.50`), escritos con el valor exacto del `Decimal`, sin pasar por coma flotante. Importes y saldos (`importe`, `saldo`, `disponible`, `retenido`, `valor`, `invertido`, `ganancia`, `total` y las columnas de `income`) van redondeados a 2 decimales; participaciones, VL, coste medio y porcentajes conservan la precisión de la API. `raw` y `fund` también devuelven números. En Python, `json.loads(texto, parse_float=Decimal)` los recupera sin pérdida.
 - **`csv`**: los mismos valores sin formatear (`-12.50`).
 - **`tsv`**: como CSV pero separado por tabuladores, sin comillas y una línea por fila (tabuladores y saltos de línea dentro de un valor se cambian por espacios); cómodo para logs, `cut` o `awk`.
 
@@ -86,6 +87,53 @@ Lo que la API no trae sale como `null` (vacío en CSV); el CLI no rellena nada p
 - `movements --id ID` busca el movimiento en el rango de `--from`/`--to`/`--days` (por defecto, los últimos 30 días): para uno antiguo, pasa un rango que lo incluya. Si no aparece y falta un tramo que pide firma, sale con 13 en vez de decir que no existe.
 
 Las órdenes (`orders`) usan como `ref` el `reference` de MyInvestor, que según lo observado es único (no se repite entre cuentas), y las aportaciones periódicas (`contributions`) su `contributionId` como `id`: ambos sirven tal cual como clave.
+
+### Posición y cartera: fechas y total
+
+`position` y `holdings` son una foto del momento: en JSON, CSV y TSV cada fila lleva `consultado_en`, la fecha y hora de la consulta en ISO 8601 con zona (`2026-11-03T09:00:12+01:00`); en la tabla va en el título. Así dos fotos se comparan sabiendo cuándo se tomó cada una.
+
+`position` añade `fecha_valor` a cada producto, la fecha a la que corresponde su valor:
+
+| `producto` | `fecha_valor` |
+|---|---|
+| `efectivo` | hoy (el saldo es en tiempo real) |
+| `valores` | el `liquidationValueDate` más reciente de sus fondos, ETF y acciones (`null` si no tiene ninguno) |
+| `pensiones` | el `liquidationValueDate` más reciente de sus planes (una petición más por cuenta de pensiones) |
+
+Los fondos suelen ir con el VL de uno o dos días hábiles antes, así que comparar el valor de un lunes con el del viernes puede no reflejar ningún cambio real: mira `fecha_valor` antes de calcular la variación. La última fila es el total, también en JSON/CSV/TSV, con `producto: "total"` (`TOTAL` en la tabla), `valor` = suma de los productos y `fecha_valor: null`. La salida sigue siendo una lista de filas, compatible con lo que había. En `holdings`, la fecha del VL de cada posición ya iba en `fecha_vl`.
+
+### Ingresos: intereses, dividendos, retenciones y comisiones
+
+`income` clasifica los movimientos de las cuentas de efectivo por su `operationType` y los suma por mes (`--by month`, por defecto), año (`--by year`), cuenta (`--by account`) o tipo de movimiento (`--by type`):
+
+| Columna | Qué suma |
+|---|---|
+| `intereses`, `dividendos` | abonos de intereses (remuneración de la cuenta, depósitos) y de dividendos |
+| `bruto` | `intereses` + `dividendos`, tal como se abonan |
+| `retenciones` | retenciones a cuenta (IRPF), en negativo |
+| `neto` | `bruto` + `retenciones` |
+| `comisiones` | comisiones (compraventa, custodia…), en negativo |
+| `movimientos` | movimientos que entran en las columnas anteriores |
+
+Los meses se cuentan por la fecha de operación (`fecha`), salen todos los del rango aunque no tengan movimientos y la última fila es el total (`periodo: "total"`). Si MyInvestor abona los intereses ya netos sin un movimiento de retención aparte, `bruto` y `neto` coinciden.
+
+El rango es `--year` (el año natural, hasta hoy si es el actual), `--from`/`--to` o `--days`; por defecto, los últimos 90 días (incluido hoy), que no piden firma. Los movimientos se piden igual que en `movements`, con las mismas opciones: lo anterior hay que aprobarlo en la app, una vez por cuenta; si falta un tramo se muestran los totales de lo obtenido y se sale con 13, salvo con `--allow-partial` (sale con 0 y avisa), y `--free-only` recorta el rango a la ventana sin firma (ver [Movimientos antiguos y segundo factor](#movimientos-antiguos-y-segundo-factor)). Un `income --year` del año pasado pide, por tanto, una aprobación por cuenta.
+
+Categorías (`--by type` muestra cada `operationType` con su categoría y la regla que lo ha clasificado):
+
+| Categoría | Cómo se reconoce |
+|---|---|
+| `intereses` | tipo con «INTERES…» o «REMUNERAC…» |
+| `dividendos` | «DIVIDEND…» |
+| `retencion` | «RETENC…» o «IRPF» (se miran antes que intereses y dividendos: «RETENCION DIVIDENDOS» es retención) |
+| `comision` | «COMISION…» o «CUSTODIA» |
+| `compra` | «COMPRA RV CONTADO» (observado), «COMPRA» + «RV»/«VALORES», «SUSCRIPC…» |
+| `venta` | «VENTA» + «RV»/«VALORES» |
+| `aportacion_externa` | transferencias: «CARGO POR TRANSFERENCIA», «ABONO POR TRANSFERENCIA», «TRANSFERENCIA INMEDIATA», «TRANSFERENCIA SEPA» (observados) o cualquier tipo con «TRANSFERENCIA»; el signo del importe dice si entra o sale |
+| `traspaso_interno` | «TRASPASO…» |
+| `otros` | «APERTURA» y todo lo demás |
+
+Solo los tipos marcados como observados se han visto en cuentas reales; el resto son palabras clave, porque la API no publica la lista de tipos. Se comparan sin tildes ni mayúsculas, y cada palabra debe empezar una palabra del tipo (`RV` no casa con «SERVICIO»). Los tipos que no casan con nada van a `otros` y el CLI los lista en stderr para poder [ampliar la tabla](src/myinvestor/classify.py). Las transferencias entre cuentas propias salen de momento como `aportacion_externa`: distinguirlas requiere emparejar el cargo y el abono.
 
 ### Cuentas: tipo, rol y titulares
 
