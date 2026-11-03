@@ -5,16 +5,28 @@ from __future__ import annotations
 import getpass
 import os
 import sys
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
 from myinvestor.auth import Authenticator
 from myinvestor.browser_login import DEFAULT_LOGIN_TIMEOUT, browser_login
-from myinvestor.cli_common import app, build_client, err, fatal, get_store, local_time, signature_ui, stdin_is_tty
+from myinvestor.cli_common import (
+    FormatOpt,
+    app,
+    build_client,
+    err,
+    fatal,
+    get_store,
+    local_time,
+    signature_ui,
+    stdin_is_tty,
+)
 from myinvestor.errors import InputError, NotLoggedInError, SessionExpiredError
 from myinvestor.http import build_http_client
+from myinvestor.output import OutputFormat, print_json, render
 from myinvestor.session import Session, new_device_id
+from myinvestor.session_info import SessionInfo
 
 PASSWORD_ENV = "MYINVESTOR_PASSWORD"
 
@@ -132,26 +144,58 @@ def logout(
 
 
 @app.command()
-def status() -> None:
-    """Estado de la sesión; si sigue viva, la renueva y confirma con MyInvestor."""
+def status(
+    fmt: FormatOpt = OutputFormat.table,
+    offline: Annotated[
+        bool,
+        typer.Option("--offline", help="Solo leer el almacén local: no llama a MyInvestor ni renueva la sesión."),
+    ] = False,
+) -> None:
+    """Estado de la sesión. Sin --offline la confirma con MyInvestor, y eso la renueva si hace falta."""
     store = get_store()
-    session = store.load()
+    info = SessionInfo.read(store)
+    session = info.session
     if session is None or not session.refresh_token:
+        _exit_with_report(info, fmt)
         raise NotLoggedInError()
-    remembered = bool(session.customer_id and store.load_password(session.customer_id))
-    if not session.can_refresh() and session.is_expired() and not remembered:
+    if not session.can_refresh() and session.is_expired() and not info.can_relogin:
+        _exit_with_report(info, fmt)
         fatal.print(f"[yellow]Sesión caducada[/yellow] (dispositivo {session.device_id}). Ejecuta `myinvestor login`.")
         raise typer.Exit(SessionExpiredError.exit_code)
+    if offline:
+        _print_status(info, session, fmt, name=None, verified=False)
+        return
     with build_client(store) as client:
         customer = client.customer()
         session = client.session
-    name = customer.get("name") or session.name or "?"
+    _print_status(info.with_session(session), session, fmt, name=customer.get("name"), verified=True)
+
+
+def _exit_with_report(info: SessionInfo, fmt: OutputFormat) -> None:
+    """Machine formats still get the report on stdout before exiting with 11."""
+    if fmt is not OutputFormat.table:
+        _emit(info.to_dict(), fmt)
+        raise typer.Exit(SessionExpiredError.exit_code)
+
+
+def _emit(report: dict[str, Any], fmt: OutputFormat) -> None:
+    if fmt is OutputFormat.json:
+        print_json(report)
+    else:
+        render([report], fmt)
+
+
+def _print_status(info: SessionInfo, session: Session, fmt: OutputFormat, *, name: str | None, verified: bool) -> None:
+    if fmt is not OutputFormat.table:
+        _emit(info.to_dict(name=name, verified_online=verified), fmt)
+        return
     renewal = (
         "re-login automático con la contraseña guardada"
-        if remembered
+        if info.can_relogin
         else f"se renueva sola si la usas antes de las {local_time(session.refresh_expires_at)}"
     )
+    state = "[green]Sesión activa[/green]" if verified else "[green]Sesión guardada[/green] (sin comprobar: --offline)"
     err.print(
-        f"[green]Sesión activa[/green] como {name} · dispositivo {session.device_id}\n"
+        f"{state} como {name or session.name or '?'} · dispositivo {session.device_id}\n"
         f"Token hasta las {local_time(session.expires_at)}; {renewal}."
     )
