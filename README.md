@@ -36,7 +36,7 @@ myinvestor logout [--forget-device]
 ```bash
 myinvestor position                               # efectivo + cuentas de valores + planes, con total
 myinvestor accounts [--owner me|junior|other]     # cuentas de efectivo: tipo, tu rol, titular, disponible, retenido, saldo
-myinvestor movements [-a "Mi cuenta"] [--from 2026-10-01 --to 2026-10-31 | --days 60] [-s nómina] [--oldest-first] [--owner me|junior|other]
+myinvestor movements [-a "Mi cuenta"] [--from 2026-10-01 --to 2026-10-31 | --days 60] [-s nómina] [--oldest-first] [--owner me|junior|other] [--free-only] [--allow-partial]
 myinvestor movements --id <id> [--from … | --days …]   # un solo movimiento, con todos sus campos
 myinvestor holds                                  # saldo retenido (p. ej. por órdenes en curso)
 myinvestor balance-history [--from 2026-01-01]    # saldo diario total del efectivo
@@ -83,7 +83,7 @@ Lo que la API no trae sale como `null` (vacío en CSV); el CLI no rellena nada p
 - Con `reference` (el caso normal): `{cuenta_uuid}:{reference}`. `reference` es un contador **por cuenta** (se repite entre cuentas), por eso va con el uuid delante.
 - Sin `reference`: `{cuenta_uuid}:h` + los 16 primeros caracteres hexadecimales del sha256 de `cuenta_uuid|fecha|valor_fecha|importe|concepto|tipo|operacion_ref` (sin el saldo).
 - Si dos movimientos dan el mismo id (idénticos en esos campos), el segundo lleva `#2`, el tercero `#3`… Se numeran por el saldo y el resto de campos, no por la posición en la lista, así que el orden de la respuesta o el rango pedido no los cambia. Limitación: si más tarde se apunta otro movimiento idéntico el mismo día, la numeración de ese grupo puede cambiar; y se asume que la API filtra `dateFrom`/`dateTo` por fecha de operación (un rango incluye o no el día entero).
-- `movements --id ID` busca el movimiento en el rango de `--from`/`--to`/`--days` (por defecto, los últimos 30 días): para uno antiguo, pasa un rango que lo incluya.
+- `movements --id ID` busca el movimiento en el rango de `--from`/`--to`/`--days` (por defecto, los últimos 30 días): para uno antiguo, pasa un rango que lo incluya. Si no aparece y falta un tramo que pide firma, sale con 13 en vez de decir que no existe.
 
 Las órdenes (`orders`) usan como `ref` el `reference` de MyInvestor, que según lo observado es único (no se repite entre cuentas), y las aportaciones periódicas (`contributions`) su `contributionId` como `id`: ambos sirven tal cual como clave.
 
@@ -123,14 +123,28 @@ Para que un script distinga qué ha pasado sin leer el texto de error (también 
 | 10 | Contraseña rechazada (la guardada se ha borrado) o cambio de contraseña obligatorio | `InvalidCredentialsError`, `StoredPasswordRejectedError`, `PasswordChangeRequired` |
 | 11 | Sin sesión, o caducada sin forma de renovarla (incluido el re-login en pausa) | `NotLoggedInError`, `SessionExpiredError`, `ReloginBlockedError` |
 | 12 | Red, WAF (Imperva) o MyInvestor caído: reintentable | `NetworkBlockedError`, errores de `httpx`, `ApiError` 5xx tras los reintentos |
-| 13 | Hace falta un segundo factor que no se puede dar sin terminal | `SignatureRequired`, `SignatureError` |
+| 13 | Hace falta un segundo factor que no se puede dar sin terminal, o `movements` ha devuelto solo una parte (ver abajo) | `SignatureRequired`, `SignatureError`, `PartialResultError` |
 | 14 | Sesión guardada corrupta | `CorruptStoreError`, `CorruptKeyringError` |
 
 Con `-f json` el error también sale en JSON, en una sola línea de stderr: `{"error": "signature_required", "exit_code": 13, "message": "…"}` (`error` es el nombre de la excepción en snake_case sin `Error`; `network` para los errores de red).
 
 ### Movimientos antiguos y segundo factor
 
-La consulta de movimientos solo sale directa para los últimos ~90 días (PSD2). Para rangos más antiguos MyInvestor responde `202` con una petición de firma y pide **aprobarla en la app del móvil**. En una terminal interactiva el CLI lo avisa y espera (`--approval-timeout`, 300 s por defecto) y después repite la consulta firmada. Sin terminal (cron, CI, el `!` de Claude Code) falla con un mensaje claro y **no** te manda la notificación, salvo que pases `--approve` (o `MYINVESTOR_APPROVE=1`): `myinvestor --approve movements --from 2025-01-01`. Lo mismo ocurre con el SMS del login `--direct` en un dispositivo nuevo.
+La consulta de movimientos solo sale directa para los últimos ~90 días (PSD2). Para rangos más antiguos MyInvestor responde `202` con una petición de firma y pide **aprobarla en la app del móvil**. En una terminal interactiva el CLI lo avisa y espera (`--approval-timeout`, 300 s por defecto) y después repite la consulta firmada. Sin terminal (cron, CI, el `!` de Claude Code) **no** te manda la notificación, salvo que pases `--approve` (o `MYINVESTOR_APPROVE=1`): `myinvestor --approve movements --from 2025-01-01`. Lo mismo ocurre con el SMS del login `--direct` en un dispositivo nuevo.
+
+**Límite observado** (no verificado al día exacto, porque cada prueba crea una petición de firma en tu cuenta): con `dateFrom` hasta 89 días antes de hoy la consulta va directa; a partir de unos 90 días pide firma. No se sabe si cuenta desde hoy o desde `dateTo`. El CLI se queda en el lado seguro: la ventana sin firma son los últimos 90 días naturales contando hoy (`--from` ≥ hoy − 89).
+
+**Rangos largos, en tramos.** Si el rango empieza antes de esa ventana, `movements` lo parte por días completos: primero pide `[hoy − 89, --to]` de **todas** las cuentas y después el tramo antiguo, con **una sola firma por cuenta**. El tramo antiguo solo se pide si hay forma de firmar (terminal interactiva o `--approve`); si una firma se rechaza o caduca, no se piden las de las demás cuentas. Lo ya obtenido nunca se pierde: se muestra lo que haya y, si falta algún tramo, el CLI sale con **13** (`partial_result` con `-f json`) y dice qué cuentas y fechas faltan. Con `--allow-partial` sale con 0 y lo avisa en stderr. Los `id` se numeran juntando los tramos de cada cuenta, así que no cambian por trocear.
+
+- `--free-only` (o `--clip`): no pide nada que necesite firma; recorta `--from` a hoy − 89 y lo avisa en stderr. Si todo el rango es anterior, error de uso (2).
+- `--no-signature` (opción global, o `MYINVESTOR_NO_SIGNATURE=1`): no inicia **nunca** un segundo factor, ni en una terminal ni con `--approve` (que queda sin efecto). Sirve para cualquier comando; en `movements` equivale a no tener terminal: lo libre sale y lo demás acaba en 13.
+- En JSON/CSV la salida sigue siendo la lista de filas de siempre: el recorte y el resultado parcial solo se avisan en stderr (silenciable con `-q`), y el resultado parcial además con el código de salida.
+
+```bash
+myinvestor --no-signature movements --days 365 -f json --allow-partial > movs.json   # cron: lo que se pueda, sin firmas
+myinvestor movements --free-only --from 2025-01-01 -f csv                            # sin firma, recortado
+myinvestor --approve movements --from 2025-01-01 -f json                             # todo, aprobando en la app
+```
 
 ### Silencio, depuración y ritmo de peticiones
 

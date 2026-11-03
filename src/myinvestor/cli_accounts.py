@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 
 import typer
+from rich.markup import escape
 
 from myinvestor.cli_common import FormatOpt, TerminalSignatureUI, app, build_client, err, parse_day
-from myinvestor.client import MyInvestorClient
+from myinvestor.client import MyInvestorClient, Statement
 from myinvestor.config import FREE_FLOWS_DAYS
-from myinvestor.errors import InputError
+from myinvestor.errors import InputError, PartialResultError, SignatureError, SignatureRequired
 from myinvestor.models import CashAccount, Flow, Ownership, stable_ids
 from myinvestor.output import OutputFormat, print_json, render
+from myinvestor.psd2 import Span, free_start, split_range
 
 DEFAULT_MOVEMENT_DAYS = 30
 # `movements` in a table keeps these columns; JSON and CSV export every field of the row.
@@ -187,31 +190,95 @@ def movements(
             f"--from/--to/--days (por defecto, los últimos {DEFAULT_MOVEMENT_DAYS} días).",
         ),
     ] = None,
+    free_only: Annotated[
+        bool,
+        typer.Option(
+            "--free-only",
+            "--clip",
+            help=f"Solo lo que MyInvestor da sin segundo factor: recorta --from a los últimos {FREE_FLOWS_DAYS} "
+            "días (lo avisa en stderr).",
+        ),
+    ] = False,
+    allow_partial: Annotated[
+        bool,
+        typer.Option(
+            "--allow-partial",
+            help="Si falta un tramo que pide firma, salir con 0 (con aviso en stderr) en vez de con 13.",
+        ),
+    ] = False,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
     """Movimientos de las cuentas de efectivo.
 
-    Más allá de ~90 días MyInvestor pide aprobar la consulta en la app del móvil: en una terminal
-    interactiva el CLI espera a que la apruebes; sin terminal, falla con un aviso.
+    Sin segundo factor MyInvestor solo da los últimos ~90 días. Un rango más largo se pide en dos
+    tramos: primero los últimos 90 días de todas las cuentas y luego lo anterior, que hay que aprobar
+    en la app del móvil (una vez por cuenta, solo en una terminal o con --approve). Si falta algún
+    tramo, se muestra lo obtenido y se sale con 13 (0 con --allow-partial).
     """
     start, end = _range(date_from, date_to, days)
-    if (date.today() - start).days > FREE_FLOWS_DAYS:
-        err.print(f"[dim]Rango de más de {FREE_FLOWS_DAYS} días: puede que haya que aprobarlo en la app.[/dim]")
+    if free_only:
+        start = _clip_to_free_window(start, end)
     with build_client() as client:
         chosen = filter_owner(match_cash_accounts(client.cash_accounts(), account), owner)
         if movement_id:
             chosen = [a for a in chosen if movement_id.startswith(f"{a.account_uuid}:")] or chosen
-        rows = _movement_rows(client, chosen, start, end)
+        rows, gaps = _movement_rows(client, chosen, start, end)
     if query:
         needle = query.lower()
         rows = [r for r in rows if needle in f"{r['concepto'] or ''} {r['tipo'] or ''}".lower()]
     if movement_id:
+        if gaps and not any(r["id"] == movement_id for r in rows):
+            raise PartialResultError(_gaps_message(gaps))
         _show_movement(rows, movement_id, start, end, fmt)
         return
     rows.sort(key=lambda r: (r["fecha"], r["ref"] or "", r["id"]), reverse=not oldest_first)
     if fmt is OutputFormat.table:
         rows = [{c: r[c] for c in MOVEMENT_TABLE_COLUMNS} for r in rows]
     render(rows, fmt, title=f"Movimientos {start} → {end}")
+    _report_gaps(gaps, allow_partial=allow_partial)
+
+
+@dataclass(frozen=True)
+class _Gap:
+    """A span of an account that was not fetched because it needs a second factor."""
+
+    account: CashAccount
+    span: Span
+
+    def __str__(self) -> str:
+        return f"{self.account.alias or self.account.account_id} del {self.span.start} al {self.span.end}"
+
+
+def _clip_to_free_window(start: date, end: date) -> date:
+    first = free_start(date.today())
+    if end < first:
+        raise InputError(
+            f"--free-only: todo el rango es anterior al {first} y sin segundo factor MyInvestor solo da "
+            f"los últimos {FREE_FLOWS_DAYS} días."
+        )
+    if start < first:
+        err.print(
+            f"[yellow]Recortado a --from {first}:[/yellow] sin segundo factor MyInvestor solo da "
+            f"los últimos {FREE_FLOWS_DAYS} días."
+        )
+    return max(start, first)
+
+
+def _gaps_message(gaps: list[_Gap]) -> str:
+    return (
+        f"Faltan movimientos que MyInvestor solo da con un segundo factor: {'; '.join(map(str, gaps))}. "
+        "Para obtenerlos, repite en una terminal interactiva o con `myinvestor --approve …` (sin --no-signature); "
+        "para quedarte con lo que sale sin firma, usa --free-only o --allow-partial."
+    )
+
+
+def _report_gaps(gaps: list[_Gap], *, allow_partial: bool) -> None:
+    if not gaps:
+        return
+    if not allow_partial:
+        raise PartialResultError(_gaps_message(gaps))
+    missing = "; ".join(map(str, gaps))
+    err.print(f"[yellow]Resultado parcial:[/yellow] faltan los movimientos que piden firma ({escape(missing)}).")
 
 
 def _show_movement(rows: list[dict[str, Any]], movement_id: str, start: date, end: date, fmt: OutputFormat) -> None:
@@ -229,17 +296,53 @@ def _show_movement(rows: list[dict[str, Any]], movement_id: str, start: date, en
         render([{"campo": k, "valor": v} for k, v in row.items()], fmt, title=f"Movimiento {movement_id}")
 
 
-def _movement_rows(client: MyInvestorClient, chosen: list[CashAccount], start: date, end: date) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+def _movement_rows(
+    client: MyInvestorClient, chosen: list[CashAccount], start: date, end: date
+) -> tuple[list[dict[str, Any]], list[_Gap]]:
+    """Rows of every account, free span first for all of them, then the older span (one signature each).
+
+    Without a way to sign, or once a signature fails, older spans are not asked for and become gaps;
+    what was already fetched is kept. Ids are numbered over all the spans of an account together.
+    """
+    spans = split_range(start, end, date.today())
+    if any(not s.free for s in spans) and client.signature_ui is not None:
+        err.print(
+            f"[dim]Más de {FREE_FLOWS_DAYS} días: primero lo posterior al {free_start(date.today())} de cada "
+            "cuenta; lo anterior hay que aprobarlo en la app (una vez por cuenta).[/dim]"
+        )
+    flows: dict[str, list[Flow]] = {a.account_uuid: [] for a in chosen}
+    ibans: dict[str, str | None] = {a.account_uuid: a.iban for a in chosen}
+    gaps: list[_Gap] = []
+    for span in spans:
+        for acc in chosen:
+            if not span.free and (client.signature_ui is None or gaps):
+                gaps.append(_Gap(acc, span))
+                continue
+            statement = _span_statement(client, acc, span)
+            if statement is None:
+                gaps.append(_Gap(acc, span))
+                continue
+            flows[acc.account_uuid].extend(statement.flows)
+            ibans[acc.account_uuid] = ibans[acc.account_uuid] or statement.iban
+    rows = [
+        _movement_row(acc, ibans[acc.account_uuid], f, i)
+        for acc in chosen
+        for f, i in zip(flows[acc.account_uuid], stable_ids(acc.account_uuid, flows[acc.account_uuid]), strict=True)
+    ]
+    return rows, gaps
+
+
+def _span_statement(client: MyInvestorClient, acc: CashAccount, span: Span) -> Statement | None:
+    """The statement of one span, or None if MyInvestor asked for a signature that was not completed."""
     ui = client.signature_ui
-    for acc in chosen:
-        if isinstance(ui, TerminalSignatureUI):
-            ui.context = f"movimientos de {acc.alias or acc.account_id} desde {start}"
-        statement = client.statement(acc.account_uuid, start, end)
-        iban = acc.iban or statement.iban
-        ids = stable_ids(acc.account_uuid, statement.flows)
-        rows.extend(_movement_row(acc, iban, f, i) for f, i in zip(statement.flows, ids, strict=True))
-    return rows
+    if isinstance(ui, TerminalSignatureUI):
+        ui.context = f"movimientos de {acc.alias or acc.account_id} desde {span.start}"
+    try:
+        return client.statement(acc.account_uuid, span.start, span.end)
+    except SignatureError as exc:
+        if not isinstance(exc, SignatureRequired):  # rejected, timed out…: say why
+            err.print(f"[yellow]{escape(acc.alias or acc.account_id)}:[/yellow] {escape(str(exc))}")
+        return None
 
 
 def _movement_row(acc: CashAccount, iban: str | None, f: Flow, movement_id: str) -> dict[str, Any]:

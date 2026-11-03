@@ -266,7 +266,8 @@ def test_approve_flag_waits_for_app_without_terminal(
     monkeypatch.setattr("myinvestor.signature.time.sleep", lambda _s: None)
     mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account()]))
     flows = mock_api.get(url__regex=r".*/account/api/v3/account/.*/flows")
-    flows.side_effect = [
+    flows.side_effect = [  # the last 90 days go first and need no signature; the older span does
+        httpx.Response(200, json=ok({"flowList": []})),
         httpx.Response(202, json=signature_pending("r1")),
         httpx.Response(200, json=ok({"flowList": []})),
     ]
