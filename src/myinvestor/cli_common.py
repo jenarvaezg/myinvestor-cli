@@ -261,7 +261,9 @@ def build_client(store: SessionStore | None = None) -> MyInvestorClient:
         store=store,
         signature_ui=ui,
         signer_factory=partial(Signer, timeout=options.approval_timeout),
-        relogin=stored_password_relogin(Authenticator(http), store, ui) if can_relogin else None,
+        relogin=stored_password_relogin(Authenticator(http, approval_timeout=options.approval_timeout), store, ui)
+        if can_relogin
+        else None,
         retry_blocked=options.retry_blocked,
         cache=True,
     )

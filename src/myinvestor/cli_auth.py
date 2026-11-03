@@ -171,12 +171,16 @@ def logout(
         bool, typer.Option(help="Olvidar también el id de dispositivo (el próximo login pedirá segundo factor).")
     ] = False,
 ) -> None:
-    """Borra la sesión local y la contraseña guardada. Los tokens ya emitidos caducan solos (≤ 30 min)."""
+    """Borra la sesión local, la contraseña guardada, la pausa del re-login y el login pendiente de --start.
+
+    Los tokens ya emitidos caducan solos (≤ 30 min).
+    """
     store = get_store()
     session = store.load()
     store.clear_pending_login()
     if session and session.customer_id:
         store.delete_password(session.customer_id)
+        store.clear_relogin_block(session.customer_id)
     if forget_device or session is None:
         store.clear()
     else:

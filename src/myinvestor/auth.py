@@ -48,6 +48,7 @@ from myinvestor.errors import (
 )
 from myinvestor.session import Session
 from myinvestor.signature import (
+    DEFAULT_APPROVAL_TIMEOUT,
     MAX_CODE_ATTEMPTS,
     SIGNATURE_HEADER,
     Challenge,
@@ -80,8 +81,10 @@ def _tokens(data: Any) -> tuple[str, str | None]:
 
 
 class Authenticator:
-    def __init__(self, http: httpx.Client) -> None:
+    def __init__(self, http: httpx.Client, *, approval_timeout: float = DEFAULT_APPROVAL_TIMEOUT) -> None:
+        """`approval_timeout`: seconds to wait for an app approval of the login (`--approval-timeout`)."""
         self._http = http
+        self._approval_timeout = approval_timeout
 
     def _post(self, path: str, body: Any, headers: dict[str, str]) -> httpx.Response:
         return self._http.post(f"{API_BASE}{path}", json=body, headers=headers)
@@ -104,7 +107,7 @@ class Authenticator:
         """
         payload, request = self._first_login(customer_id, password, session.device_id)
         if request is not None:
-            Signer(self._public_call(session.device_id), public=True).complete(request, ui)
+            self._signer(session.device_id).complete(request, ui)
             payload = self._signed_login(customer_id, password, session.device_id, request.id)
         return _session(payload, customer_id, session.device_id)
 
@@ -127,7 +130,7 @@ class Authenticator:
             return _session(payload, customer_id, session.device_id)
         if not send_code:
             raise SignatureRequired(sorted({m for group in request.pending_methods for m in group}))
-        challenge = Signer(self._public_call(session.device_id), public=True).start_code(request)
+        challenge = self._signer(session.device_id).start_code(request)
         return PendingLogin(
             customer_id=customer_id,
             device_id=session.device_id,
@@ -141,7 +144,7 @@ class Authenticator:
 
     def finish_login(self, pending: PendingLogin, password: str, code: str, ui: SignatureUI | None) -> Session:
         """Validate the code of a `start_login` and repeat the login signed. Raises `WrongCodeError`."""
-        signer = Signer(self._public_call(pending.device_id), public=True)
+        signer = self._signer(pending.device_id)
         challenge = Challenge(pending.signature_id, pending.method, destination=pending.destination)
         request = signer.submit_code(pending.request_id, challenge, code)
         if request is None:
@@ -168,6 +171,9 @@ class Authenticator:
             raise _login_rejection(response.status_code, error_code(body))
         raise_for_response(response)
         return envelope.data(envelope.decode(response))
+
+    def _signer(self, device_id: str) -> Signer:
+        return Signer(self._public_call(device_id), public=True, timeout=self._approval_timeout)
 
     def _public_call(self, device_id: str) -> Any:
         headers = {"x-device-id": device_id}

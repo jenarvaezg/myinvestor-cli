@@ -54,7 +54,7 @@ Segundo factor en el login `--direct`: un **código SMS** se da en la terminal o
 |---|---|---|---|
 | Sesión: id de dispositivo, DNI/NIE, access y refresh token | en cada login y en cada renovación; `logout` borra los tokens y conserva el id de dispositivo (para que el próximo login no pida segundo factor); `logout --forget-device` la borra entera | `session` | `session` |
 | Contraseña | solo con `--direct --remember`, y solo si MyInvestor la acepta; se borra con `logout`, al entrar con otro usuario y si el re-login recibe `UNAUTHORIZED` o `UPDATE_PASSWORD_REQUIRED` | `password:<DNI>` | `passwords.<DNI>`, **en claro** |
-| Pausa del re-login | cuando MyInvestor rechaza el re-login por otro motivo: hasta cuándo (24 h) y el error; se quita con el siguiente login correcto (manual o re-login tras la pausa) | `relogin-block:<DNI>` | `relogin_blocks.<DNI>` |
+| Pausa del re-login | cuando MyInvestor rechaza el re-login por otro motivo: hasta cuándo (24 h) y el error; se quita con el siguiente login correcto (manual o re-login tras la pausa) y con `logout` | `relogin-block:<DNI>` | `relogin_blocks.<DNI>` |
 | Login pendiente de `--start` | `signatureRequestId`, id del código enviado, método, destino enmascarado, DNI, id de dispositivo, hora e intentos fallidos; la contraseña solo con `--start --remember`; se borra al completarlo con `--code`, al agotar los intentos o si la firma caduca o se rechaza, con cualquier login correcto y con `logout` | `pending-login` | `pending_login` |
 
 Protección:

@@ -50,7 +50,7 @@ La ruta por defecto es `$XDG_CONFIG_HOME/myinvestor/session.json` (o `~/.config/
 Si MyInvestor pide un segundo factor (dispositivo nuevo o que ha dejado de reconocer):
 
 - **Código SMS**: en una terminal interactiva lo pregunta. Sin terminal (un agente, `ssh -T`), en dos pasos: `myinvestor login --direct --remember --start -u 12345678Z` envía el SMS y sale con 13, y `myinvestor login --direct --code 123456` lo completa (con `--start --remember` la contraseña queda en el login pendiente y `--code` no la vuelve a pedir). También valen `--code-stdin`, `--code-fd` y `MYINVESTOR_OTP`: ver [Código SMS sin terminal](../README.md#código-sms-sin-terminal).
-- **Aprobación en la app** (INAPP): en una terminal, o con `myinvestor --approve login --direct --remember …`, que espera hasta 300 s a que lo apruebes. `--approve` no sirve para un código SMS.
+- **Aprobación en la app** (INAPP): en una terminal, o con `myinvestor --approve login --direct --remember …`, que espera a que lo apruebes hasta `--approval-timeout` (300 s por defecto; va antes de la orden: `myinvestor --approve --approval-timeout 600 login --direct …`). `--approve` no sirve para un código SMS.
 
 Dato observado el 2026-11-03, no una garantía: el primer login desde una IP de datacenter (un dispositivo nuevo) no pidió segundo factor. Imperva sí puede bloquear IPs de datacenter (código 12); `myinvestor doctor` lo comprueba.
 
@@ -82,7 +82,7 @@ Por qué no:
 
 - **`MYINVESTOR_PASSWORD`**: no la necesitas (el re-login usa la guardada con `--remember`) y en el entorno queda a la vista: en el crontab y sus copias, en `systemctl --user show`, en `/proc/<pid>/environ` (tu usuario y root) y en lo que herede cualquier proceso hijo.
 - **`MYINVESTOR_OTP`**: con ella, cada re-login que necesite código **envía un SMS** y prueba ese código, que ya será viejo: un SMS por ejecución y un código incorrecto cada vez. Sin ella, el re-login falla con 13 sin mandar nada.
-- **`MYINVESTOR_APPROVE`**: con ella, cada consulta que pida aprobación te manda una **notificación al móvil** (a las 3 de la mañana, si ahí cae el cron) y el proceso espera hasta 5 min a que la apruebes. Además, acostumbrarse a aprobar avisos que no has pedido es justo lo que aprovecha un fraude. En el cron, mejor `MYINVESTOR_NO_SIGNATURE=1`, que garantiza lo contrario.
+- **`MYINVESTOR_APPROVE`**: con ella, cada consulta que pida aprobación te manda una **notificación al móvil** (a las 3 de la mañana, si ahí cae el cron) y el proceso espera a que la apruebes hasta `--approval-timeout` (300 s por defecto). Además, acostumbrarse a aprobar avisos que no has pedido es justo lo que aprovecha un fraude. En el cron, mejor `MYINVESTOR_NO_SIGNATURE=1`, que garantiza lo contrario.
 
 ## Zona horaria
 
