@@ -147,6 +147,12 @@ ACCOUNT = (
     ),
 )
 
+# Only `accounts` (one more request per account), not the `cash` section of `snapshot`.
+ACCOUNT_RATES = (
+    Field("tipo_pct", N, True, "`remunerationPercentage` de la última liquidación, en %; null sin remuneración"),
+    Field("tae_pct", N, True, "`calculateTaeAverage`, en %; null sin remuneración o si llega 0 (sin calcular)"),
+)
+
 HOLDING = (
     Field("cuenta", S, note="id de la cuenta de valores"),
     Field("tipo", S, True, "`investmentProductType`: `INDEXED_FUND`, `BROKER`…"),
@@ -586,7 +592,7 @@ def _allocation(label: str, *labels: Field) -> Variant:
 
 CONTRACTS: tuple[Contract, ...] = (
     Contract("position", 1, (_rows(*POSITION),), "Una fila por producto y, al final, el total."),
-    Contract("accounts", 1, (_rows(*ACCOUNT),)),
+    Contract("accounts", 1, (_rows(*ACCOUNT, *ACCOUNT_RATES),)),
     Contract(
         "movements",
         1,

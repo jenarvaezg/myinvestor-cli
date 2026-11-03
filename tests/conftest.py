@@ -67,6 +67,12 @@ def cash_account(i: int = 1, **overrides: Any) -> dict[str, Any]:
     return {**base, **overrides}
 
 
+def mock_no_remuneration(router: respx.MockRouter) -> respx.Route:
+    """`accounts` asks for each cash account's remuneration (for its TAE): none here, a 404 for every account."""
+    not_found = {"payload": {}, "status": {"code": "NOT_FOUND", "message": "no"}}
+    return router.get(url__regex=rf"{CPERF}/v2/cash-accounts/\d+/remuneration").respond(404, json=not_found)
+
+
 def flow(i: int, amount: float, **overrides: Any) -> dict[str, Any]:
     base = {
         "amount": amount,

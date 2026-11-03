@@ -36,7 +36,9 @@
       "titulares": "array",
       "titulares[].nombre": "string|null",
       "titulares[].rol": "string|null",
-      "titulares[].yo": "boolean"
+      "titulares[].yo": "boolean",
+      "tipo_pct": "number|null",
+      "tae_pct": "number|null"
     }
   },
   "myinvestor.movements/1": {

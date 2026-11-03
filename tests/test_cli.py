@@ -47,6 +47,7 @@ from tests.conftest import (
     flow,
     investment,
     make_jwt,
+    mock_no_remuneration,
     ok,
     order,
     securities_account,
@@ -158,6 +159,7 @@ def json_rows(*args: str) -> list[dict[str, Any]]:
 
 def test_accounts_json_amounts_are_numbers(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
     mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account(1)]))
+    mock_no_remuneration(mock_api)
     [row] = json_rows("accounts")
     amounts = (row["disponible"], row["retenido"], row["saldo"])
     assert amounts == (Decimal("1000.10"), Decimal("0.20"), Decimal("1000.30"))

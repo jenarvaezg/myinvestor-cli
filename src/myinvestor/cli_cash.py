@@ -9,7 +9,7 @@ from typing import Annotated, Any
 import typer
 from rich.markup import escape
 
-from myinvestor.cli_accounts import DEFAULT_MOVEMENT_DAYS, AccountOpt, _range, match_cash_accounts
+from myinvestor.cli_accounts import DEFAULT_MOVEMENT_DAYS, NOT_FOUND, AccountOpt, _range, match_cash_accounts
 from myinvestor.cli_common import FormatOpt, app, build_client, err, now_local
 from myinvestor.client import MyInvestorClient
 from myinvestor.errors import ApiError, InputError
@@ -30,7 +30,6 @@ INTEREST_TABLE_COLUMNS = (
     "retencion",
     "neto",
 )
-NOT_FOUND = 404
 
 
 def _fetch_transfers(client: MyInvestorClient, account: list[str] | None) -> list[tuple[CashAccount, SentTransfer]]:

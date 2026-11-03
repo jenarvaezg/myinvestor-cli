@@ -66,7 +66,7 @@ Protección:
 
 ```bash
 myinvestor position                               # efectivo + cuentas de valores + planes, con total y fecha de valor
-myinvestor accounts [--owner me|junior|other]     # cuentas de efectivo: tipo, tu rol, titular, disponible, retenido, saldo
+myinvestor accounts [--owner me|junior|other]     # cuentas de efectivo: tipo, tu rol, titular, disponible, retenido, saldo y TAE
 myinvestor movements [-a "Mi cuenta"] [--from 2026-10-01 --to 2026-10-31 | --days 60] [-s nómina] [--oldest-first] [--owner me|junior|other] [--free-only] [--allow-partial]
 myinvestor movements --id <id> [--from … | --days …]   # un solo movimiento, con todos sus campos
 myinvestor movements --new [--no-mark] [--state PATH] | --since-date 2026-11-01 | --since-id <id>   # solo lo nuevo
@@ -102,7 +102,7 @@ myinvestor export DIR [--since 2024-01-01] [--format csv|json] [--allow-partial]
 myinvestor documents [--kind fiscal|cash|securities|pension|portfolio|all]   # tus documentos en PDF
 myinvestor documents get ID|NOMBRE [-o FICHERO|DIR|-] [--latest] [--force] | --fiscal 2025   # descarga uno
 myinvestor documents summary -a "Mi cuenta" [-o …]    # extracto de una cuenta de efectivo
-myinvestor xray (--account ID | --isin ISIN | --pension ID) [-o …]   # radiografía en PDF (`--pension`, sin verificar)
+myinvestor xray (--account ID | --isin ISIN | --pension ID) [-o …]   # radiografía en PDF
 myinvestor schema [movements] [--envelope]        # JSON Schema de la salida -f json de una orden
 ```
 
@@ -390,7 +390,7 @@ La tabla muestra `fecha`, `cuenta`, `importe`, `beneficiario`, `concepto`, `ejec
 | `fecha_oficial` | `officialRemunerationDate` | la web la muestra como fecha de actualización |
 | `saldo_base`, `saldo_promo`, `saldo_total` | `applicableBaseBalance`, `balancePromo`, `totalBalance` | saldo remunerado al tipo base, al promocional y en total |
 | `tipo_pct`, `tipo_base_pct`, `tipo_promo_pct` | `remunerationPercentage`, `baseRemunerationPercentage`, `promotionRemunerationPercentage` | % aplicado: total, base y promocional |
-| `tae_pct`, `tae_promo_pct` | `calculateTaeAverage`, `taePromotion` | la web enseña `calculateTaeAverage` como el tipo medio del periodo |
+| `tae_pct`, `tae_promo_pct` | `calculateTaeAverage`, `taePromotion` | la web enseña `calculateTaeAverage` como el tipo medio del periodo; aquí sale tal cual, y `tae_pct: 0` significa «sin calcular» (la web lo oculta), no una TAE del 0 % |
 | `intereses_base`, `intereses_promo` | `baseResults`, `promoResults` | |
 | `bruto` | `finalResult` | intereses **brutos** del periodo: la web calcula el neto como `finalResult - taxChargeAmount` |
 | `retencion` | `taxChargeAmount` | retención (IRPF), **en negativo** como en `income` |
@@ -399,9 +399,11 @@ La tabla muestra `fecha`, `cuenta`, `importe`, `beneficiario`, `concepto`, `ejec
 
 Las fechas que la API manda como texto vacío (`""`) salen como `null`. La tabla muestra `cuenta`, `periodo`, `fecha_pago`, `saldo_base`, `tipo_pct`, `tae_pct`, `bruto`, `retencion` y `neto`. Para el histórico de intereses cobrados, `income` suma los abonos de cada mes.
 
-### Cuentas: tipo, rol y titulares
+### Cuentas: tipo, rol, titulares y TAE
 
 `accounts` muestra `tipo` (`accountType`), `rol` (el `participantType` del titular que eres tú) y `titular` (el menor en una cuenta junior; si no, el `OWNER`). En JSON añade `titulares: [{"nombre", "rol", "yo"}]`. El DNI de los titulares (`documentNumber`) no se lee ni se exporta nunca.
+
+También da `tipo_pct` y `tae_pct` (en %) de la última liquidación de intereses, como en [`interest`](#remuneración-de-la-cuenta-interest): cuesta una petición más por cuenta (`…/cash-accounts/{accountId}/remuneration`). Si una cuenta no tiene remuneración (404 o respuesta vacía), las dos celdas quedan vacías (`null` en JSON); si la consulta falla por otro motivo, también, con un aviso en stderr, y la orden sigue con el resto. MyInvestor manda a menudo `calculateTaeAverage: 0` aunque la cuenta tenga tipo (y `null` en una `CASH_PORTFOLIO`); la web trata el 0 como «sin dato», así que aquí `tae_pct` también sale vacía (`null`) cuando llega 0. `snapshot` y `export` no las incluyen.
 
 | Valor | Significado |
 |---|---|
@@ -604,7 +606,7 @@ myinvestor documents get dddddddd-0000-0000-0000-000000000001 -o - | pdftotext -
 - **Seguridad**: los PDF contienen datos personales y fiscales (nombre, DNI, saldos, IBAN). Se escriben con **permisos 0600**, de forma atómica (temporal en el mismo directorio y enlace/renombrado; si algo falla no queda nada a medias). El nombre que da la API se sanea: sin `/`, `\`, caracteres de control ni puntos iniciales (`..`), y como mucho 200 bytes, así que no puede salirse del directorio de destino.
 - **Comprobaciones de la descarga**: solo `GET`, con las mismas cabeceras, renovación del token, reintento tras `401`, `--retry-blocked` y segundo factor que el resto de órdenes; el cuerpo no se interpreta como JSON. Se exige `content-type` `application/pdf` (o `application/octet-stream`) y que empiece por `%PDF`: una página HTML de error o un JSON nunca se guardan como documento. Se lee en streaming con un **límite de 50 MB**.
 
-**Extracto y radiografías** (rutas sacadas de la web; mismas comprobaciones; verificadas contra la API el 2026-11-03 salvo `xray --pension`):
+**Extracto y radiografías** (rutas sacadas de la web; mismas comprobaciones; verificadas contra la API el 2026-11-03):
 
 - `documents summary -a CUENTA`: extracto de una cuenta de efectivo. Pide `…/cash-accounts/{accountId}/documents/summary`, que devuelve `{id, fileName}`, y descarga `…/documents/temporary/{id}`, como hace la web.
 - `xray --account ID` (cuenta de valores), `--pension ID` (cuenta de planes) o `--isin ISIN` (fondo): la «radiografía» que la web genera al momento. Por defecto se guarda como `radiografia-cuenta-ID.pdf`, `radiografia-plan-ID.pdf` o `radiografia-fondo-ISIN.pdf`.
@@ -627,7 +629,7 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 
 | Orden | Peticiones |
 |---|---|
-| `accounts`, `balance-history`, `contributions`, `funds`, `feed`, `raw`, `status` | 1 |
+| `balance-history`, `contributions`, `funds`, `feed`, `raw`, `status` | 1 |
 | `position` | 3 + V |
 | `movements`, `holds` | 1 + C (`movements --new`: igual; `--since-id`: 1 + 1; `--details`: + 1 por cuenta con algún cargo de transferencia emitida) |
 | `export` | 4 + C + 2V + P; la primera vez (o con un hueco), + C del tramo antiguo y sus firmas |
@@ -637,8 +639,8 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | `pensions` | 1 + P |
 | `upcoming` | 4 + 2·C + 2·V + P (C: con `--owner`, solo las de ese tipo; por cuenta, retenciones y transferencias emitidas) |
 | `snapshot`, `summary` | 4 + 3·C + 2·V + 2·P (`summary --from-file`: 0) |
-| `transfers`, `interest` | 1 + C |
 | `fund-transfers` | 1 + V (también con `--pending`); con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
+| `accounts`, `transfers`, `interest` | 1 + C (`accounts`: C con `--owner`, solo las de ese tipo) |
 | `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V |
 | `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
 | `login` | `--direct` o `--refresh-token-stdin`: 1 |
@@ -719,10 +721,19 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/customers/self/documents/fiscal` · `cash-accounts/self/documents` · `securities-accounts/self/documents` · `pension-accounts/self/documents` · `portfolios/self/documents` | listas de documentos, todas con `{documentId, documentUuid, name, extension, isNotified, createDate, signDate, accountId ("" si no es de una cuenta), accountCode, accountAlias, accountType, isCurrentCustomerAnOwner}` |
 | GET | `/cperf-server/api/v2/customers/self/documents/signedes/{documentUuid}` | el PDF tal cual (`application/pdf`, no JSON) |
 | GET | `/cperf-server/api/v2/cash-accounts/{accountId}/documents/summary` | extracto: `{id, fileName}`; el PDF, en `/cperf-server/api/v2/documents/temporary/{id}` |
-| GET | `/cperf-server/api/v2/documents/{securities,pension-plans}/{accountId}/x-ray` · `/documents/funds/{isin}/x-ray` | radiografía en PDF generada al momento (`pension-plans`, sin probar); la web también conoce `/documents/broker/{accountId}/x-ray`, sin uso en la interfaz |
+| GET | `/cperf-server/api/v2/documents/{securities,pension-plans}/{accountId}/x-ray` · `/documents/funds/{isin}/x-ray` | radiografía en PDF generada al momento; la web también conoce `/documents/broker/{accountId}/x-ray`, sin uso en la interfaz |
 | GET | `/cperf-server/api/v2/funds?page&limit&sort&mainInputFilter&…` | catálogo paginado; filtros `category`, `region`, `manager`, `assetsType`, `currency`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue`… |
 | GET | `/cperf-server/api/v2/funds/{isin}` · `/prices/last` · `/compositions` · `/graphs/{type}` | ficha, último VL |
 | GET | `/feed/api/feed/self` | `text/event-stream` con un evento `data:{…}` |
+
+### Servicio `/read-only/api/v1`
+
+El bundle de la web conoce un servicio aparte, `/read-only/api/v1/…`, que repite las consultas principales (`cash-accounts/self`, `cash-accounts/{id}/flows`, `…/remuneration`, `securities-accounts/…`, `pension-accounts/…`, `funds/{isin}`, `portfolios/{id}/returns`, `customers/self`, `feed/self`…) y responde con el token normal. Lo que se vio al probarlo (#10):
+
+- **Es una copia diaria**, no los datos en vivo: el sobre lleva un nivel `data` más, `payload.data = {"lastUpdate": "AAAA-MM-DDT00:00:00.000Z", "data": <lo mismo que cperf-server>}`, y faltan las cuentas abiertas ese día. `funds/{isin}` da el mismo detalle (con `lastUpdate` de esa mañana); `customers/self` no lleva el nivel extra; `feed/self` responde sin payload y `portfolios/{id}/returns`, `null`.
+- **`cash-accounts/{id}/flows` no sirve como histórico**: ignora `dateFrom`/`dateTo` y devuelve unos 25 movimientos con solo cuatro campos (`amount`, `concept`, `operationDate` en `DD/MM/AAAA` y `operationType`; sin referencia ni saldo). Algunos tienen más de 90 días y no pide firma, pero no hay forma de pedir un rango completo.
+
+**Conclusión**: no sirve como fuente principal ni para ir más allá de los 90 días de forma completa. Como mucho, valdría de fallback de saldos (con un día de retraso) si `cperf-server` cae; no está implementado. Para explorarlo, `myinvestor raw /read-only/api/v1/cash-accounts/self` (o cualquier otra ruta de la lista) devuelve la respuesta tal cual.
 
 **Fuera de alcance a propósito**: todo lo que escribe (`…/funds/buy-orders`, `selling-orders`, `inner-transfers`, `external-transfers`, `POST`/`PUT`/`DELETE` de `cash-accounts/{id}/transfers`, cancelar órdenes, aportaciones, Bizum…).
 
