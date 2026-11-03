@@ -26,7 +26,11 @@ EXIT_CODES = (
     (EXIT_CREDENTIALS, "contraseña rechazada (la guardada se borra) o cambio de contraseña obligatorio"),
     (EXIT_NO_SESSION, "sin sesión, o caducada sin forma de renovarla (incluye el re-login en pausa)"),
     (EXIT_NETWORK, "red, WAF (Imperva) o MyInvestor caído: reintentable"),
-    (EXIT_SIGNATURE, "hace falta un segundo factor (SMS/app) que no se puede dar sin terminal (o resultado parcial)"),
+    (
+        EXIT_SIGNATURE,
+        "hace falta un segundo factor (SMS/app) que no se puede dar sin terminal, lo ha enviado `login --start` "
+        "(o resultado parcial)",
+    ),
     (EXIT_CORRUPT_STORE, "sesión guardada corrupta"),
 )
 

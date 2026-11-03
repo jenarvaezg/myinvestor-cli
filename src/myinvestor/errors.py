@@ -147,6 +147,12 @@ class SignatureError(MyInvestorError):
     exit_code = EXIT_SIGNATURE
 
 
+_CODE_HINT = (
+    " Para un código SMS sin terminal: `myinvestor login --direct --start` y luego `--code`, "
+    "o MYINVESTOR_OTP/--code-stdin (ver el README)."
+)
+
+
 class SignatureRequired(SignatureError):
     def __init__(self, methods: list[str]) -> None:
         self.methods = methods
@@ -154,11 +160,29 @@ class SignatureRequired(SignatureError):
             "MyInvestor pide confirmar esta consulta con un segundo factor "
             f"({', '.join(methods) or '?'}). Repite en una terminal interactiva, o con "
             "`myinvestor --approve …` si basta con aprobarla en la app del móvil."
+            + (_CODE_HINT if any(m.startswith("OTP_") for m in methods) else "")
         )
 
 
 class PartialResultError(SignatureError):
     """Part of the requested data needs a second factor that was not given; the rest was already printed."""
+
+
+class SignatureCodeRequired(SignatureError):
+    """`login --direct --start` sent the code and saved the login: `login --direct --code` completes it."""
+
+
+class WrongCodeError(SignatureError):
+    """`finish_login`: MyInvestor rejected the code; `attempts_left` more before the login must restart."""
+
+    def __init__(self, attempts_left: int) -> None:
+        self.attempts_left = max(attempts_left, 0)
+        hint = (
+            f"te quedan {self.attempts_left}: repite `myinvestor login --direct --code <código>`"
+            if self.attempts_left
+            else "no quedan más intentos, vuelve a empezar con `myinvestor login --direct --start`"
+        )
+        super().__init__(f"Código incorrecto; {hint}.")
 
 
 def envelope_status(body: object) -> tuple[str | None, str | None]:

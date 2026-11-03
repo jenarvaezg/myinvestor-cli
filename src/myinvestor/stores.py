@@ -4,6 +4,9 @@ The password is stored only after `login --direct --remember`, keyed by customer
 session can log in again unattended (cron). It is deleted on logout and when MyInvestor says it is
 wrong. Any other rejection keeps it but pauses the re-login (`ReloginBlock`) so cron does not retry it
 on every run.
+
+`login --direct --start` leaves a `PendingLogin` (the SMS already sent) that `login --direct --code`
+completes in another process. It holds the password only with `--remember`.
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ import json
 import os
 import tempfile
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -51,6 +54,51 @@ class ReloginBlock:
         return cls(until=until, error=str(raw["last_relogin_error"]))
 
 
+@dataclass(frozen=True)
+class PendingLogin:
+    """A `login --direct --start` waiting for its code: what repeating the login with `x-signature-id` needs.
+
+    The web repeats the very same `POST /login/api/v2/auth/token` (`customerId`, `password`, same device)
+    adding `x-signature-id: <signatureRequestId>` once the code is validated, so the password is needed
+    again: it is kept here only with `--remember` (it would be saved anyway); otherwise `--code` asks for it.
+    """
+
+    customer_id: str
+    device_id: str
+    request_id: str  # signatureRequestId: sent back as `x-signature-id`
+    signature_id: str  # the started code method, for `…/validate/{signatureId}`
+    method: str
+    destination: str | None
+    started_at: datetime
+    wrong_codes: int = 0
+    password: str | None = field(default=None, repr=False)
+
+    def with_wrong_code(self) -> PendingLogin:
+        return replace(self, wrong_codes=self.wrong_codes + 1)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**asdict(self), "started_at": self.started_at.isoformat()}
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> PendingLogin:
+        """Raises ValueError/TypeError/KeyError on malformed data."""
+        started_at = datetime.fromisoformat(raw["started_at"])
+        if started_at.tzinfo is None:
+            raise ValueError("started_at without timezone")
+        password = raw.get("password")
+        return cls(
+            customer_id=str(raw["customer_id"]),
+            device_id=str(raw["device_id"]),
+            request_id=str(raw["request_id"]),
+            signature_id=str(raw["signature_id"]),
+            method=str(raw["method"]),
+            destination=str(raw["destination"]) if raw.get("destination") else None,
+            started_at=started_at,
+            wrong_codes=int(raw.get("wrong_codes", 0)),
+            password=str(password) if password else None,
+        )
+
+
 class StoreKind(StrEnum):
     auto = "auto"
     keyring = "keyring"
@@ -67,10 +115,14 @@ class SessionStore(Protocol):
     def load_relogin_block(self, customer_id: str) -> ReloginBlock | None: ...
     def save_relogin_block(self, customer_id: str, block: ReloginBlock) -> None: ...
     def clear_relogin_block(self, customer_id: str) -> None: ...
+    def load_pending_login(self) -> PendingLogin | None: ...
+    def save_pending_login(self, pending: PendingLogin) -> None: ...
+    def clear_pending_login(self) -> None: ...
 
 
 class KeyringSessionStore:
     _SESSION_KEY = "session"
+    _PENDING_LOGIN_KEY = "pending-login"
 
     def __init__(self, service: str = KEYRING_SERVICE) -> None:
         self._service = service
@@ -116,6 +168,22 @@ class KeyringSessionStore:
     def clear_relogin_block(self, customer_id: str) -> None:
         if keyring.get_password(self._service, f"relogin-block:{customer_id}") is not None:
             keyring.delete_password(self._service, f"relogin-block:{customer_id}")
+
+    def load_pending_login(self) -> PendingLogin | None:
+        raw = keyring.get_password(self._service, self._PENDING_LOGIN_KEY)
+        if not raw:
+            return None
+        try:
+            return PendingLogin.from_dict(json.loads(raw))
+        except (ValueError, TypeError, KeyError) as exc:
+            raise CorruptKeyringError(self._service) from exc
+
+    def save_pending_login(self, pending: PendingLogin) -> None:
+        keyring.set_password(self._service, self._PENDING_LOGIN_KEY, json.dumps(pending.to_dict()))
+
+    def clear_pending_login(self) -> None:
+        if keyring.get_password(self._service, self._PENDING_LOGIN_KEY) is not None:
+            keyring.delete_password(self._service, self._PENDING_LOGIN_KEY)
 
 
 class FileSessionStore:
@@ -214,6 +282,23 @@ class FileSessionStore:
             }
         )
 
+    def load_pending_login(self) -> PendingLogin | None:
+        raw = self._read().get("pending_login")
+        if raw is None:
+            return None
+        try:
+            return PendingLogin.from_dict(raw)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise CorruptStoreError(self.path) from exc
+
+    def save_pending_login(self, pending: PendingLogin) -> None:
+        self._update(lambda data: {**data, "pending_login": pending.to_dict()})
+
+    def clear_pending_login(self) -> None:
+        if "pending_login" not in self._read():
+            return
+        self._update(lambda data: {k: v for k, v in data.items() if k != "pending_login"})
+
 
 class MemorySessionStore:
     """In-memory store for tests and library users who manage persistence themselves."""
@@ -222,6 +307,7 @@ class MemorySessionStore:
         self.session = session
         self.passwords: dict[str, str] = {}
         self.relogin_blocks: dict[str, ReloginBlock] = {}
+        self.pending_login: PendingLogin | None = None
 
     def load(self) -> Session | None:
         return self.session
@@ -249,6 +335,15 @@ class MemorySessionStore:
 
     def clear_relogin_block(self, customer_id: str) -> None:
         self.relogin_blocks.pop(customer_id, None)
+
+    def load_pending_login(self) -> PendingLogin | None:
+        return self.pending_login
+
+    def save_pending_login(self, pending: PendingLogin) -> None:
+        self.pending_login = pending
+
+    def clear_pending_login(self) -> None:
+        self.pending_login = None
 
 
 def default_store_path() -> Path:

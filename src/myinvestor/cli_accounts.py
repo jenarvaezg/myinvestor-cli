@@ -35,6 +35,7 @@ from myinvestor.models import (
 )
 from myinvestor.output import OutputFormat, print_json, render
 from myinvestor.psd2 import Span, free_start, split_range
+from myinvestor.signature import INAPP, can_start
 from myinvestor.transfers_match import with_transfer_fields
 
 DEFAULT_MOVEMENT_DAYS = 30
@@ -351,7 +352,8 @@ def _movement_rows(
     what was already fetched is kept. Ids are numbered over all the spans of an account together.
     """
     spans = split_range(start, end, date.today())
-    if any(not s.free for s in spans) and client.signature_ui is not None:
+    can_approve = can_start(client.signature_ui, INAPP)  # /dev/tty alone types codes, it does not approve
+    if any(not s.free for s in spans) and can_approve:
         err.print(
             f"[dim]Más de {FREE_FLOWS_DAYS} días: primero lo posterior al {free_start(date.today())} de cada "
             "cuenta; lo anterior hay que aprobarlo en la app (una vez por cuenta).[/dim]"
@@ -361,7 +363,7 @@ def _movement_rows(
     gaps: list[_Gap] = []
     for span in spans:
         for acc in chosen:
-            if not span.free and (client.signature_ui is None or gaps):
+            if not span.free and (not can_approve or gaps):
                 gaps.append(_Gap(acc, span))
                 continue
             statement = _span_statement(client, acc, span)

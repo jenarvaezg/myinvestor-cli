@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -17,10 +18,18 @@ from rich.markup import escape
 from myinvestor.auth import Authenticator, stored_password_relogin
 from myinvestor.cli_errors import EXIT_CODES_HELP, record_format
 from myinvestor.client import MyInvestorClient, ensure_session
+from myinvestor.code_input import CodeSource, CodeSourcesUI, code_prompt, open_tty, preset_code
 from myinvestor.errors import InputError, SignatureError
 from myinvestor.http import build_http_client
 from myinvestor.output import OutputFormat, notices, set_wide
-from myinvestor.signature import DEFAULT_APPROVAL_TIMEOUT, Challenge, SignatureRequest, SignatureUI, Signer
+from myinvestor.signature import (
+    DEFAULT_APPROVAL_TIMEOUT,
+    OTP_METHODS,
+    Challenge,
+    SignatureRequest,
+    SignatureUI,
+    Signer,
+)
 from myinvestor.stores import SessionStore, StoreKind, resolve_store
 from myinvestor.verbosity import configure as configure_verbosity
 
@@ -33,6 +42,7 @@ app = typer.Typer(
 )
 err = notices  # informative messages: silenced by --quiet
 fatal = Console(stderr=True)  # errors: shown even with --quiet
+OTP_ENV = "MYINVESTOR_OTP"
 
 FormatOpt = Annotated[
     OutputFormat,
@@ -169,9 +179,7 @@ class TerminalSignatureUI:
         self.context: str | None = None
 
     def ask_code(self, challenge: Challenge, attempt: int) -> str | None:
-        where = f" enviado a {challenge.destination}" if challenge.destination else ""
-        retry = " (incorrecto, prueba otra vez)" if attempt > 1 else ""
-        return typer.prompt(f"Código {challenge.method}{where}{retry}", default="", show_default=False) or None
+        return typer.prompt(code_prompt(challenge, attempt), default="", show_default=False) or None
 
     def approve_in_app(self, request: SignatureRequest) -> None:
         label = request.description or self.context
@@ -182,20 +190,61 @@ class TerminalSignatureUI:
         )
 
 
-class AppOnlySignatureUI(TerminalSignatureUI):
-    """`--approve` without a terminal: app approvals need no input, codes can't be typed."""
+class PipedSignatureUI(TerminalSignatureUI):
+    """stdin is not a terminal: app approvals only with `--approve`, codes on /dev/tty if there is one (like ssh/gpg).
+
+    The terminal is opened only when a code is asked (or to check, right before starting one, that there is
+    one) and closed right after. Without it (cron, CI, a detached agent) no code method is started, and
+    without `--approve` no app approval is: nobody gets a notification they cannot answer.
+    """
+
+    def __init__(self, *, approve: bool) -> None:
+        super().__init__()
+        self._approve = approve
+
+    def supports(self, method: str) -> bool:
+        if method in OTP_METHODS:
+            return self._has_terminal()
+        return self._approve
 
     def ask_code(self, challenge: Challenge, attempt: int) -> str | None:
-        raise SignatureError(f"MyInvestor pide un código {challenge.method}: repite en una terminal interactiva.")
+        terminal = open_tty()
+        if terminal is None:
+            raise SignatureError(f"MyInvestor pide un código {challenge.method}: repite en una terminal interactiva.")
+        with terminal:
+            terminal.write(f"{code_prompt(challenge, attempt)}: ")
+            terminal.flush()
+            return terminal.readline().strip() or None
+
+    def _has_terminal(self) -> bool:
+        terminal = open_tty()
+        if terminal is None:
+            return False
+        terminal.close()
+        return True
 
 
-def signature_ui() -> SignatureUI | None:
-    """Ask in an interactive terminal; elsewhere only with `--approve`, so cron/CI never pings the phone."""
+def signature_ui(code_source: CodeSource | None = None) -> SignatureUI | None:
+    """Ask in an interactive terminal; elsewhere only with `--approve`, so cron/CI never pings the phone.
+
+    `MYINVESTOR_OTP`, then `code_source` (`--code-stdin`/`--code-fd`), answer codes before the terminal.
+    `--no-signature` beats them all: no second factor is ever started.
+    """
     if options.no_signature:
         return None
-    if stdin_is_tty():
-        return TerminalSignatureUI()
-    return AppOnlySignatureUI() if options.approve else None
+    otp = os.environ.get(OTP_ENV, "").strip()
+    sources = [s for s in (preset_code(otp, OTP_ENV) if otp else None, code_source) if s is not None]
+    ui = _interactive_ui()
+    return CodeSourcesUI(sources, ui, _announce) if sources else ui
+
+
+def _interactive_ui() -> TerminalSignatureUI:
+    return TerminalSignatureUI() if stdin_is_tty() else PipedSignatureUI(approve=options.approve)
+
+
+def _announce(message: str) -> None:
+    # also with --quiet: it says where the code went
+    fatal.print(message, markup=False, highlight=False, soft_wrap=True)
 
 
 def build_client(store: SessionStore | None = None) -> MyInvestorClient:
