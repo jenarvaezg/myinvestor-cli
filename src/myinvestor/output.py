@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
-from typing import Any
+from typing import IO, Any
 
 from rich.cells import cell_len
 from rich.console import Console
@@ -67,8 +67,31 @@ TEXT_MIN_WIDTH = 6
 UNLIMITED_WIDTH = 10_000
 _LINE_BREAKS = re.compile(r"[\t\r\n]+")
 
+
+class StderrConsole(Console):
+    """stderr console that only wraps lines for a terminal (#67).
+
+    Redirected (a file, a pipe, cron), a message is one line however long: a script that greps it or
+    keeps its last line gets it whole. A terminal still wraps at its width. It asks the stream itself
+    and not `is_terminal`, which `FORCE_COLOR` turns on.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**{"stderr": True, **kwargs})
+
+    def print(self, *objects: Any, soft_wrap: bool | None = None, **kwargs: Any) -> None:
+        super().print(*objects, soft_wrap=not _isatty(self.file) if soft_wrap is None else soft_wrap, **kwargs)
+
+
+def _isatty(stream: IO[str]) -> bool:
+    try:
+        return stream.isatty()
+    except (AttributeError, ValueError):  # no isatty, or already closed
+        return False
+
+
 # Informative messages on stderr (never stdout); `--quiet` silences them.
-notices = Console(stderr=True)
+notices = StderrConsole()
 
 
 class OutputFormat(StrEnum):

@@ -54,6 +54,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 
 ### Corregido
 
+- Con stderr redirigido (fichero, tubería, cron) los errores y avisos salen en una sola línea aunque pasen de 80 columnas: una ruta larga ya no parte el mensaje (`grep "ya existe"` o `tail -n 1` lo leen entero). En una terminal siguen ajustándose a su ancho. La línea JSON de `-f json` ya era una sola (#67).
 - `position`: la tabla ya no añade la columna `efectivo` con una cartera contratada (su saldo ya va en `valor`), y vuelve a caber en 80 columnas; JSON/CSV/TSV no cambian.
 - Una respuesta de MyInvestor con un formato inesperado ya no acaba en un traceback: sale un error claro con el modelo y las claves afectadas (sin sus valores), código 1 y, con `-f json`, `"error": "unexpected_response"` en stderr.
 - `--approval-timeout` también vale en el login y el re-login; `logout` borra la pausa del re-login (#46).
