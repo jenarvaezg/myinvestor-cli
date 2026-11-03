@@ -579,6 +579,7 @@ Con `--by geo | --by category`: lista de objetos.
 | Clave | Tipo | `null` | Estable | Notas |
 |---|---|---|---|---|
 | `clave` | string | no | sí | clave del grupo; `total` en la última fila |
+| `origen` | string | sí | sí | solo con `--by geo`; qué decidió la zona (`geoZone`, `nombre: …`, `categoría: …`, `ISIN: …`) |
 | `valor` | number (€, 2 decimales) | no | sí |  |
 | `peso_pct` | number (exacto) | sí | sí | % del total, a 2 decimales |
 | `invertido` | number (€, 2 decimales) | sí | sí |  |

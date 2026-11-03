@@ -821,7 +821,16 @@ CONTRACTS: tuple[Contract, ...] = (
         1,
         (
             _allocation("--by asset", Field("origen", S, True, "etiquetas de la API que dan la clase")),
-            _allocation("--by geo | --by category"),
+            _allocation(
+                "--by geo | --by category",
+                Field(
+                    "origen",
+                    S,
+                    True,
+                    "qué decidió la zona (`geoZone`, `nombre: …`, `categoría: …`, `ISIN: …`)",
+                    only_with="--by geo",
+                ),
+            ),
             _allocation("--by product", Field("nombre", S, True)),
             _allocation("--by account", Field("cuenta_id", S, True), Field("tipo", S, True, "tipo de cuenta")),
         ),

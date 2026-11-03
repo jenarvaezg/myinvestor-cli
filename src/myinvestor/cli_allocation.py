@@ -25,6 +25,7 @@ from myinvestor.allocation import (
     target_total,
     total_row,
     unbalanced_keys,
+    unlocated,
     untranslated_labels,
 )
 from myinvestor.cli_common import FormatOpt, app, build_client, err, iso_moment, now_local
@@ -40,8 +41,9 @@ TITLES = {
     Grouping.product: "producto",
     Grouping.account: "cuenta",
 }
-# Pension-plan sheets only carry an asset type and a category: other groupings skip that request.
-PLAN_SHEET_GROUPINGS = frozenset({Grouping.asset, Grouping.category})
+# Pension-plan sheets carry an asset type, a category and a name (the region comes from the last two):
+# other groupings skip that request.
+PLAN_SHEET_GROUPINGS = frozenset({Grouping.asset, Grouping.geo, Grouping.category})
 
 
 def fund_sheets(client: MyInvestorClient, securities: list[SecuritiesAccount]) -> dict[str, FundSheet]:
@@ -88,6 +90,12 @@ def _report_untranslated(labels: list[str]) -> None:
         err.print(f"[dim]Tipos de activo sin traducir (van a sin_clasificar): {names}.[/dim]")
 
 
+def _report_unlocated(names: list[str]) -> None:
+    if names:
+        listed = ", ".join(f"«{escape(name)}»" for name in names)
+        err.print(f"[dim]Sin zona conocida (van a sin_clasificar): {listed}.[/dim]")
+
+
 def _report_untargeted(keys: list[str]) -> None:
     if keys:
         names = ", ".join(f"«{escape(k)}»" for k in keys)
@@ -117,7 +125,9 @@ def allocation(
     `ter` es la media ponderada por valor de las posiciones con TER conocido (los fondos); la fila
     `total` lleva el de toda la cartera. Con `--by asset` la clave es una clase canónica (`renta_variable`,
     `renta_fija`, `monetario`, `mixto`, `materias_primas`…) y `origen`, las etiquetas de la API de las
-    que sale. Lo que no tiene clasificación va a `sin_clasificar`. Con
+    que sale. Con `--by geo`, `origen` dice qué decidió la zona (`geoZone`, `nombre: S&P 500`,
+    `categoría: GLOBAL`, `ISIN: US`); las materias primas y el efectivo van a `no_aplica`. Lo que no
+    tiene clasificación va a `sin_clasificar`. Con
     `--target`, `objetivo_pct`, `desviacion_pct` y `aportar`: cuánto aportar a cada clave para llegar
     al objetivo sin vender. En JSON/CSV/TSV cada fila lleva además `consultado_en`.
     """
@@ -127,6 +137,8 @@ def allocation(
         holdings = collect(client, by, include_cash=include_cash)
     if by is Grouping.asset:
         _report_untranslated(untranslated_labels(holdings))
+    if by is Grouping.geo:
+        _report_unlocated(unlocated(holdings))
     rows = group(holdings, by)
     total = total_row(holdings, by, TOTAL.upper() if fmt is OutputFormat.table else TOTAL)
     if targets is not None:
