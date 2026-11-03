@@ -12,10 +12,12 @@ from myinvestor.cli_common import FormatOpt, TerminalSignatureUI, app, build_cli
 from myinvestor.client import MyInvestorClient
 from myinvestor.config import FREE_FLOWS_DAYS
 from myinvestor.errors import InputError
-from myinvestor.models import CashAccount
-from myinvestor.output import OutputFormat, render
+from myinvestor.models import CashAccount, Flow, Ownership, stable_ids
+from myinvestor.output import OutputFormat, print_json, render
 
 DEFAULT_MOVEMENT_DAYS = 30
+# `movements` in a table keeps these columns; JSON and CSV export every field of the row.
+MOVEMENT_TABLE_COLUMNS = ("fecha", "valor_fecha", "cuenta", "tipo", "concepto", "importe", "saldo", "ref")
 
 AccountOpt = Annotated[
     list[str] | None,
@@ -23,6 +25,15 @@ AccountOpt = Annotated[
         "--account",
         "-a",
         help="Cuenta: id, uuid, alias o últimos dígitos del IBAN. Repetible; por defecto todas.",
+    ),
+]
+
+
+OwnerOpt = Annotated[
+    Ownership | None,
+    typer.Option(
+        "--owner",
+        help="Filtrar cuentas: me (soy titular), junior (cuenta de un menor) u other (el resto).",
     ),
 ]
 
@@ -46,6 +57,10 @@ def match_cash_accounts(accounts: list[CashAccount], refs: list[str] | None) -> 
         if hits[0] not in chosen:
             chosen.append(hits[0])
     return chosen
+
+
+def filter_owner(accounts: list[CashAccount], owner: Ownership | None) -> list[CashAccount]:
+    return accounts if owner is None else [a for a in accounts if a.ownership is owner]
 
 
 def _total_row(label: str, **values: Any) -> dict[str, Any]:
@@ -110,23 +125,35 @@ def position(fmt: FormatOpt = OutputFormat.table) -> None:
 
 
 @app.command()
-def accounts(fmt: FormatOpt = OutputFormat.table) -> None:
-    """Cuentas de efectivo con su saldo disponible y retenido."""
+def accounts(owner: OwnerOpt = None, fmt: FormatOpt = OutputFormat.table) -> None:
+    """Cuentas de efectivo con su tipo, tu rol, el titular y el saldo disponible y retenido.
+
+    En JSON añade `titulares` (nombre, rol y si eres tú; nunca el DNI).
+    """
     with build_client() as client:
-        rows = [
-            {
-                "id": a.account_id,
-                "uuid": a.account_uuid,
-                "alias": a.alias,
-                "iban": a.iban,
-                "estado": a.status,
-                "disponible": a.enabled_balance,
-                "retenido": a.withheld_balance,
-                "saldo": a.balance,
-            }
-            for a in client.cash_accounts()
-        ]
+        chosen = filter_owner(client.cash_accounts(), owner)
+    rows = [_account_row(a, with_holders=fmt is OutputFormat.json) for a in chosen]
     render(rows, fmt, title="Cuentas")
+
+
+def _account_row(a: CashAccount, *, with_holders: bool) -> dict[str, Any]:
+    main = a.main_holder
+    row: dict[str, Any] = {
+        "id": a.account_id,
+        "uuid": a.account_uuid,
+        "alias": a.alias,
+        "iban": a.iban,
+        "tipo": a.account_type,
+        "rol": a.my_role,
+        "titular": main.full_name if main else None,
+        "estado": a.status,
+        "disponible": a.enabled_balance,
+        "retenido": a.withheld_balance,
+        "saldo": a.balance,
+    }
+    if with_holders:
+        row["titulares"] = [{"nombre": h.full_name, "rol": h.participant_type, "yo": h.me} for h in a.holders]
+    return row
 
 
 def _range(date_from: str | None, date_to: str | None, days: int | None) -> tuple[date, date]:
@@ -151,6 +178,15 @@ def movements(
     oldest_first: Annotated[
         bool, typer.Option(help="Orden cronológico (por defecto, lo más reciente primero).")
     ] = False,
+    owner: OwnerOpt = None,
+    movement_id: Annotated[
+        str | None,
+        typer.Option(
+            "--id",
+            help="Mostrar solo el movimiento con este id (columna `id`). Se busca en el rango de "
+            f"--from/--to/--days (por defecto, los últimos {DEFAULT_MOVEMENT_DAYS} días).",
+        ),
+    ] = None,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
     """Movimientos de las cuentas de efectivo.
@@ -162,12 +198,35 @@ def movements(
     if (date.today() - start).days > FREE_FLOWS_DAYS:
         err.print(f"[dim]Rango de más de {FREE_FLOWS_DAYS} días: puede que haya que aprobarlo en la app.[/dim]")
     with build_client() as client:
-        rows = _movement_rows(client, match_cash_accounts(client.cash_accounts(), account), start, end)
+        chosen = filter_owner(match_cash_accounts(client.cash_accounts(), account), owner)
+        if movement_id:
+            chosen = [a for a in chosen if movement_id.startswith(f"{a.account_uuid}:")] or chosen
+        rows = _movement_rows(client, chosen, start, end)
     if query:
         needle = query.lower()
         rows = [r for r in rows if needle in f"{r['concepto'] or ''} {r['tipo'] or ''}".lower()]
-    rows.sort(key=lambda r: (r["fecha"], r["ref"] or ""), reverse=not oldest_first)
+    if movement_id:
+        _show_movement(rows, movement_id, start, end, fmt)
+        return
+    rows.sort(key=lambda r: (r["fecha"], r["ref"] or "", r["id"]), reverse=not oldest_first)
+    if fmt is OutputFormat.table:
+        rows = [{c: r[c] for c in MOVEMENT_TABLE_COLUMNS} for r in rows]
     render(rows, fmt, title=f"Movimientos {start} → {end}")
+
+
+def _show_movement(rows: list[dict[str, Any]], movement_id: str, start: date, end: date, fmt: OutputFormat) -> None:
+    row = next((r for r in rows if r["id"] == movement_id), None)
+    if row is None:
+        raise InputError(
+            f"No hay ningún movimiento con id {movement_id!r} entre {start} y {end}. "
+            "Si es de otra fecha, indica el rango con --from/--to o --days."
+        )
+    if fmt is OutputFormat.json:
+        print_json(row)
+    elif fmt is OutputFormat.csv:
+        render([row], fmt)
+    else:
+        render([{"campo": k, "valor": v} for k, v in row.items()], fmt, title=f"Movimiento {movement_id}")
 
 
 def _movement_rows(client: MyInvestorClient, chosen: list[CashAccount], start: date, end: date) -> list[dict[str, Any]]:
@@ -177,20 +236,34 @@ def _movement_rows(client: MyInvestorClient, chosen: list[CashAccount], start: d
         if isinstance(ui, TerminalSignatureUI):
             ui.context = f"movimientos de {acc.alias or acc.account_id} desde {start}"
         statement = client.statement(acc.account_uuid, start, end)
-        for f in statement.flows:
-            rows.append(
-                {
-                    "fecha": f.operation_date.isoformat(),
-                    "valor_fecha": f.value_date.isoformat() if f.value_date else None,
-                    "cuenta": acc.alias or acc.account_id,
-                    "tipo": f.operation_type,
-                    "concepto": f.concept,
-                    "importe": f.amount,
-                    "saldo": f.total_balance,
-                    "ref": f.reference,
-                }
-            )
+        iban = acc.iban or statement.iban
+        ids = stable_ids(acc.account_uuid, statement.flows)
+        rows.extend(_movement_row(acc, iban, f, i) for f, i in zip(statement.flows, ids, strict=True))
     return rows
+
+
+def _movement_row(acc: CashAccount, iban: str | None, f: Flow, movement_id: str) -> dict[str, Any]:
+    return {
+        "id": movement_id,
+        "fecha": f.operation_date.isoformat(),
+        "valor_fecha": f.value_date.isoformat() if f.value_date else None,
+        "cuenta": acc.alias or acc.account_id,
+        "cuenta_id": acc.account_id,
+        "cuenta_uuid": acc.account_uuid,
+        "iban": iban,
+        "sentido": f.flow_type,
+        "tipo": f.operation_type,
+        "clase": f.operation_class,
+        "concepto": f.concept,
+        "importe": f.amount,
+        "saldo": f.total_balance,
+        "origen": f.operation_origin_label,
+        "destino": f.operation_target_label,
+        "contraparte": f.counterparty,
+        "ref": f.reference,
+        "operacion_ref": f.operation_ref,
+        "fichero_ref": f.file_ref,
+    }
 
 
 @app.command()

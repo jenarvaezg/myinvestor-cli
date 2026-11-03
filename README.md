@@ -35,8 +35,9 @@ myinvestor logout [--forget-device]
 
 ```bash
 myinvestor position                               # efectivo + cuentas de valores + planes, con total
-myinvestor accounts                               # cuentas de efectivo: disponible, retenido, saldo
-myinvestor movements [-a "Mi cuenta"] [--from 2026-10-01 --to 2026-10-31 | --days 60] [-s nómina] [--oldest-first]
+myinvestor accounts [--owner me|junior|other]     # cuentas de efectivo: tipo, tu rol, titular, disponible, retenido, saldo
+myinvestor movements [-a "Mi cuenta"] [--from 2026-10-01 --to 2026-10-31 | --days 60] [-s nómina] [--oldest-first] [--owner me|junior|other]
+myinvestor movements --id <id> [--from … | --days …]   # un solo movimiento, con todos sus campos
 myinvestor holds                                  # saldo retenido (p. ej. por órdenes en curso)
 myinvestor balance-history [--from 2026-01-01]    # saldo diario total del efectivo
 
@@ -52,6 +53,46 @@ myinvestor raw /cperf-server/api/v2/cash-accounts/self [-p clave=valor]   # GET 
 ```
 
 Todas las órdenes de listado aceptan `-f table|json|csv`. En JSON y CSV los importes van sin formatear (`-12.5`); en la tabla, en formato español (`-12,50 €`).
+
+### Movimientos: campos e id
+
+En la tabla, `movements` muestra `fecha`, `valor_fecha`, `cuenta`, `tipo`, `concepto`, `importe`, `saldo` y `ref`. En JSON y CSV saca además:
+
+| Campo | Origen en la API | Notas |
+|---|---|---|
+| `id` | — | id estable del movimiento (ver abajo) |
+| `cuenta_id`, `cuenta_uuid`, `iban` | `accountId`, `accountUuid`, `iban` de la cuenta (o del extracto) | el alias (`cuenta`) lo puede cambiar el usuario: no sirve como clave |
+| `sentido` | `flowType` | `IN` / `OUT` |
+| `clase` | `operationClass` | |
+| `origen`, `destino` | `operationOriginLabel`, `operationTargetLabel` | tal cual vienen; en un «CARGO POR TRANSFERENCIA» `destino` es el beneficiario |
+| `contraparte` | — | `destino` en cargos y `origen` en abonos; `null` si viene vacío (en los SEPA entrantes muchas veces solo hay concepto) |
+| `operacion_ref` | `operationRef` | campo de ancho fijo compartido por el cargo y el abono de una misma transferencia; se exporta sin interpretar |
+| `fichero_ref` | `fileRef` | |
+
+Lo que la API no trae sale como `null` (vacío en CSV); el CLI no rellena nada por su cuenta.
+
+**`id`**: no cambia entre ejecuciones ni entre rangos de fechas, así que sirve para saber qué movimientos son nuevos desde la última vez.
+
+- Con `reference` (el caso normal): `{cuenta_uuid}:{reference}`. `reference` es un contador **por cuenta** (se repite entre cuentas), por eso va con el uuid delante.
+- Sin `reference`: `{cuenta_uuid}:h` + los 16 primeros caracteres hexadecimales del sha256 de `cuenta_uuid|fecha|valor_fecha|importe|concepto|tipo|operacion_ref` (sin el saldo).
+- Si dos movimientos dan el mismo id (idénticos en esos campos), el segundo lleva `#2`, el tercero `#3`… Se numeran por el saldo y el resto de campos, no por la posición en la lista, así que el orden de la respuesta o el rango pedido no los cambia. Limitación: si más tarde se apunta otro movimiento idéntico el mismo día, la numeración de ese grupo puede cambiar; y se asume que la API filtra `dateFrom`/`dateTo` por fecha de operación (un rango incluye o no el día entero).
+- `movements --id ID` busca el movimiento en el rango de `--from`/`--to`/`--days` (por defecto, los últimos 30 días): para uno antiguo, pasa un rango que lo incluya.
+
+Las órdenes (`orders`) usan como `ref` el `reference` de MyInvestor, que según lo observado es único (no se repite entre cuentas), y las aportaciones periódicas (`contributions`) su `contributionId` como `id`: ambos sirven tal cual como clave.
+
+### Cuentas: tipo, rol y titulares
+
+`accounts` muestra `tipo` (`accountType`), `rol` (el `participantType` del titular que eres tú) y `titular` (el menor en una cuenta junior; si no, el `OWNER`). En JSON añade `titulares: [{"nombre", "rol", "yo"}]`. El DNI de los titulares (`documentNumber`) no se lee ni se exporta nunca.
+
+| Valor | Significado |
+|---|---|
+| `accountType: CASH_ACCOUNT` | cuenta de efectivo |
+| `accountType: CASH_PORTFOLIO` | efectivo asociado a una cartera |
+| `participantType: OWNER` | titular (cuentas propias y `CASH_PORTFOLIO`) |
+| `participantType: REPRESENTATIVE` | representante: los padres en la cuenta de un menor |
+| `participantType: JUNIOR` | el menor en una cuenta junior |
+
+`--owner` (en `accounts` y `movements`) filtra por cuenta: `me` si eres `OWNER`, `junior` si la cuenta tiene un titular `JUNIOR` y `other` para el resto.
 
 ### Sin escritorio (cron, Linux)
 
@@ -117,8 +158,8 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | Método | Ruta | Notas |
 |---|---|---|
 | GET | `/cperf-server/api/v3/customers/self` | perfil |
-| GET | `/cperf-server/api/v2/cash-accounts/self` | `accountId`, `accountUuid`, `alias`, `iban`, `enabledBalance`, `withheldBalance` |
-| GET | `/account/api/v3/account/{accountUuid}/flows?dateFrom&dateTo` | `{flowList, iban, startBalance, endBalance}`; más de ~90 días → `202` + firma INAPP |
+| GET | `/cperf-server/api/v2/cash-accounts/self` | `accountId`, `accountUuid`, `alias`, `iban`, `accountType`, `enabledBalance`, `withheldBalance`, `holders` (`name`, `surname1`, `surname2`, `documentNumber`, `me`, `participantType`) |
+| GET | `/account/api/v3/account/{accountUuid}/flows?dateFrom&dateTo` | `{flowList, iban, startBalance, endBalance}`; cada flow: `amount, concept, currency, fileRef, flowType, isMigrated, operationClass, operationDate, operationOriginLabel, operationRef, operationTargetLabel, operationType, reference, totalBalance, valueDate`; más de ~90 días → `202` + firma INAPP |
 | GET | `/account/api/v3/account/{accountUuid}/holds` | retenciones |
 | GET | `/cperf-server/api/v2/cash-accounts/historical-balance?accountTypes=CASH_ACCOUNT` | `[{date, balance}]` |
 | GET | `/cperf-server/api/v2/securities-accounts/self-basic` | ids de cuentas de valores |

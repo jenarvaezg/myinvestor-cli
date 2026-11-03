@@ -8,7 +8,11 @@ Unknown fields are ignored: the API adds fields often and the CLI only needs a s
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+from collections import defaultdict
+from collections.abc import Sequence
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -25,9 +29,35 @@ class _Model(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="ignore", frozen=True)
 
 
+# Known `participantType` values of a cash-account holder.
+OWNER = "OWNER"  # the account holder (own accounts and CASH_PORTFOLIO)
+REPRESENTATIVE = "REPRESENTATIVE"  # a parent on a minor's account
+JUNIOR = "JUNIOR"  # the minor on a junior account
+
+# Characters of the sha256 hex digest kept in the id of a movement without `reference`.
+FLOW_HASH_LENGTH = 16
+
+
+class Ownership(StrEnum):
+    """Whose a cash account is, from the logged-in user's point of view."""
+
+    me = "me"  # I am an OWNER of it
+    junior = "junior"  # a minor's account (it has a JUNIOR holder)
+    other = "other"  # anything else (e.g. I only represent or am authorised on it)
+
+
 class Holder(_Model):
+    """A holder of a cash account. The API also sends `documentNumber` (the ID card): never parsed."""
+
     me: bool = False
     participant_type: str | None = None
+    name: str | None = None
+    surname1: str | None = None
+    surname2: str | None = None
+
+    @property
+    def full_name(self) -> str | None:
+        return " ".join(p for p in (self.name, self.surname1, self.surname2) if p) or None
 
 
 class CashAccount(_Model):
@@ -46,6 +76,28 @@ class CashAccount(_Model):
     def balance(self) -> Decimal:
         return self.enabled_balance + self.withheld_balance
 
+    @property
+    def my_role(self) -> str | None:
+        """`participantType` of the logged-in user on this account."""
+        return next((h.participant_type for h in self.holders if h.me), None)
+
+    @property
+    def main_holder(self) -> Holder | None:
+        """Whose money it is: the minor on a junior account, else the OWNER (me first if joint)."""
+        for kind in (JUNIOR, OWNER):
+            hits = sorted((h for h in self.holders if h.participant_type == kind), key=lambda h: not h.me)
+            if hits:
+                return hits[0]
+        return None
+
+    @property
+    def ownership(self) -> Ownership:
+        if any(h.participant_type == JUNIOR for h in self.holders):
+            return Ownership.junior
+        if any(h.me and h.participant_type == OWNER for h in self.holders):
+            return Ownership.me
+        return Ownership.other
+
 
 class Flow(_Model):
     """A cash-account movement. `amount` is signed: charges are negative."""
@@ -59,11 +111,83 @@ class Flow(_Model):
     concept: str | None = None
     operation_type: str | None = None
     total_balance: Decimal | None = None
+    operation_class: str | None = None
     operation_origin_label: str | None = None
     operation_target_label: str | None = None
-    operation_ref: str | None = None
+    operation_ref: str | None = None  # fixed-width; shared by both legs of a transfer
+    file_ref: str | None = None
+    is_migrated: bool | None = None
 
     _days = field_validator("operation_date", "value_date", mode="before")(_day)
+
+    @property
+    def outgoing(self) -> bool:
+        return self.flow_type == "OUT" if self.flow_type else self.amount < 0
+
+    @property
+    def counterparty(self) -> str | None:
+        """The payee on charges and the payer on credits, when the API labels them."""
+        label = self.operation_target_label if self.outgoing else self.operation_origin_label
+        return (label or "").strip() or None
+
+    def stable_id(self, account_uuid: str) -> str:
+        """Id of this movement, the same on every run and date range (before de-duplication, see `stable_ids`).
+
+        `reference` is a per-account counter, so it is qualified with the account. Without it, a hash of
+        the fields that describe the movement (not the running balance, which is not part of it).
+        """
+        if self.reference:
+            return f"{account_uuid}:{self.reference}"
+        fields = (
+            account_uuid,
+            self.operation_date.isoformat(),
+            self.value_date.isoformat() if self.value_date else "",
+            _canonical(self.amount),
+            self.concept or "",
+            self.operation_type or "",
+            self.operation_ref or "",
+        )
+        digest = hashlib.sha256("|".join(fields).encode()).hexdigest()
+        return f"{account_uuid}:h{digest[:FLOW_HASH_LENGTH]}"
+
+    def _tiebreak(self) -> tuple[str, ...]:
+        """Remaining fields, to number identical movements without depending on the list order."""
+        return tuple(
+            "" if v is None else str(v)
+            for v in (
+                self.total_balance,
+                self.file_ref,
+                self.flow_type,
+                self.operation_class,
+                self.operation_origin_label,
+                self.operation_target_label,
+                self.currency,
+                self.is_migrated,
+            )
+        )
+
+
+def _canonical(amount: Decimal) -> str:
+    """`-12.50` and `-12.5` are the same amount."""
+    return format(amount.normalize(), "f")
+
+
+def stable_ids(account_uuid: str, flows: Sequence[Flow]) -> list[str]:
+    """`Flow.stable_id` of each flow, with `#2`, `#3`… on movements that would otherwise share an id.
+
+    Identical movements are numbered by the fields outside the id (running balance first), so the
+    result does not depend on the order of `flows`. Assuming the API filters by operation date, a range
+    covers whole days, so every range that includes the day sees the whole group; only a new identical
+    movement booked later the same day can renumber its group.
+    """
+    groups: defaultdict[str, list[int]] = defaultdict(list)
+    for i, f in enumerate(flows):
+        groups[f.stable_id(account_uuid)].append(i)
+    ids = [""] * len(flows)
+    for base, members in groups.items():
+        for n, i in enumerate(sorted(members, key=lambda i: flows[i]._tiebreak()), start=1):
+            ids[i] = base if n == 1 else f"{base}#{n}"
+    return ids
 
 
 class Hold(_Model):
