@@ -3,6 +3,8 @@
 API_BASE = "https://api.myinvestor.es"
 WEB_ORIGIN = "https://newapp.myinvestor.es"
 SIGNIN_URL = f"{WEB_ORIGIN}/auth/signin"
+# Public feature flags of the web (`/flags/settings.json`: maintenance / read-only mode, minimum versions).
+CONFIG_ORIGIN = "https://config.myinvestor.es"
 
 # Keycloak endpoints (see `myinvestor.auth`); the request log tags them by path.
 LOGIN_PATH = "/login/api/v2/auth/token"

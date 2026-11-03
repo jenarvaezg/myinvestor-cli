@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 from functools import partial
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated
 
@@ -51,6 +52,19 @@ class _GlobalOptions:
 
 
 options = _GlobalOptions()
+
+
+def package_version() -> str:
+    try:
+        return version("myinvestor")
+    except PackageNotFoundError:
+        return "desconocida"
+
+
+def _show_version(value: bool) -> None:
+    if value:
+        print(f"myinvestor {package_version()}")
+        raise typer.Exit()
 
 
 @app.callback()
@@ -118,6 +132,10 @@ def _global_options(
             "Nunca se repiten login, refresh ni firmas.",
         ),
     ] = 0,
+    _version: Annotated[
+        bool,
+        typer.Option("--version", is_eager=True, callback=_show_version, help="Muestra la versión del CLI y sale."),
+    ] = False,
 ) -> None:
     set_wide(wide)
     if quiet and verbose:
