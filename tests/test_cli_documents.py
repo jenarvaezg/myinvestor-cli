@@ -14,8 +14,9 @@ from typer.testing import CliRunner
 
 from myinvestor import cli_common, documents
 from myinvestor.auth import REFRESH_PATH
-from myinvestor.cli import app, main
-from myinvestor.errors import EXIT_USAGE
+from myinvestor.cli import _fail, app, main
+from myinvestor.cli_errors import requested
+from myinvestor.errors import EXIT_USAGE, InputError
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
 from tests.conftest import API, CPERF, cash_account, make_jwt, ok, tokens
@@ -276,3 +277,36 @@ def test_xray_of_a_fund(mock_api: respx.MockRouter, tmp_path: Path, monkeypatch:
 def test_xray_needs_exactly_one_target(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     assert run_main(monkeypatch, capsys, "xray")[0] == EXIT_USAGE
     assert run_main(monkeypatch, capsys, "xray", "-a", "201", "--isin", "IE0000000001")[0] == EXIT_USAGE
+
+
+@pytest.mark.usefixtures("store", "lists")
+def test_long_error_stays_on_one_line_without_a_terminal(
+    mock_api: respx.MockRouter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Redirected stderr: a 200-character path never splits the message (#67)."""
+    mock_api.get(SIGNED).respond(200, content=PDF, headers=PDF_HEADERS)
+    folder = tmp_path / ("ruta-muy-larga-" * 14)
+    folder.mkdir()
+    target = folder / "mio.pdf"
+    target.write_bytes(b"mi copia")
+    assert len(str(target)) > 200
+
+    code, error = run_main(monkeypatch, capsys, "documents", "get", DOC_UUID, "-o", str(target))
+
+    assert code == EXIT_USAGE
+    assert error.count("\n") == 1 and error.endswith("\n")
+    assert str(target) in error and "ya existe" in error
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_fail_never_wraps_a_long_message(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], as_json: bool
+) -> None:
+    monkeypatch.setattr(requested, "json", as_json)
+    message = "/" + "carpeta/" * 40 + "mio.pdf ya existe: usa --force"
+
+    with pytest.raises(SystemExit):
+        _fail(InputError(message), "Error", message)
+
+    error = capsys.readouterr().err
+    assert error.count("\n") == 1 and message in (json.loads(error)["message"] if as_json else error)

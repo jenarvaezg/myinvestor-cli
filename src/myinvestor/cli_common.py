@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.console import Console
 from rich.markup import escape
 
 from myinvestor.auth import Authenticator, stored_password_relogin
@@ -22,7 +21,7 @@ from myinvestor.code_input import CodeSource, CodeSourcesUI, code_prompt, open_t
 from myinvestor.errors import InputError, SignatureError
 from myinvestor.http import build_http_client
 from myinvestor.json_envelope import configure as configure_envelope
-from myinvestor.output import OutputFormat, notices, set_wide
+from myinvestor.output import OutputFormat, StderrConsole, notices, set_wide
 from myinvestor.signature import (
     DEFAULT_APPROVAL_TIMEOUT,
     OTP_METHODS,
@@ -42,7 +41,7 @@ app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 err = notices  # informative messages: silenced by --quiet
-fatal = Console(stderr=True)  # errors: shown even with --quiet
+fatal = StderrConsole()  # errors: shown even with --quiet
 OTP_ENV = "MYINVESTOR_OTP"
 
 FormatOpt = Annotated[
