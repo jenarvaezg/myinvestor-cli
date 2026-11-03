@@ -21,6 +21,7 @@ from myinvestor.client import MyInvestorClient, ensure_session
 from myinvestor.code_input import CodeSource, CodeSourcesUI, code_prompt, open_tty, preset_code
 from myinvestor.errors import InputError, SignatureError
 from myinvestor.http import build_http_client
+from myinvestor.json_envelope import configure as configure_envelope
 from myinvestor.output import OutputFormat, notices, set_wide
 from myinvestor.signature import (
     DEFAULT_APPROVAL_TIMEOUT,
@@ -79,6 +80,7 @@ def _show_version(value: bool) -> None:
 
 @app.callback()
 def _global_options(
+    ctx: typer.Context,
     store: Annotated[
         StoreKind,
         typer.Option(
@@ -143,12 +145,27 @@ def _global_options(
             "Nunca se repiten login, refresh ni firmas.",
         ),
     ] = 0,
+    json_envelope: Annotated[
+        bool,
+        typer.Option(
+            "--json-envelope",
+            envvar="MYINVESTOR_JSON_ENVELOPE",
+            help='Con -f json, envolver la salida en {"schema": "myinvestor.<orden>/1", "cli_version", "as_of", '
+            '"data"} (ver docs/json.md y `myinvestor schema`). Sin esto, la salida de siempre.',
+        ),
+    ] = False,
     _version: Annotated[
         bool,
         typer.Option("--version", is_eager=True, callback=_show_version, help="Muestra la versión del CLI y sale."),
     ] = False,
 ) -> None:
     set_wide(wide)
+    configure_envelope(
+        enabled=json_envelope,
+        command=ctx.invoked_subcommand or "",
+        cli_version=package_version(),
+        as_of=iso_moment(now_local()),
+    )
     if quiet and verbose:
         raise InputError("Usa --quiet o --verbose, no ambos.")
     configure_verbosity(quiet=quiet, verbose=verbose)

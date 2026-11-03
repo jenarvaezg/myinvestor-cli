@@ -89,6 +89,7 @@ myinvestor raw /cperf-server/api/v2/cash-accounts/self [-p clave=valor]   # GET 
 
 myinvestor state show|mark|reset                  # estado local de --new
 myinvestor export DIR [--since 2024-01-01] [--format csv|json] [--allow-partial]   # histórico local incremental
+myinvestor schema [movements] [--envelope]        # JSON Schema de la salida -f json de una orden
 ```
 
 ### Formatos de salida
@@ -97,6 +98,8 @@ Todas las órdenes de listado aceptan `-f table|json|csv|tsv`:
 
 - **`table`** (por defecto): importes en formato español (`-12,50 €`). Las fechas y los importes nunca se cortan ni se parten; los textos largos (conceptos, nombres) se parten en varias líneas para caber en la terminal. Si ni así cabe, la tabla se sale del ancho antes que recortar un dato. Se respeta `COLUMNS`, y si la salida no es una terminal (cron, una tubería, el `!` de Claude Code, un agente) la tabla ocupa lo que necesite en vez de limitarse a 80 columnas. Con `--wide` (o `MYINVESTOR_WIDE=1`) cada fila va en una sola línea: `myinvestor --wide movements | less -S`.
 - **`json`**: los importes son **números** JSON, no texto (`"importe": -12.50`), escritos con el valor exacto del `Decimal`, sin pasar por coma flotante. Importes y saldos (`importe`, `saldo`, `disponible`, `retenido`, `valor`, `invertido`, `ganancia`, `total`, las columnas de `income` y `disponible_tras`/`falta` de `upcoming`) van redondeados a 2 decimales; participaciones, VL, coste medio y porcentajes conservan la precisión de la API. `raw` y `fund` también devuelven números. En Python, `json.loads(texto, parse_float=Decimal)` los recupera sin pérdida.
+
+  **Contrato:** las claves y tipos de cada orden, cuáles son estables y qué cuenta como cambio incompatible están en [docs/json.md](docs/json.md); los cambios, en el [CHANGELOG](CHANGELOG.md). Con la opción global `--json-envelope` (o `MYINVESTOR_JSON_ENVELOPE=1`) la salida va envuelta con su versión de esquema: `{"schema": "myinvestor.movements/1", "cli_version": "0.2.0", "as_of": "…", "data": [...]}`, para que un script detecte un cambio en vez de fallar en silencio. Sin la opción, la salida es la de siempre. `myinvestor schema ORDEN` da el JSON Schema.
 - **`csv`**: los mismos valores sin formatear (`-12.50`).
 - **`tsv`**: como CSV pero separado por tabuladores, sin comillas y una línea por fila (tabuladores y saltos de línea dentro de un valor se cambian por espacios); cómodo para logs, `cut` o `awk`.
 
@@ -352,7 +355,7 @@ Nunca incluye tokens ni la contraseña, y el DNI/NIE va enmascarado. `logged_in`
 | `version` | la versión con la que se presenta el CLI (`x-myinvestor-app`) frente a la de la web, que se lee de su script principal o de los que este importa (primero `api-*.js`; como mucho 5, de hasta 8 MB); `WARN` si no coinciden, si está por debajo de la mínima de `settings.json` o si no se puede leer |
 | `mantenimiento` | `config.myinvestor.es/flags/settings.json`, el mismo aviso que consulta la web: `FAIL` en mantenimiento, `WARN` en modo solo lectura |
 
-Con `--offline` solo se miran `store` y `sesion`; el resto sale como `WARN` «no comprobado». Con `-f json`: `{"ok": false, "cli_version": "0.1.0", "checks": [{"check": "red", "status": "FAIL", "message": "…", "data": {"http_status": 403, "latency_ms": 85}}, …]}`. Las comprobaciones de red no reintentan y esperan 10 s como mucho; `-v` las muestra.
+Con `--offline` solo se miran `store` y `sesion`; el resto sale como `WARN` «no comprobado». Con `-f json`: `{"ok": false, "cli_version": "0.2.0", "checks": [{"check": "red", "status": "FAIL", "message": "…", "data": {"http_status": 403, "latency_ms": 85}}, …]}`. Las comprobaciones de red no reintentan y esperan 10 s como mucho; `-v` las muestra.
 
 #### Códigos de salida
 
@@ -451,7 +454,7 @@ Con `--format csv` (por defecto) son `.csv` con cabecera; con `--format json`, *
 **`manifest.json`** se reescribe (atómicamente) en cada ejecución:
 
 ```json
-{"version": 1, "as_of": "2026-11-03T09:00:12+01:00", "cli_version": "0.1.0", "format": "csv",
+{"version": 1, "as_of": "2026-11-03T09:00:12+01:00", "cli_version": "0.2.0", "format": "csv",
  "files": {"movements": {"fichero": "movements.csv", "filas": 1520}, …},
  "accounts": {"<cuenta_uuid>": {"cuenta": "Mi cuenta", "cuenta_id": "…",
    "cubierto": [{"desde": "2010-01-01", "hasta": "2026-11-03"}],
@@ -472,6 +475,7 @@ Opciones globales (van antes de la orden: `myinvestor -q position -f json`):
 - `-q`/`--quiet` (o `MYINVESTOR_QUIET=1`): en stderr solo los errores; se silencian los avisos («Rango de más de 90 días…», «Sin resultados», «Sesión iniciada…»). El código de salida sigue indicando si ha ido bien. Pensado para cron: el log diario se queda con el JSON y los fallos.
 - `-v`/`--verbose`: una línea por petición en stderr, `GET /ruta 200 (123 ms)`, marcando `[refresh]`, `[login]`, `[firma]` (endpoints de segundo factor) o `[firmada]` (consulta repetida tras aprobarla), y cuándo se renueva la sesión o se hace re-login. **Nunca** se escriben la query, las cabeceras (`authorization`, `x-signature-id`…), los cuerpos de login/refresh, tokens, contraseñas ni códigos; los ids de firma se enmascaran (`/signature/api/v3/signature/*`). Las rutas sí llevan ids de cuenta: revísalo antes de pegarlo en un issue.
 - `--min-interval SEG` (o `MYINVESTOR_MIN_INTERVAL`, por defecto 0): espera mínima entre peticiones del mismo proceso, para no despertar al WAF con muchas cuentas.
+- `--json-envelope` (o `MYINVESTOR_JSON_ENVELOPE=1`): con `-f json`, la salida envuelta con su versión de esquema (ver [docs/json.md](docs/json.md)).
 - `--retry-blocked N` (o `MYINVESTOR_RETRY_BLOCKED`, por defecto 0): si Imperva bloquea una consulta `GET`, espera 30 s, 2 min, 5 min (y 5 min las siguientes) y la repite hasta N veces. Login, refresh, firmas y cualquier `POST` no se repiten nunca.
 
 stdout solo lleva el resultado: con `-f json` y sin datos sale `[]`, con `-f csv` o `-f tsv` sale vacío, y en ninguno se escribe «Sin resultados». Sin terminal en stderr o con `NO_COLOR` no hay colores ni marcado (lo hace rich).
@@ -575,3 +579,5 @@ uv run ruff check . && uv run ruff format --check .
 ```
 
 Los tests usan `respx` con datos sintéticos y bloquean la red; no se versiona ninguna respuesta real.
+
+`tests/test_json_contract.py` comprueba la salida `-f json` de cada orden contra la tabla de `src/myinvestor/json_contract.py`. Si cambias claves, actualiza la tabla (y sube la versión del esquema si el cambio es incompatible, ver [docs/json.md](docs/json.md)) y ejecuta `UPDATE_JSON_CONTRACT=1 uv run pytest tests/test_json_contract.py`, que regenera la referencia de `docs/json.md` y `tests/json_contract.lock.json` (nunca acepta un cambio incompatible en un esquema ya publicado).
