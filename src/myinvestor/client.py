@@ -18,6 +18,7 @@ import httpx
 
 from myinvestor import envelope
 from myinvestor.auth import Authenticator, Relogin
+from myinvestor.catalog import CatalogFilters, Domain, FilterKind
 from myinvestor.config import API_BASE
 from myinvestor.documents import Document, DocumentKind, TemporaryDocument, XrayTarget
 from myinvestor.errors import (
@@ -46,6 +47,7 @@ from myinvestor.models import (
     PensionAccount,
     PensionPlanPosition,
     PensionPlanSheet,
+    PensionPlanSummary,
     PensionTransfer,
     PositionPoint,
     Remuneration,
@@ -99,6 +101,13 @@ class Statement:
 @dataclass(frozen=True)
 class FundPage:
     funds: list[FundSummary]
+    total: int | None
+    last: bool
+
+
+@dataclass(frozen=True)
+class PensionPlanPage:
+    plans: list[PensionPlanSummary]
     total: int | None
     last: bool
 
@@ -466,20 +475,37 @@ class MyInvestorClient:
         return data if isinstance(data, dict) else {}
 
     def funds(
-        self, query: str | None = None, *, sort: str = "ter,asc", page: int = 0, limit: int = FUND_PAGE_SIZE
+        self,
+        query: str | None = None,
+        *,
+        sort: str = "ter,asc",
+        page: int = 0,
+        limit: int = FUND_PAGE_SIZE,
+        filters: CatalogFilters | None = None,
     ) -> FundPage:
-        """Fund catalog; `query` is the web's free-text box (`mainInputFilter`: name, ISIN…)."""
-        params: dict[str, Any] = {"page": page, "limit": limit, "sort": sort}
-        if query:
-            params["mainInputFilter"] = query
-        body = self.get(f"{CPERF}/v2/funds", params)
-        pagination = envelope.payload(body).get("pagination") or {}
-        rows = envelope.data(body) or []
-        return FundPage(
-            funds=[FundSummary.model_validate(r) for r in rows],
-            total=pagination.get("totalElements"),
-            last=bool(pagination.get("last", True)),
-        )
+        """Fund catalog; `query` is the web's free-text box (`mainInputFilter`: name, ISIN…). Pages from 0."""
+        body = self.get(f"{CPERF}/v2/funds", _catalog_params(query, sort, page, limit, filters))
+        rows, total, last = _catalog_page(body)
+        return FundPage(funds=[FundSummary.model_validate(r) for r in rows], total=total, last=last)
+
+    def pension_plan_catalog(
+        self,
+        query: str | None = None,
+        *,
+        sort: str = "ter,asc",
+        page: int = 1,
+        limit: int = FUND_PAGE_SIZE,
+        filters: CatalogFilters | None = None,
+    ) -> PensionPlanPage:
+        """Pension-plan catalog, like `funds` but its pages start at 1 (as the web asks for them)."""
+        body = self.get(f"{CPERF}/v2/pension-plans", _catalog_params(query, sort, page, limit, filters))
+        rows, total, last = _catalog_page(body)
+        return PensionPlanPage(plans=[PensionPlanSummary.model_validate(r) for r in rows], total=total, last=last)
+
+    def catalog_filter(self, domain: Domain, kind: FilterKind) -> list[str]:
+        """Valid values of a searcher filter, spelled exactly as the API sends them (blanks included)."""
+        data = self.get_data(f"{CPERF}/v2/masters/{domain.value}/searcher/filters/{kind.path}")
+        return [v for v in data if isinstance(v, str)] if isinstance(data, list) else []
 
     # ---- documents (PDF) ----------------------------------------------------
 
@@ -515,6 +541,22 @@ def _days(date_from: date, date_to: date) -> dict[str, str]:
     if date_from > date_to:
         raise ValueError("date_from > date_to")
     return {"initDate": date_from.isoformat(), "endDate": date_to.isoformat()}
+
+
+def _catalog_params(
+    query: str | None, sort: str, page: int, limit: int, filters: CatalogFilters | None
+) -> dict[str, Any]:
+    """Without `query` nor filters, exactly `page`, `limit` and `sort`."""
+    params: dict[str, Any] = {"page": page, "limit": limit, "sort": sort}
+    if query:
+        params["mainInputFilter"] = query
+    return {**params, **(filters.params() if filters else {})}
+
+
+def _catalog_page(body: Any) -> tuple[list[Any], int | None, bool]:
+    """Rows, `totalElements` and whether it is the last page of a catalog response."""
+    pagination = envelope.payload(body).get("pagination") or {}
+    return envelope.data(body) or [], pagination.get("totalElements"), bool(pagination.get("last", True))
 
 
 def ensure_session(session: Session | None, *, can_relogin: bool = False) -> Session:

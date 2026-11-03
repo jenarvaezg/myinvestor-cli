@@ -260,6 +260,8 @@ Salida: lista de objetos.
 
 ### `funds` — `myinvestor.funds/1`
 
+Las mismas claves con cualquier filtro.
+
 Salida: lista de objetos.
 
 | Clave | Tipo | `null` | Estable | Notas |
@@ -273,6 +275,36 @@ Salida: lista de objetos.
 | `vl` | number (exacto) | sí | sí |  |
 | `ytd` | number (exacto) | sí | sí | rentabilidad en el año, en % |
 | `1a` | number (exacto) | sí | sí | rentabilidad a 1 año, en % |
+
+### `fund-filters` — `myinvestor.fund-filters/1`
+
+Las mismas claves con un filtro y con `--pension`.
+
+Salida: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `filtro` | string | no | sí | `categories`, `managers`, `currencies`, `asset-types`, `regions` o `types` |
+| `opcion` | string | no | sí | la opción de `funds` (o `pension-plans`) que lo usa: `--category`… |
+| `nombre` | string | no | sí | el valor que se pasa a la opción, sin espacios ni tabuladores alrededor |
+
+### `pension-plans` — `myinvestor.pension-plans/1`
+
+El catálogo de planes; las mismas claves con filtros.
+
+Salida: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `dgs` | string | sí | sí | código DGS del plan (`N1234`) |
+| `nombre` | string | sí | sí |  |
+| `gestora` | string | sí | sí |  |
+| `categoria` | string | sí | sí |  |
+| `ter` | number (exacto) | sí | sí | en % |
+| `ytd` | number (exacto) | sí | sí | rentabilidad en el año, en % |
+| `1a` | number (exacto) | sí | sí | rentabilidad anualizada a 1 año, en % |
+| `3a` | number (exacto) | sí | sí | rentabilidad anualizada a 3 años, en % |
+| `5a` | number (exacto) | sí | sí | rentabilidad anualizada a 5 años, en % |
 
 ### `feed` — `myinvestor.feed/1`
 

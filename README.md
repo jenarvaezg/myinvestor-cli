@@ -92,7 +92,9 @@ myinvestor upcoming [--days 14] [--owner me|junior|other]   # lo que viene: apor
 myinvestor snapshot [--save DIR] [--previous FILE] [--no-new] [--no-mark]   # todo lo anterior en un JSON, con el delta (aportado/mercado)
 myinvestor summary [--from-file FILE] [--previous FILE]   # la misma foto, en tablas
 myinvestor fund IE0032126645 [--full]             # ficha del fondo (o del plan: `fund N1234`)
-myinvestor funds "s&p 500" [--sort ter,asc] [-n 20] [--page 0]
+myinvestor funds "s&p 500" [--sort ter,asc] [-n 20] [--page 0] [--asset-type variable_income --currency usd --max-ter 0.3 --risk 5-6 …]
+myinvestor fund-filters [categories|managers|currencies|asset-types|regions|types] [--pension]   # valores válidos de los filtros
+myinvestor pension-plans ["indexado"] [--manager …] [--asset-type …] [--max-ter 0.5] [--risk 2-4] [--rating 4] [--sort ter,asc] [-n 20] [--page 1]   # catálogo de planes
 myinvestor feed [-n 20]                           # «Actividad» de la web
 myinvestor raw /cperf-server/api/v2/cash-accounts/self [-p clave=valor]   # GET arbitrario
 
@@ -399,6 +401,36 @@ La tabla muestra `fecha`, `cuenta`, `importe`, `beneficiario`, `concepto`, `ejec
 
 Las fechas que la API manda como texto vacío (`""`) salen como `null`. La tabla muestra `cuenta`, `periodo`, `fecha_pago`, `saldo_base`, `tipo_pct`, `tae_pct`, `bruto`, `retencion` y `neto`. Para el histórico de intereses cobrados, `income` suma los abonos de cada mes.
 
+### Buscador de fondos y planes: `funds`, `fund-filters` y `pension-plans`
+
+`funds` busca en el catálogo de fondos con los mismos filtros que «Explorar» en la web. Sin filtros la consulta es la de siempre (`page`, `limit`, `sort` y, con texto, `mainInputFilter`).
+
+| Opción | Parámetro de `/funds` | Valores |
+|---|---|---|
+| `--category` | `category` | categoría Morningstar (`fund-filters categories`) |
+| `--manager` | `manager` | gestora (`fund-filters managers`) |
+| `--currency` | `currency` | `EUR`, `USD`, `GBP`… |
+| `--asset-type` | `assetsType` | `variable_income`, `fixed_income`, `mixed`, `money_market`, `alternatives`, `others` |
+| `--region` | `region` | `global`, `europe`, `united_states`, `emergent_markets`… (`fund-filters regions`) |
+| `--type indexados\|activos` | `type` | `FONDOS_INDEXADOS` o `FONDOS_INVERSION` (también valen tal cual) |
+| `--min-ter`, `--max-ter` | `terMinValue`, `terTopValue` | TER en % (`0.3` es un 0,30 %) |
+| `--risk 5` o `--risk 3-6` | `riskMinValue`, `riskTopValue` | indicador de riesgo de 1 a 7; un nivel solo es el mínimo y el máximo |
+| `--rating` | `mstarRating` | estrellas Morningstar, de 1 a 5 |
+| `--esg` | `responsibleFund=true` | solo fondos sostenibles |
+| `--hedged` | `currencyHedging=true` | solo fondos con la divisa cubierta |
+
+Los códigos (`--currency`, `--asset-type`, `--region`) se pueden escribir en minúsculas y con guiones (`fixed-income`): se envían en mayúsculas con `_`. `--category` y `--manager` no distinguen mayúsculas ni los espacios de alrededor: el CLI pide la lista de valores (una petición más cada una) y envía el valor tal como lo escribe MyInvestor, que en algunas categorías lleva tabuladores delante (`"\t Japan Equity"`); si no está en la lista, falla con código 2 y sugiere el más parecido. Por ejemplo, fondos de renta variable en dólares con TER de hasta 0,30 % y riesgo 5 o 6:
+
+```bash
+myinvestor funds --asset-type variable_income --currency usd --max-ter 0.3 --risk 5-6
+```
+
+`fund-filters [FILTRO]` lista los valores válidos de cada filtro (`GET /cperf-server/api/v2/masters/funds/searcher/filters/{categories,managers,currencies,assets-type,regions,types}`), sin espacios alrededor y sin los `null` que manda la API, con la opción de `funds` que los usa (`filtro`, `opcion`, `nombre`). Sin `FILTRO`, todos (seis peticiones). Con `--pension`, los del buscador de planes (`masters/pension-plans/…`), que solo filtra por gestora y tipo de activo.
+
+No es `funds filters` porque `funds` recibe un texto libre: un grupo leería `myinvestor funds filters` (o cualquier búsqueda que coincidiera con una suborden) como suborden en vez de como búsqueda.
+
+`pension-plans [TEXTO]` es el catálogo de planes de pensiones (`GET /cperf-server/api/v2/pension-plans`): `dgs` (código del plan, el de `fund N1234`), `nombre`, `gestora`, `categoria`, `ter` y las rentabilidades anualizadas `ytd`, `1a`, `3a` y `5a` (en %, `null` si el plan es más joven). Filtra por `--manager` (de `fund-filters managers --pension`), `--asset-type`, `--min-ter`/`--max-ter`, `--risk` y `--rating`, como `funds`. Aquí las páginas empiezan en **1** (`--page 1`, como la web), no en 0 como en `funds`. `--sort` usa los campos de la API: `ter`, `name`, `dgsCode`, `managingEntity`, `riskRating`, `morningstarRating`, `annualizedProfitability.ytd`…
+
 ### Cuentas: tipo, rol, titulares y TAE
 
 `accounts` muestra `tipo` (`accountType`), `rol` (el `participantType` del titular que eres tú) y `titular` (el menor en una cuenta junior; si no, el `OWNER`). En JSON añade `titulares: [{"nombre", "rol", "yo"}]`. El DNI de los titulares (`documentNumber`) no se lee ni se exporta nunca.
@@ -630,6 +662,9 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | Orden | Peticiones |
 |---|---|
 | `balance-history`, `contributions`, `funds`, `feed`, `raw`, `status` | 1 |
+| `funds` con `--category` o `--manager` | 1 + 1 por cada una (la lista de valores) |
+| `fund-filters` | 1 por filtro: 6 sin argumento, 2 con `--pension` |
+| `pension-plans` | 1 (+ 1 con `--manager`) |
 | `position` | 3 + V |
 | `movements`, `holds` | 1 + C (`movements --new`: igual; `--since-id`: 1 + 1; `--details`: + 1 por cuenta con algún cargo de transferencia emitida) |
 | `export` | 4 + C + 2V + P; la primera vez (o con un hueco), + C del tramo antiguo y sus firmas |
@@ -722,8 +757,10 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/customers/self/documents/signedes/{documentUuid}` | el PDF tal cual (`application/pdf`, no JSON) |
 | GET | `/cperf-server/api/v2/cash-accounts/{accountId}/documents/summary` | extracto: `{id, fileName}`; el PDF, en `/cperf-server/api/v2/documents/temporary/{id}` |
 | GET | `/cperf-server/api/v2/documents/{securities,pension-plans}/{accountId}/x-ray` · `/documents/funds/{isin}/x-ray` | radiografía en PDF generada al momento; la web también conoce `/documents/broker/{accountId}/x-ray`, sin uso en la interfaz |
-| GET | `/cperf-server/api/v2/funds?page&limit&sort&mainInputFilter&…` | catálogo paginado; filtros `category`, `region`, `manager`, `assetsType`, `currency`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue`… |
+| GET | `/cperf-server/api/v2/funds?page&limit&sort&mainInputFilter&…` | catálogo paginado desde 0; filtros `category`, `region`, `manager`, `assetsType`, `currency`, `type`, `mstarRating`, `currencyHedging`, `responsibleFund`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue`… |
 | GET | `/cperf-server/api/v2/funds/{isin}` · `/prices/last` · `/compositions` · `/graphs/{type}` | ficha, último VL |
+| GET | `/cperf-server/api/v2/masters/{funds,pension-plans}/searcher/filters/{categories,managers,currencies,assets-type,regions}` · `/masters/funds/searcher/filters/types` | valores de los filtros del buscador: lista de textos (algunas categorías con espacios o tabuladores delante; `regions` incluye un `null`) |
+| GET | `/cperf-server/api/v2/pension-plans?page&limit&sort&mainInputFilter&…` | catálogo de planes, paginado **desde 1**: `{dgsCode, name, managingEntity, morningstarRating, currency, ter, category, annualizedProfitability, cumulativeProfitability, passedProfitability}`; filtros `manager`, `assetsType`, `mstarRating`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue` |
 | GET | `/feed/api/feed/self` | `text/event-stream` con un evento `data:{…}` |
 
 ### Servicio `/read-only/api/v1`
