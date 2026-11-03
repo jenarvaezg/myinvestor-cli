@@ -179,6 +179,7 @@ def _global_options(
 
 
 def get_store() -> SessionStore:
+    """Call it as `cli_common.get_store()` (never import the name): tests replace it in this one place."""
     return resolve_store(options.kind, options.path)
 
 

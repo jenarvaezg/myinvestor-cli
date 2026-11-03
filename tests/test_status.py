@@ -9,7 +9,7 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from myinvestor import cli_auth, cli_common
+from myinvestor import cli_common
 from myinvestor.cli import app
 from myinvestor.session import Session
 from myinvestor.session_info import SessionInfo, mask_customer_id
@@ -40,7 +40,6 @@ STATUS_KEYS = {
 def store(monkeypatch: pytest.MonkeyPatch, session: Session) -> MemorySessionStore:
     memory = MemorySessionStore(session)
     monkeypatch.setattr(cli_common, "get_store", lambda: memory)
-    monkeypatch.setattr(cli_auth, "get_store", lambda: memory)
     monkeypatch.setattr(cli_common, "stdin_is_tty", lambda: False)
     return memory
 

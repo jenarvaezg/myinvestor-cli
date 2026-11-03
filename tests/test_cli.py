@@ -62,7 +62,6 @@ runner = CliRunner()
 def store(monkeypatch: pytest.MonkeyPatch, session: Session) -> MemorySessionStore:
     memory = MemorySessionStore(session)
     monkeypatch.setattr(cli_common, "get_store", lambda: memory)
-    monkeypatch.setattr(cli_auth, "get_store", lambda: memory)
     return memory
 
 

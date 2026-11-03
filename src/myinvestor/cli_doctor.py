@@ -8,7 +8,8 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 
-from myinvestor.cli_common import FormatOpt, app, build_client, get_store, options, package_version
+from myinvestor import cli_common
+from myinvestor.cli_common import FormatOpt, app, build_client, options, package_version
 from myinvestor.doctor import Check, Level, has_failures, run_doctor
 from myinvestor.errors import EXIT_ERROR
 from myinvestor.http import build_http_client
@@ -52,7 +53,7 @@ def doctor(
     ] = False,
 ) -> None:
     """Diagnóstico: almacén, sesión, red e Imperva, API, reloj, versión de la web y mantenimiento."""
-    store = get_store()
+    store = cli_common.get_store()
     if offline:
         checks = run_doctor(store, http=None, client_factory=None)
     else:

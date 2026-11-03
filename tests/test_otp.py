@@ -44,7 +44,6 @@ MASKED = "+34 6** *** *12"
 def store(monkeypatch: pytest.MonkeyPatch) -> MemorySessionStore:
     memory = MemorySessionStore(Session(device_id=DEVICE))
     monkeypatch.setattr(cli_common, "get_store", lambda: memory)
-    monkeypatch.setattr(cli_auth, "get_store", lambda: memory)
     monkeypatch.setattr(cli_common, "stdin_is_tty", lambda: False)
     monkeypatch.setattr(cli_auth, "stdin_is_tty", lambda: False)
     return memory

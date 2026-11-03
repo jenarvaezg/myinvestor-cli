@@ -12,7 +12,7 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from myinvestor import cli_common, cli_doctor, web_info
+from myinvestor import cli_common, web_info
 from myinvestor.cli import app
 from myinvestor.client import MyInvestorClient
 from myinvestor.config import APP_VERSION
@@ -381,7 +381,6 @@ def test_run_doctor_skips_api_without_session(mock_api: respx.MockRouter, http: 
 def cli_store(monkeypatch: pytest.MonkeyPatch, session: Session) -> MemorySessionStore:
     memory = MemorySessionStore(session)
     monkeypatch.setattr(cli_common, "get_store", lambda: memory)
-    monkeypatch.setattr(cli_doctor, "get_store", lambda: memory)
     monkeypatch.setattr(cli_common, "stdin_is_tty", lambda: False)
     return memory
 

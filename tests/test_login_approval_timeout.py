@@ -48,8 +48,8 @@ def approval_never_given(mock_api: respx.MockRouter) -> respx.Route:
 @pytest.fixture
 def store(monkeypatch: pytest.MonkeyPatch) -> MemorySessionStore:
     memory = MemorySessionStore(Session(device_id=DEVICE))
+    monkeypatch.setattr(cli_common, "get_store", lambda: memory)
     for module in (cli_common, cli_auth):
-        monkeypatch.setattr(module, "get_store", lambda: memory)
         monkeypatch.setattr(module, "stdin_is_tty", lambda: False)
     return memory
 

@@ -58,6 +58,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - El error de `--account` sin coincidencias dice «no coincide con ninguna cuenta» (antes, «coincide con ninguna cuentas»); con varias, «coincide con varias cuentas».
 - Las retenciones (`holds`, `pending.holds` de `snapshot`) salen siempre en negativo, como un cargo en `movements`, aunque una respuesta las traiga en positivo. Se ha corregido el ejemplo de docs/snapshot.md, que ahora se valida en los tests contra el contrato (#57).
 - README: en las transferencias recibidas de otros bancos la API no da el ordenante; `origen`, `destino` y `contraparte` van a `null` (#56).
+- Los tests ya no dependen de `FORCE_COLOR`, `NO_COLOR`, `TERM`, `COLUMNS` ni `CI` del entorno, y no pueden leer el llavero ni el fichero de sesión reales: `doctor` también usa el almacén del test (#53, #54).
 
 ## [0.1.0]
 

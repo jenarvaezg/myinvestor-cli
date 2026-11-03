@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import keyring.core
 import pytest
 import respx
+import typer.rich_utils
 
-from myinvestor import cli_common, json_envelope
+from myinvestor import cli_common, cli_doctor, json_envelope, stores
 from myinvestor.http import build_http_client
 from myinvestor.output import notices
 from myinvestor.session import Session
@@ -23,6 +25,30 @@ API = "https://api.myinvestor.es"
 CPERF = f"{API}/cperf-server/api"
 DEVICE = "11111111-2222-3333-4444-555555555555"
 CASH_UUID = "aaaaaaaa-0000-0000-0000-000000000001"
+
+# What rich (and typer's rich help and errors) read from the environment to pick colours, width and
+# interactivity; `CI` and `CLICOLOR*` too, so no future reader of them depends on the runner.
+TERMINAL_ENV = (
+    "FORCE_COLOR",
+    "NO_COLOR",
+    "TERM",
+    "COLORTERM",
+    "COLUMNS",
+    "LINES",
+    "JUPYTER_COLUMNS",
+    "JUPYTER_LINES",
+    "TTY_COMPATIBLE",
+    "TTY_INTERACTIVE",
+    "CI",
+    "CLICOLOR",
+    "CLICOLOR_FORCE",
+    "GITHUB_ACTIONS",
+    "PY_COLORS",
+    "TERMINAL_WIDTH",
+    "_TYPER_FORCE_DISABLE_TERMINAL",
+)
+# Consoles created at import time: they read the environment pytest was started with, once.
+MODULE_CONSOLES = (notices, cli_common.fatal, cli_doctor.out)
 
 
 def make_jwt(expires_in: timedelta = timedelta(minutes=15), **claims: Any) -> str:
@@ -179,9 +205,73 @@ def _no_myinvestor_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _neutral_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tables and stderr must not depend on the terminal or CI running pytest (FORCE_COLOR, TERM, COLUMNS…)."""
+    for name in TERMINAL_ENV:
+        monkeypatch.delenv(name, raising=False)
+    # typer computes these once, when `typer.rich_utils` is imported; None is their value in a clean env.
+    monkeypatch.setattr(typer.rich_utils, "FORCE_TERMINAL", None)
+    monkeypatch.setattr(typer.rich_utils, "MAX_WIDTH", None)
+    for console in MODULE_CONSOLES:
+        # Re-run the constructor in place: every module importing the console keeps the same object,
+        # which now reads the clean environment (colour system, width, NO_COLOR are fixed at creation).
+        console.__init__(stderr=console.stderr)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_dirs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
         monkeypatch.setenv(var, str(tmp_path / var.lower()))
+
+
+class RealStoreAccessError(RuntimeError):
+    """A test reached the real session store (OS keyring or default file) instead of a MemorySessionStore."""
+
+
+class _ForbiddenKeyring:
+    """Stands in for the OS keyring: any use records the access and raises (not a KeyringError, never caught)."""
+
+    def __init__(self, accesses: list[str]) -> None:
+        self._accesses = accesses
+
+    def _refuse(self, what: str) -> RealStoreAccessError:
+        self._accesses.append(what)
+        return RealStoreAccessError(
+            f"{what}: tests must not use the real keyring; patch `cli_common.get_store` (see the `store` fixtures)."
+        )
+
+    def get_password(self, service: str, username: str) -> str | None:
+        raise self._refuse(f"keyring.get_password({service!r}, {username!r})")
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        raise self._refuse(f"keyring.set_password({service!r}, {username!r})")
+
+    def delete_password(self, service: str, username: str) -> None:
+        raise self._refuse(f"keyring.delete_password({service!r}, {username!r})")
+
+    def get_credential(self, service: str, username: str | None) -> None:
+        raise self._refuse(f"keyring.get_credential({service!r}, {username!r})")
+
+
+@pytest.fixture(autouse=True)
+def real_store_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
+    """Fail any test that touches the user's real session store, even if the code under test swallowed the error.
+
+    The keyring backend is replaced (so `auto` still picks it, and then refuses) and resolving the default
+    session file raises. Tests that check the guard itself clear the returned list of accesses.
+    """
+    accesses: list[str] = []
+
+    def default_store_path() -> Path:
+        accesses.append("stores.default_store_path()")
+        raise RealStoreAccessError("tests must not use the default session file; patch `cli_common.get_store`.")
+
+    monkeypatch.setattr(keyring.core, "_keyring_backend", _ForbiddenKeyring(accesses))
+    monkeypatch.setattr(stores, "default_store_path", default_store_path)
+    yield accesses
+    if accesses:
+        pytest.fail(f"The test used the real session store: {', '.join(accesses)}")
 
 
 @pytest.fixture(autouse=True)
