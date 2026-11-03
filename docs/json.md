@@ -481,7 +481,7 @@ Salida: lista de objetos.
 
 ### `interest` — `myinvestor.interest/1`
 
-Una fila por cuenta con remuneración: la última liquidación.
+Una fila por cuenta con remuneración: la ficha de MyInvestor y la última liquidación de `movements`.
 
 Salida: lista de objetos.
 
@@ -489,17 +489,17 @@ Salida: lista de objetos.
 |---|---|---|---|---|
 | `cuenta` | string | no | sí | alias de la cuenta (o su id si no tiene) |
 | `cuenta_id` | string | no | sí |  |
-| `periodo` | string | sí | sí | mes liquidado, `AAAA-MM` (`remunerationDate`) |
-| `fecha_pago` | date `AAAA-MM-DD` | sí | sí | `paymentDate`: día del abono |
+| `periodo` | string | sí | sí | mes natural de la ficha, `AAAA-MM` (`remunerationDate`), no el de la liquidación |
+| `fecha_pago` | date `AAAA-MM-DD` | sí | sí | `paymentDate`: día del abono; null si la ficha no trae desglose |
 | `fecha_oficial` | date `AAAA-MM-DD` | sí | sí | `officialRemunerationDate` |
-| `saldo_base` | number (€, 2 decimales) | sí | sí | `applicableBaseBalance` |
+| `saldo_base` | number (€, 2 decimales) | sí | sí | `applicableBaseBalance`; null (no 0) si la ficha no trae desglose, como los demás saldos e intereses |
 | `saldo_promo` | number (€, 2 decimales) | sí | sí | `balancePromo` |
 | `saldo_total` | number (€, 2 decimales) | sí | sí | `totalBalance` |
 | `tipo_pct` | number (exacto) | sí | sí | `remunerationPercentage`, en % |
-| `tipo_base_pct` | number (exacto) | sí | sí | `baseRemunerationPercentage`, en % |
-| `tipo_promo_pct` | number (exacto) | sí | sí | `promotionRemunerationPercentage`, en % |
-| `tae_pct` | number (exacto) | sí | sí | `calculateTaeAverage`, en % |
-| `tae_promo_pct` | number (exacto) | sí | sí | `taePromotion`, en % |
+| `tipo_base_pct` | number (exacto) | sí | sí | `baseRemunerationPercentage`, en %; null si llega 0 |
+| `tipo_promo_pct` | number (exacto) | sí | sí | `promotionRemunerationPercentage`, en %; null si llega 0 |
+| `tae_pct` | number (exacto) | sí | sí | `calculateTaeAverage`, en %; null si llega 0 («sin calcular») |
+| `tae_promo_pct` | number (exacto) | sí | sí | `taePromotion`, en %; null si llega 0 |
 | `intereses_base` | number (€, 2 decimales) | sí | sí | `baseResults` |
 | `intereses_promo` | number (€, 2 decimales) | sí | sí | `promoResults` |
 | `bruto` | number (€, 2 decimales) | sí | sí | `finalResult`: intereses brutos del periodo |
@@ -508,6 +508,10 @@ Salida: lista de objetos.
 | `remuneracion` | string | sí | sí | `remunerationType` (visto: `DEFAULT`) |
 | `promocion` | string | sí | sí | `promotionCode` |
 | `fin_promocion` | date `AAAA-MM-DD` | sí | sí | `endDateRemuneration` |
+| `liquidacion_fecha` | date `AAAA-MM-DD` | sí | sí | «LIQUIDAC. INTERESES» de `movements` (últimos 90 días) del día de `fecha_pago` o, si no, la última |
+| `liquidacion_importe` | number (€, 2 decimales) | sí | sí | su importe, tal cual en `movements` |
+| `liquidacion_desde` | date `AAAA-MM-DD` | sí | sí | inicio del periodo que dice su concepto («PERIODO dd/mm/aaaa …») |
+| `liquidacion_hasta` | date `AAAA-MM-DD` | sí | sí | fin de ese periodo |
 
 ### `income` — `myinvestor.income/1`
 

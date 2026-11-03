@@ -86,7 +86,7 @@ INTEREST = flow(
     8,
     3.21,
     reference="000261",
-    concept="Intereses",
+    concept="LIQUIDAC. INTERESES PERIODO 17/09/2026 17/10/2026",
     operationType="LIQUIDAC. INTERESES",
     operationOriginLabel="MyInvestor",
     operationTargetLabel="Mi cuenta",
@@ -171,7 +171,7 @@ PERIODIC = sent(
 )
 REMUNERATION = {
     "remunerationDate": "2026-09-01T00:00:00.000+0000",
-    "paymentDate": "2026-10-07",
+    "paymentDate": "2026-10-18",  # the day of the INTEREST movement, so `liquidacion_*` is crossed
     "officialRemunerationDate": "2026-10-01",
     "remunerationType": "DEFAULT",
     "remunerationPercentage": 2.5,

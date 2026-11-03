@@ -73,7 +73,7 @@ myinvestor movements --new [--no-mark] [--state PATH] | --since-date 2026-11-01 
 myinvestor movements --details [-a …] [--days …]   # + beneficiario e IBAN de destino de las transferencias emitidas
 myinvestor internal-transfers [--from … --to … | --days …] [-a Junior] [--unmatched] [--free-only | --allow-partial]   # traspasos entre tus cuentas: cargo ↔ abono
 myinvestor transfers [-a …] [--from … --to … | --days …] | --scheduled | --ref REF   # transferencias emitidas y programadas
-myinvestor interest [-a …]                        # remuneración: tipo, TAE, intereses brutos, retención y neto de la última liquidación
+myinvestor interest [-a …] [--no-movements]       # remuneración: tipo, TAE, desglose de MyInvestor y última «LIQUIDAC. INTERESES»
 myinvestor holds                                  # saldo retenido (p. ej. por órdenes en curso); importe negativo, como un cargo
 myinvestor balance-history [--from 2026-01-01]    # saldo diario total del efectivo
 myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|year|type|account] [-a …] [--free-only] [--allow-partial]   # intereses, dividendos, retenciones y comisiones
@@ -429,23 +429,31 @@ La tabla muestra `fecha`, `cuenta`, `importe`, `beneficiario`, `concepto`, `ejec
 
 ### Remuneración de la cuenta: `interest`
 
-`interest` da, para cada cuenta de efectivo, la **última liquidación de intereses** (`GET /cperf-server/api/v2/cash-accounts/{accountId}/remuneration`, una petición por cuenta; si MyInvestor no da remuneración para una cuenta, se avisa en stderr y no sale). Los tipos van en %, como en la web (`2.5` es un 2,5 %).
+`interest` da, para cada cuenta de efectivo, la **ficha de remuneración** de MyInvestor (`GET /cperf-server/api/v2/cash-accounts/{accountId}/remuneration`, una petición por cuenta; si MyInvestor no da remuneración para una cuenta, se avisa en stderr y no sale) cruzada con la **última liquidación real** de los movimientos («LIQUIDAC. INTERESES», campos `liquidacion_*`). Los tipos van en %, como en la web (`2.5` es un 2,5 %).
+
+**Ficha sin desglose.** La web solo pinta saldo remunerado, periodo e intereses («Tu remuneración») en las cuentas con promoción (`remunerationType` `BALANCE_INCREASE`, `BALANCE_INCREASE_EXTRA` o `…_PROMOTION`); para las demás (`DEFAULT`…) solo enseña el tipo. A esas cuentas la API les manda la ficha con todos los saldos e intereses a 0, que **no** es su liquidación: entonces `saldo_*`, `intereses_*`, `bruto`, `retencion`, `neto` y `fecha_pago` salen vacíos (`null`), no a 0, y lo cobrado está en `liquidacion_*` (#74). Igual que la web, un `tipo_base_pct`, `tipo_promo_pct`, `tae_pct` o `tae_promo_pct` que llega a 0 sale `null` («sin dato»).
+
+**`periodo` frente al periodo de la liquidación.** `periodo` es el mes natural de la ficha (`remunerationDate`; la web lo pinta como «Periodo», el mes anterior a `officialRemunerationDate`), que es como se liquida la promoción («antes del día 7 de cada mes recibirás los intereses del mes anterior»). Sin promoción, los intereses se abonan «a mes vencido, coincidiendo con el día en el que abriste tu cuenta»: el periodo va de ese día de un mes al mismo día del siguiente (del 18 al 18, del 22 al 22…) y se abona al día siguiente. Ese periodo real es `liquidacion_desde`–`liquidacion_hasta`, sacado del concepto del abono («LIQUIDAC. INTERESES PERIODO 18/09/2026 18/10/2026»).
+
+**Cruce con los movimientos.** Por defecto `interest` pide también los movimientos de cada cuenta con remuneración, **solo de los últimos 90 días** (`GET /account/api/v3/account/{accountUuid}/flows`, una petición más por cuenta; nunca pide segundo factor, que MyInvestor exige más atrás) y toma los abonos de intereses (clasificados como en `income`). Si la ficha trae desglose, `liquidacion_*` es el abono del día de `fecha_pago`; si no, el último. Se avisa en stderr si la ficha da un abono dentro de esos 90 días que no está en los movimientos (y se enseña el último), si no hay ningún abono de intereses en la ventana o si falla la consulta de movimientos (la orden sigue con el resto). `--no-movements` se salta esas peticiones y deja `liquidacion_*` en `null`.
 
 | Campo | Origen en la API | Notas |
 |---|---|---|
-| `periodo` | `remunerationDate` | mes liquidado, `AAAA-MM` |
-| `fecha_pago` | `paymentDate` | día del abono («LIQUIDAC. INTERESES» en `movements`) |
+| `periodo` | `remunerationDate` | mes natural de la ficha, `AAAA-MM` (no el periodo de la liquidación: ver arriba) |
+| `fecha_pago` | `paymentDate` | día del abono según la ficha; `null` sin desglose |
 | `fecha_oficial` | `officialRemunerationDate` | la web la muestra como fecha de actualización |
 | `saldo_base`, `saldo_promo`, `saldo_total` | `applicableBaseBalance`, `balancePromo`, `totalBalance` | saldo remunerado al tipo base, al promocional y en total |
 | `tipo_pct`, `tipo_base_pct`, `tipo_promo_pct` | `remunerationPercentage`, `baseRemunerationPercentage`, `promotionRemunerationPercentage` | % aplicado: total, base y promocional |
-| `tae_pct`, `tae_promo_pct` | `calculateTaeAverage`, `taePromotion` | la web enseña `calculateTaeAverage` como el tipo medio del periodo; aquí sale tal cual, y `tae_pct: 0` significa «sin calcular» (la web lo oculta), no una TAE del 0 % |
+| `tae_pct`, `tae_promo_pct` | `calculateTaeAverage`, `taePromotion` | la web enseña `calculateTaeAverage` como el tipo medio del periodo; un 0 significa «sin calcular» (la web lo oculta) y sale `null`, como en `accounts` |
 | `intereses_base`, `intereses_promo` | `baseResults`, `promoResults` | |
 | `bruto` | `finalResult` | intereses **brutos** del periodo: la web calcula el neto como `finalResult - taxChargeAmount` |
 | `retencion` | `taxChargeAmount` | retención (IRPF), **en negativo** como en `income` |
 | `neto` | — | `bruto` + `retencion` |
 | `remuneracion`, `promocion`, `fin_promocion` | `remunerationType`, `promotionCode`, `endDateRemuneration` | solo se ha visto `DEFAULT` |
+| `liquidacion_fecha`, `liquidacion_importe` | `operationDate`, `amount` del movimiento | el abono «LIQUIDAC. INTERESES» de `movements`, importe tal cual |
+| `liquidacion_desde`, `liquidacion_hasta` | `concept` del movimiento | el «PERIODO dd/mm/aaaa dd/mm/aaaa» del concepto; `null` si no lo trae |
 
-Las fechas que la API manda como texto vacío (`""`) salen como `null`. La tabla muestra `cuenta`, `periodo`, `fecha_pago`, `saldo_base`, `tipo_pct`, `tae_pct`, `bruto`, `retencion` y `neto`. Para el histórico de intereses cobrados, `income` suma los abonos de cada mes.
+Las fechas que la API manda como texto vacío (`""`) salen como `null`. La tabla muestra `cuenta`, `periodo`, `fecha_pago`, `saldo_base`, `tipo_pct`, `tae_pct`, `bruto`, `retencion`, `neto`, `liquidacion_fecha` y `liquidacion_importe`. Para el histórico de intereses cobrados, `income` suma los abonos de cada mes.
 
 ### Buscador de fondos y planes: `funds`, `fund-filters` y `pension-plans`
 
@@ -722,7 +730,8 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | `upcoming` | 4 + 2·C + 2·V + P (C: con `--owner`, solo las de ese tipo; por cuenta, retenciones y transferencias emitidas) |
 | `snapshot`, `summary` | 4 + 3·C + 2·V + 2·P (`summary --from-file`: 0) |
 | `fund-transfers` | 1 + V (también con `--pending`); con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
-| `accounts`, `transfers`, `interest` | 1 + C (`accounts`: C con `--owner`, solo las de ese tipo) |
+| `accounts`, `transfers` | 1 + C (`accounts`: C con `--owner`, solo las de ese tipo) |
+| `interest` | 1 + C + R (R: las cuentas con remuneración, sus movimientos de los últimos 90 días); `--no-movements`: 1 + C |
 | `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V |
 | `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
 | `fund-history` | 2 (la serie y la ficha, para la moneda) |
