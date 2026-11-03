@@ -491,7 +491,7 @@ class MyInvestorClient:
         return self.stream(f"{CPERF}/v2/customers/self/documents/signedes/{seg(document_uuid)}")
 
     def xray_pdf(self, target: XrayTarget, key: str) -> contextlib.AbstractContextManager[httpx.Response]:
-        """Portfolio «x-ray» generated on the fly: account id or fund ISIN (`pension`: unverified)."""
+        """Portfolio «x-ray» generated on the fly: securities or pension account id, or fund ISIN."""
         return self.stream(f"{CPERF}/v2/documents/{target.value}/{seg(key)}/x-ray")
 
     def account_summary(self, account_id: str) -> TemporaryDocument:

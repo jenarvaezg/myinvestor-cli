@@ -13,7 +13,9 @@ from typer.testing import CliRunner
 
 from myinvestor import cli_cash, cli_common, cli_upcoming
 from myinvestor.cli import app
+from myinvestor.cli_accounts import match_cash_accounts
 from myinvestor.errors import InputError
+from myinvestor.models import CashAccount
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
 from tests.conftest import API, CASH_UUID, CPERF, cash_account, flow, ok
@@ -164,6 +166,60 @@ def test_interest_account_filter_and_table(mock_api: respx.MockRouter, store: Me
 
     assert "16,44 €" in result.stdout and "13,32 €" in result.stdout and "2,00 %" in result.stdout
     assert "tipo_base_pct" not in result.stdout
+
+
+# ---- accounts: TAE and interest rate ----------------------------------------------------------------
+
+
+def test_accounts_show_tae_and_rate_per_account(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account(1), cash_account(2)]))
+    mock_api.get(REMUNERATION).respond(200, json=ok({**REMUNERATION_DATA, "calculateTaeAverage": 2.02}))
+    mock_api.get(f"{CPERF}/v2/cash-accounts/102/remuneration").respond(
+        404, json={"payload": {}, "status": {"code": "NOT_FOUND", "message": "no"}}
+    )
+
+    result = invoke("accounts", "-f", "json")
+
+    rows = json.loads(result.stdout, parse_float=Decimal)
+    assert [(r["id"], r["tae"], r["tipo_interes"]) for r in rows] == [
+        ("101", Decimal("2.02"), Decimal("2.0")),
+        ("102", None, None),
+    ]
+    assert "Traceback" not in result.stderr
+
+
+def test_accounts_keep_going_when_remuneration_fails(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account(1), cash_account(2)]))
+    mock_api.get(REMUNERATION).respond(400, json={"payload": {}, "status": {"code": "ERROR", "message": "fallo"}})
+    mock_api.get(f"{CPERF}/v2/cash-accounts/102/remuneration").respond(200, json=ok(REMUNERATION_DATA))
+
+    result = runner.invoke(app, ["--wide", "accounts"])
+
+    assert result.exit_code == 0
+    assert "Cuenta 1" in result.stdout and "2,00 %" in result.stdout and "tae" in result.stdout
+    assert "Cuenta 1" in result.stderr and "remuneración" in result.stderr
+
+
+def test_accounts_csv_has_tae_column(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account(1)]))
+    mock_api.get(REMUNERATION).respond(200, json=ok({}))
+
+    [header, row] = invoke("accounts", "-f", "csv").stdout.splitlines()
+
+    assert {"tae", "tipo_interes"} <= set(header.split(","))
+    assert row.endswith(",,")
+
+
+# ---- --account matching ----------------------------------------------------------------------------
+
+
+def test_account_match_messages_are_grammatical() -> None:
+    accounts = [CashAccount.model_validate(cash_account(i, alias="Ahorro")) for i in (1, 2)]
+
+    with pytest.raises(InputError, match=r"--account 'zzz' no coincide con ninguna cuenta\. Disponibles"):
+        match_cash_accounts(accounts, ["zzz"])
+    with pytest.raises(InputError, match=r"--account 'Ahorro' coincide con varias cuentas\. Disponibles"):
+        match_cash_accounts(accounts, ["Ahorro"])
 
 
 # ---- movements --details ----------------------------------------------------------------------------

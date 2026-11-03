@@ -25,7 +25,7 @@ from myinvestor.cli_common import (
 from myinvestor.cli_state import MarkOpt, NewOpt, StateOpt, record, state_file
 from myinvestor.client import MyInvestorClient, Statement
 from myinvestor.config import FREE_FLOWS_DAYS
-from myinvestor.errors import InputError, PartialResultError, SignatureError, SignatureRequired
+from myinvestor.errors import ApiError, InputError, PartialResultError, SignatureError, SignatureRequired
 from myinvestor.models import (
     CashAccount,
     Flow,
@@ -44,6 +44,7 @@ from myinvestor.state import AccountCursor, StateKind, movement_marks, unseen_mo
 from myinvestor.transfers_match import operation_id, with_transfer_fields
 
 DEFAULT_MOVEMENT_DAYS = 30
+NOT_FOUND = 404
 # `movements` in a table keeps these columns; JSON and CSV export every field of the row.
 MOVEMENT_TABLE_COLUMNS = ("fecha", "valor_fecha", "cuenta", "tipo", "concepto", "importe", "saldo", "ref")
 
@@ -107,8 +108,8 @@ def match_cash_accounts(accounts: list[CashAccount], refs: list[str] | None) -> 
         ]
         if len(hits) != 1:
             known = ", ".join(f"{a.account_id} ({a.alias})" for a in accounts)
-            what = "ninguna" if not hits else "varias"
-            raise InputError(f"--account {ref!r} coincide con {what} cuentas. Disponibles: {known}.")
+            what = "no coincide con ninguna cuenta" if not hits else "coincide con varias cuentas"
+            raise InputError(f"--account {ref!r} {what}. Disponibles: {known}.")
         if hits[0] not in chosen:
             chosen.append(hits[0])
     return chosen
@@ -202,14 +203,31 @@ def position(fmt: FormatOpt = OutputFormat.table) -> None:
 
 @app.command()
 def accounts(owner: OwnerOpt = None, fmt: FormatOpt = OutputFormat.table) -> None:
-    """Cuentas de efectivo con su tipo, tu rol, el titular y el saldo disponible y retenido.
+    """Cuentas de efectivo con su tipo, tu rol, el titular, el saldo disponible y retenido, y su TAE.
 
+    `tae` y `tipo_interes` (en %) son los de la última liquidación de intereses (como en `interest`):
+    una petición más por cuenta, y vacíos si la cuenta no tiene remuneración.
     En JSON añade `titulares` (nombre, rol y si eres tú; nunca el DNI).
     """
     with build_client() as client:
         chosen = filter_owner(client.cash_accounts(), owner)
-    rows = [_account_row(a, with_holders=fmt is OutputFormat.json) for a in chosen]
+        rows = [{**_account_row(a, with_holders=fmt is OutputFormat.json), **_rates(client, a)} for a in chosen]
     render(rows, fmt, title="Cuentas")
+
+
+def _rates(client: MyInvestorClient, acc: CashAccount) -> dict[str, Any]:
+    """`tae` and `tipo_interes` of the last settlement; empty (with a notice) if MyInvestor gives none or fails."""
+    try:
+        found = client.remuneration(acc.account_id)
+    except ApiError as exc:
+        if exc.status != NOT_FOUND:
+            name = escape(acc.alias or acc.account_id)
+            err.print(f"[yellow]{name}:[/yellow] sin TAE, falló la consulta de su remuneración ({escape(str(exc))}).")
+        found = None
+    return {
+        "tae": found.calculate_tae_average if found else None,
+        "tipo_interes": found.remuneration_percentage if found else None,
+    }
 
 
 def _account_row(a: CashAccount, *, with_holders: bool) -> dict[str, Any]:

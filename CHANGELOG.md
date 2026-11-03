@@ -12,6 +12,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - Nuevos `myinvestor.transfers/1` y `myinvestor.interest/1`. `myinvestor.movements/1` gana `beneficiario` e `iban_destino`, solo con `--details` (compatible). En `myinvestor.upcoming/1`, `tipo` puede valer `transferencia` (#4, #5).
 - Nuevos: `myinvestor.order/1` (objeto `{orden, ejecuciones}`), `myinvestor.lots/1` y `myinvestor.gains/1` (#3, #1).
 - Nuevo `myinvestor.fund-transfers/1`, con la variante `--pending` (#8).
+- `myinvestor.accounts/1` gana `tae` y `tipo_interes` (números en %, `null` si la cuenta no tiene remuneración) (compatible) (#5).
 
 ### Añadido
 
@@ -33,6 +34,8 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - `transfers` (transferencias emitidas y programadas: beneficiario, IBAN de destino, estado, periodicidad y próxima fecha) e `interest` (última liquidación de intereses: tipo, TAE, brutos, retención y neto); `upcoming` (y la sección `upcoming` de `snapshot`, con una petición más por cuenta de efectivo) incluye las transferencias programadas (`tipo: transferencia`) y `movements --details` añade `beneficiario` e `iban_destino` a los cargos de transferencias emitidas (#4, #5).
 - `order REF`: una orden con su ejecución (VL, participaciones, comisiones, retenciones, neto y resultado fiscal) (#3); `lots`: lotes vivos FIFO de cada fondo con su plusvalía latente, y `gains [--year]`: plusvalías y minusvalías realizadas en reembolsos y traspasos de salida (#1).
 - `fund-transfers`: traspasos de fondos de las cuentas de valores o, con `--pension`, de planes de pensiones (por defecto, los últimos 60 días, como la web; `--since`/`--until`), y `--pending` con el contador de traspasos en curso. Los cambios entre fondos dentro de MyInvestor siguen en `orders`/`lots` (#8).
+- `accounts`: columnas `tae` y `tipo_interes` de la última liquidación (una petición más por cuenta; vacías si la cuenta no tiene remuneración o la consulta falla, sin abortar la orden) (#5).
+- README: hallazgos del servicio `/read-only/api/v1` (copia diaria, no sirve como fuente principal ni para más de 90 días) (#10).
 
 ### Cambiado
 
@@ -46,6 +49,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - Una respuesta de MyInvestor con un formato inesperado ya no acaba en un traceback: sale un error claro con el modelo y las claves afectadas (sin sus valores), código 1 y, con `-f json`, `"error": "unexpected_response"` en stderr.
 - `--approval-timeout` también vale en el login y el re-login; `logout` borra la pausa del re-login (#46).
 - `movements --id -f json` redondea los importes a céntimos, como la lista (antes, `-50.0` en vez de `-50.00`) (#30).
+- El error de `--account` sin coincidencias dice «no coincide con ninguna cuenta» (antes, «coincide con ninguna cuentas»); con varias, «coincide con varias cuentas».
 
 ## [0.1.0]
 

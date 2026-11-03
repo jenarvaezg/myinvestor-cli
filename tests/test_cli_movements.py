@@ -18,7 +18,7 @@ from myinvestor.cli import app
 from myinvestor.errors import InputError
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
-from tests.conftest import API, CASH_UUID, CPERF, cash_account, flow, ok
+from tests.conftest import API, CASH_UUID, CPERF, cash_account, flow, mock_no_remuneration, ok
 
 runner = CliRunner()
 FLOWS = f"{API}/account/api/v3/account/{CASH_UUID}/flows"
@@ -51,6 +51,7 @@ def own_account() -> dict[str, Any]:
 
 def mock_accounts(mock_api: respx.MockRouter) -> None:
     mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([own_account(), junior_account()]))
+    mock_no_remuneration(mock_api)
 
 
 def transfer_out() -> dict[str, Any]:

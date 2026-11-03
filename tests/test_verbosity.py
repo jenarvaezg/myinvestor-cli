@@ -18,7 +18,17 @@ from myinvestor.errors import InputError, NotLoggedInError
 from myinvestor.http import log_path
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
-from tests.conftest import API, CPERF, DEVICE, cash_account, make_jwt, ok, signature_pending, tokens
+from tests.conftest import (
+    API,
+    CPERF,
+    DEVICE,
+    cash_account,
+    make_jwt,
+    mock_no_remuneration,
+    ok,
+    signature_pending,
+    tokens,
+)
 from tests.test_signature import FakeUI
 
 runner = CliRunner()
@@ -122,6 +132,7 @@ def test_verbose_logs_each_request_to_stderr(mock_api: respx.MockRouter, store: 
     )
     mock_api.post(f"{API}{REFRESH_PATH}").respond(200, json=tokens())
     mock_api.get(CASH).respond(200, json=ok([cash_account()]))
+    mock_no_remuneration(mock_api)
 
     result = runner.invoke(app, ["-v", "accounts", "-f", "json"], catch_exceptions=False)
 
@@ -134,6 +145,7 @@ def test_verbose_logs_each_request_to_stderr(mock_api: respx.MockRouter, store: 
 
 def test_without_verbose_no_request_log(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
     mock_api.get(CASH).respond(200, json=ok([cash_account()]))
+    mock_no_remuneration(mock_api)
     result = runner.invoke(app, ["accounts", "-f", "json"], catch_exceptions=False)
     assert result.stderr == ""
 
