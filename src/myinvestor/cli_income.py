@@ -12,7 +12,7 @@ from typing import Annotated, Any
 import typer
 from rich.markup import escape
 
-from myinvestor.classify import Category, Classification, classify
+from myinvestor.classify import INCOME_CATEGORIES, Category, Classification, classify
 from myinvestor.cli_accounts import (
     AccountOpt,
     AllowPartialOpt,
@@ -32,7 +32,6 @@ from myinvestor.output import OutputFormat, render
 from myinvestor.transfers_match import with_transfer_fields
 
 TOTAL = "total"
-INCOME_CATEGORIES = frozenset({Category.intereses, Category.dividendos, Category.retencion, Category.comision})
 CATEGORY_ORDER = {c: i for i, c in enumerate(Category)}
 
 
