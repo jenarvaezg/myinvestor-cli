@@ -22,6 +22,8 @@ myinvestor login                                  # abre un navegador: entras co
 myinvestor login --direct -u 12345678Z            # por terminal, sin reCAPTCHA (funciona: verificado el 2026-11-03)
 echo "$PASS" | myinvestor login --direct -u 12345678Z --password-stdin   # también vale MYINVESTOR_PASSWORD
 myinvestor login --direct --remember -u 12345678Z # guarda la contraseña → re-login automático (cron)
+myinvestor login --direct --start -u 12345678Z    # SMS en dos pasos (sin terminal): envía el código y sale con 13…
+myinvestor login --direct --code 123456           # …y esto lo completa (ver «Código SMS sin terminal»)
 myinvestor login --refresh-token-stdin --device-id <_capuid> < token.txt  # importar una sesión de la web
 myinvestor status [-f json] [--offline]           # ¿sesión viva? (sin --offline la renueva)
 myinvestor doctor [-f json] [--offline]           # diagnóstico completo, ver «Diagnóstico»
@@ -29,7 +31,7 @@ myinvestor logout [--forget-device]
 ```
 
 - El **access token dura 15 min y el refresh token 30 min**. Cada petición renueva el par si hace falta, así que la sesión vive mientras la uses al menos cada media hora; si no, hay que repetir el login.
-- Con `--remember` (solo con `--direct`), la contraseña se guarda en el Keychain (o en `~/.config/myinvestor/session.json`, 0600, con `--store file`) y, cuando el refresh token ha caducado, el CLI vuelve a entrar solo, como la app de Fintonic con el PIN. Se guarda solo si MyInvestor la acepta y se borra con `logout`. Si el re-login automático falla, depende del `errCode` del rechazo: con `UNAUTHORIZED` (contraseña incorrecta) o `UPDATE_PASSWORD_REQUIRED` **se borra en el acto**, para no bloquear la cuenta repitiéndola en cada ejecución; con cualquier otro código, o sin él (reCAPTCHA obligatorio, demasiados intentos, cambios de la API…), **no se borra**, pero el re-login queda en pausa 24 h (o hasta el siguiente `myinvestor login`), así que se intenta como mucho una vez al día. Si lo que falta es un código SMS, falla sin tocar la contraseña. Sin `--remember` la contraseña no se guarda nunca: en el almacén solo van los tokens y el id de dispositivo.
+- Con `--remember` (solo con `--direct`), la contraseña se guarda en el Keychain (o en `~/.config/myinvestor/session.json`, 0600, con `--store file`) y, cuando el refresh token ha caducado, el CLI vuelve a entrar solo, como la app de Fintonic con el PIN. Se guarda solo si MyInvestor la acepta y se borra con `logout`. Si el re-login automático falla, depende del `errCode` del rechazo: con `UNAUTHORIZED` (contraseña incorrecta) o `UPDATE_PASSWORD_REQUIRED` **se borra en el acto**, para no bloquear la cuenta repitiéndola en cada ejecución; con cualquier otro código, o sin él (reCAPTCHA obligatorio, demasiados intentos, cambios de la API…), **no se borra**, pero el re-login queda en pausa 24 h (o hasta el siguiente `myinvestor login`), así que se intenta como mucho una vez al día. Si lo que falta es un código SMS, falla (código 13) sin tocar la contraseña y **sin mandar el SMS**, salvo que hayas definido `MYINVESTOR_OTP` (ver «Código SMS sin terminal»). Sin `--remember` la contraseña no se guarda nunca: en el almacén solo van los tokens y el id de dispositivo.
 - El navegador usa un perfil propio (`~/.local/share/myinvestor/browser`) para que MyInvestor reconozca el dispositivo y solo pida el SMS la primera vez. Al terminar se borran los tokens de ese perfil: la sesión pasa a ser del CLI.
 - `--refresh-token-stdin`: el token está en el localStorage de la web (`myinvestor-app:REFRESH_TOKEN`) y el id de dispositivo en `_capuid`. Cuidado: es una credencial.
 
@@ -202,7 +204,26 @@ echo "$PASS" | myinvestor login --direct --remember -u 12345678Z --password-stdi
 myinvestor position -f json                        # semanas después: re-login automático si hace falta
 ```
 
-El primer login desde un dispositivo nuevo pide SMS o aprobación en la app: hazlo una vez en una terminal interactiva con el mismo `--store`.
+El primer login desde un dispositivo nuevo pide SMS o aprobación en la app: hazlo una vez en una terminal interactiva con el mismo `--store`, o usa una de las opciones de abajo.
+
+#### Código SMS sin terminal
+
+Cuando caduca la confianza del dispositivo, MyInvestor puede pedir un **código SMS** en el login `--direct` (también en el re-login automático). El mensaje dice siempre a qué móvil ha ido, enmascarado (`MyInvestor ha enviado un código OTP_SMS a +34 6** *** *12…`), y sale aunque uses `--quiet`. Formas de dárselo sin una terminal en stdin:
+
+- **En dos pasos** (lo más cómodo para un agente o un script que tiene que pedirle el código a una persona, sin mantener el proceso vivo):
+
+  ```bash
+  myinvestor login --direct --start -u 12345678Z    # envía el SMS, guarda el login pendiente y sale con 13
+  myinvestor login --direct --code 123456           # valida el código y termina el login
+  ```
+
+  `--start` deja en el almacén de la sesión (Keychain o fichero 0600) el `signatureRequestId`, el id del SMS enviado, el método, el destino enmascarado y el id de dispositivo. Para terminar, la web repite **la misma llamada de login** (`customerId` + contraseña, mismo dispositivo) con `x-signature-id`, así que `--code` necesita la contraseña otra vez. No se guarda en claro por defecto: `--code` la toma de `--password-stdin`/`MYINVESTOR_PASSWORD`, o de la ya guardada con `--remember`, o la pregunta en la terminal. Con `--start --remember` sí se guarda en el login pendiente (con la misma protección que `--remember`) y pasa a ser la contraseña recordada cuando MyInvestor acepta el código. Si no le pasas contraseña a `--start` y tienes una guardada con `--remember`, la usa: si el cron falla con 13, basta con `--start` y luego `--code`. Un código incorrecto deja el login pendiente para repetir `--code` (3 intentos, como la web); si la firma caduca o MyInvestor la rechaza, se borra y hay que empezar con `--start`. Solo vale para códigos: si MyInvestor solo ofrece aprobarlo en la app, usa `myinvestor --approve login --direct`. Cualquier login correcto o `logout` borra el login pendiente.
+- **`--code-stdin`**: el código es la **siguiente línea de stdin**, y se lee solo cuando MyInvestor lo pide (después de la contraseña de `--password-stdin`). Quien lanza el CLI escribe la contraseña, espera al aviso de stderr con el destino y entonces escribe el código. Si el código es incorrecto lee otra línea; si stdin se acaba, falla con 13.
+- **`--code-fd 3`**: igual, pero de otro descriptor, para no mezclar secretos en stdin: `myinvestor login --direct --password-stdin --code-fd 3 3< fifo`.
+- **`MYINVESTOR_OTP=123456`**: responde a la primera petición de código, **una sola vez**: si MyInvestor lo rechaza no se reintenta (se pasa a `--code-stdin`/la terminal si los hay, o falla con 13). Vale para cualquier orden, también para el re-login automático: con `MYINVESTOR_OTP` definida, el re-login de cron sí envía el SMS y prueba ese código; sin ella, falla sin mandarlo. Ojo: el SMS se envía en esa misma ejecución, así que el código tienes que conocerlo de antemano; para un código que llega después, usa los dos pasos o `--code-stdin`. No la dejes fija en el crontab: cada ejecución enviaría un SMS y probaría un código viejo.
+- **`/dev/tty`**: si stdin no es una terminal (p. ej. `echo "$PASS" | myinvestor login --direct --password-stdin`) pero el proceso tiene una, el código se pregunta ahí, como hacen `ssh` o `gpg`. Solo para **códigos**: una aprobación en la app sigue necesitando stdin en una terminal o `--approve`, así que un script lanzado desde una terminal no manda notificaciones al móvil. `/dev/tty` se abre solo cuando hace falta un código y se cierra al acabar. En cron, systemd o un agente desacoplado no hay `/dev/tty`: no se envía el SMS y falla con 13 como siempre.
+
+`--no-signature` gana a todo lo anterior: con él no se inicia ningún segundo factor (ni con `MYINVESTOR_OTP`, `--code-stdin`, `/dev/tty` ni `--start`, que falla con 13 sin mandar el SMS). `--code` sí puede completar un login pendiente, porque el SMS ya se envió.
 
 #### Diagnóstico: `status` y `doctor`
 
@@ -244,14 +265,14 @@ Para que un script distinga qué ha pasado sin leer el texto de error (también 
 | 10 | Contraseña rechazada (la guardada se ha borrado) o cambio de contraseña obligatorio | `InvalidCredentialsError`, `StoredPasswordRejectedError`, `PasswordChangeRequired` |
 | 11 | Sin sesión, o caducada sin forma de renovarla (incluido el re-login en pausa) | `NotLoggedInError`, `SessionExpiredError`, `ReloginBlockedError` |
 | 12 | Red, WAF (Imperva) o MyInvestor caído: reintentable | `NetworkBlockedError`, errores de `httpx`, `ApiError` 5xx tras los reintentos |
-| 13 | Hace falta un segundo factor que no se puede dar sin terminal, o `movements` ha devuelto solo una parte (ver abajo) | `SignatureRequired`, `SignatureError`, `PartialResultError` |
+| 13 | Hace falta un segundo factor que no se puede dar sin terminal, `login --direct --start` ha enviado el código, o `movements` ha devuelto solo una parte (ver abajo) | `SignatureRequired`, `SignatureCodeRequired`, `WrongCodeError`, `SignatureError`, `PartialResultError` |
 | 14 | Sesión guardada corrupta | `CorruptStoreError`, `CorruptKeyringError` |
 
 Con `-f json` el error también sale en JSON, en una sola línea de stderr: `{"error": "signature_required", "exit_code": 13, "message": "…"}` (`error` es el nombre de la excepción en snake_case sin `Error`; `network` para los errores de red).
 
 ### Movimientos antiguos y segundo factor
 
-La consulta de movimientos solo sale directa para los últimos ~90 días (PSD2). Para rangos más antiguos MyInvestor responde `202` con una petición de firma y pide **aprobarla en la app del móvil**. En una terminal interactiva el CLI lo avisa y espera (`--approval-timeout`, 300 s por defecto) y después repite la consulta firmada. Sin terminal (cron, CI, el `!` de Claude Code) **no** te manda la notificación, salvo que pases `--approve` (o `MYINVESTOR_APPROVE=1`): `myinvestor --approve movements --from 2025-01-01`. Lo mismo ocurre con el SMS del login `--direct` en un dispositivo nuevo.
+La consulta de movimientos solo sale directa para los últimos ~90 días (PSD2). Para rangos más antiguos MyInvestor responde `202` con una petición de firma y pide **aprobarla en la app del móvil**. En una terminal interactiva el CLI lo avisa y espera (`--approval-timeout`, 300 s por defecto) y después repite la consulta firmada. Sin terminal (cron, CI, el `!` de Claude Code) **no** te manda la notificación, salvo que pases `--approve` (o `MYINVESTOR_APPROVE=1`): `myinvestor --approve movements --from 2025-01-01`. Lo mismo ocurre con el SMS del login `--direct` en un dispositivo nuevo; para darle el código sin terminal, ver «Código SMS sin terminal».
 
 **Límite observado** (no verificado al día exacto, porque cada prueba crea una petición de firma en tu cuenta): con `dateFrom` hasta 89 días antes de hoy la consulta va directa; a partir de unos 90 días pide firma. No se sabe si cuenta desde hoy o desde `dateTo`. El CLI se queda en el lado seguro: la ventana sin firma son los últimos 90 días naturales contando hoy (`--from` ≥ hoy − 89).
 

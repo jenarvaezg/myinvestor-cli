@@ -14,6 +14,7 @@ import httpx
 import pytest
 import respx
 
+from myinvestor import cli_common
 from myinvestor.http import build_http_client
 from myinvestor.output import notices
 from myinvestor.session import Session
@@ -175,6 +176,12 @@ def _no_myinvestor_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _isolated_dirs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
         monkeypatch.setenv(var, str(tmp_path / var.lower()))
+
+
+@pytest.fixture(autouse=True)
+def _no_controlling_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a TTY on stdin the CLI asks codes on /dev/tty: never on the terminal running pytest."""
+    monkeypatch.setattr(cli_common, "open_tty", lambda: None)
 
 
 @pytest.fixture(autouse=True)

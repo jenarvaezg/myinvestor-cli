@@ -4,7 +4,8 @@
   token (`x-recaptcha-token`, `x-recaptcha-action: LOGIN_V2`) that a CLI cannot produce, so
   `login_direct` is a best-effort path; the default login runs in a real browser
   (`myinvestor.browser_login`). An unknown device answers with a signature request (SMS/app)
-  and the call is repeated with `x-signature-id`.
+  and the call is repeated with `x-signature-id`. `start_login`/`finish_login` split that in two
+  processes (send the SMS, exit; validate the code and repeat the login later), for agents without a terminal.
 - `POST /login/api/v1/auth/token/refresh` `{refreshToken}` (no Authorization header) returns a
   new access/refresh pair. Access tokens live 15 min, refresh tokens 30 min.
 
@@ -36,13 +37,23 @@ from myinvestor.errors import (
     PasswordChangeRequired,
     ReloginBlockedError,
     SessionExpiredError,
+    SignatureRequired,
     StoredPasswordRejectedError,
+    WrongCodeError,
     error_code,
     raise_for_response,
 )
 from myinvestor.session import Session
-from myinvestor.signature import SIGNATURE_HEADER, SignatureUI, Signer, parse_signature_request
-from myinvestor.stores import ReloginBlock, SessionStore
+from myinvestor.signature import (
+    MAX_CODE_ATTEMPTS,
+    SIGNATURE_HEADER,
+    Challenge,
+    SignatureRequest,
+    SignatureUI,
+    Signer,
+    parse_signature_request,
+)
+from myinvestor.stores import PendingLogin, ReloginBlock, SessionStore
 
 Relogin = Callable[[Session], Session]
 
@@ -84,20 +95,65 @@ class Authenticator:
 
     def login_direct(self, customer_id: str, password: str, session: Session, ui: SignatureUI | None) -> Session:
         """Login without reCAPTCHA. MyInvestor may reject it; then use the browser login."""
-        headers = {"x-device-id": session.device_id}
+        payload, request = self._first_login(customer_id, password, session.device_id)
+        if request is not None:
+            Signer(self._public_call(session.device_id), public=True).complete(request, ui)
+            payload = self._signed_login(customer_id, password, session.device_id, request.id)
+        return _session(payload, customer_id, session.device_id)
+
+    def start_login(
+        self,
+        customer_id: str,
+        password: str,
+        session: Session,
+        *,
+        keep_password: bool = False,
+        send_code: bool = True,
+    ) -> Session | PendingLogin:
+        """First half of a two-step login: a session if no code is needed, else the login waiting for it.
+
+        The code is sent here (the SMS leaves now); `finish_login` validates it, maybe in another process.
+        With `send_code=False` (`--no-signature`) a second factor fails with `SignatureRequired` instead.
+        """
+        payload, request = self._first_login(customer_id, password, session.device_id)
+        if request is None:
+            return _session(payload, customer_id, session.device_id)
+        if not send_code:
+            raise SignatureRequired(sorted({m for group in request.pending_methods for m in group}))
+        challenge = Signer(self._public_call(session.device_id), public=True).start_code(request)
+        return PendingLogin(
+            customer_id=customer_id,
+            device_id=session.device_id,
+            request_id=request.id,
+            signature_id=challenge.signature_id,
+            method=challenge.method,
+            destination=challenge.destination,
+            started_at=datetime.now(tz=UTC),
+            password=password if keep_password else None,
+        )
+
+    def finish_login(self, pending: PendingLogin, password: str, code: str, ui: SignatureUI | None) -> Session:
+        """Validate the code of a `start_login` and repeat the login signed. Raises `WrongCodeError`."""
+        signer = Signer(self._public_call(pending.device_id), public=True)
+        challenge = Challenge(pending.signature_id, pending.method, destination=pending.destination)
+        request = signer.submit_code(pending.request_id, challenge, code)
+        if request is None:
+            raise WrongCodeError(MAX_CODE_ATTEMPTS - pending.wrong_codes - 1)
+        signer.complete(request, ui)  # other factors still pending, or a final state other than COMPLETE
+        payload = self._signed_login(pending.customer_id, password, pending.device_id, pending.request_id)
+        return _session(payload, pending.customer_id, pending.device_id)
+
+    def _first_login(self, customer_id: str, password: str, device_id: str) -> tuple[Any, SignatureRequest | None]:
         body = {"customerId": customer_id, "password": password}
-        response = self._post(LOGIN_PATH, body, headers)
-        payload = self._login_payload(response)
+        payload = self._login_payload(self._post(LOGIN_PATH, body, {"x-device-id": device_id}))
         request = parse_signature_request(payload)
-        if request is not None and request.is_pending:
-            signer = Signer(self._public_call(headers), public=True)
-            signer.complete(request, ui)
-            response = self._post(LOGIN_PATH, body, {**headers, SIGNATURE_HEADER: request.id})
-            payload = self._login_payload(response)
-        if isinstance(payload, dict) and payload.get("isPasswordChangeRequired"):
-            raise PasswordChangeRequired()
-        access, refresh = _tokens(payload)
-        return Session(device_id=session.device_id, customer_id=customer_id, access_token=access, refresh_token=refresh)
+        return payload, request if request is not None and request.is_pending else None
+
+    def _signed_login(self, customer_id: str, password: str, device_id: str, request_id: str) -> Any:
+        """The web (`Vbe`) repeats the same body, adding `x-signature-id` once the signature is COMPLETE."""
+        body = {"customerId": customer_id, "password": password}
+        headers = {"x-device-id": device_id, SIGNATURE_HEADER: request_id}
+        return self._login_payload(self._post(LOGIN_PATH, body, headers))
 
     def _login_payload(self, response: httpx.Response) -> Any:
         if response.status_code in (400, 401, 403) and "text/html" not in response.headers.get("content-type", ""):
@@ -106,13 +162,22 @@ class Authenticator:
         raise_for_response(response)
         return envelope.data(envelope.decode(response))
 
-    def _public_call(self, headers: dict[str, str]) -> Any:
+    def _public_call(self, device_id: str) -> Any:
+        headers = {"x-device-id": device_id}
+
         def call(method: str, path: str, *, params: Any = None, json: Any = None) -> Any:
             response = self._http.request(method, f"{API_BASE}{path}", params=params, json=json, headers=headers)
             raise_for_response(response)
             return envelope.data(envelope.decode(response))
 
         return call
+
+
+def _session(payload: Any, customer_id: str, device_id: str) -> Session:
+    if isinstance(payload, dict) and payload.get("isPasswordChangeRequired"):
+        raise PasswordChangeRequired()
+    access, refresh = _tokens(payload)
+    return Session(device_id=device_id, customer_id=customer_id, access_token=access, refresh_token=refresh)
 
 
 def _when(moment: datetime) -> str:

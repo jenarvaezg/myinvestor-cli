@@ -11,17 +11,9 @@ import typer
 
 from myinvestor.auth import Authenticator
 from myinvestor.browser_login import DEFAULT_LOGIN_TIMEOUT, browser_login
-from myinvestor.cli_common import (
-    FormatOpt,
-    app,
-    build_client,
-    err,
-    fatal,
-    get_store,
-    local_time,
-    signature_ui,
-    stdin_is_tty,
-)
+from myinvestor.cli_common import FormatOpt, app, build_client, err, fatal, get_store, local_time, stdin_is_tty
+from myinvestor.cli_direct_login import DirectLogin, direct_login
+from myinvestor.code_input import CodeSource, fd_codes, line_codes
 from myinvestor.errors import InputError, NotLoggedInError, SessionExpiredError
 from myinvestor.http import build_http_client
 from myinvestor.output import OutputFormat, print_json, render
@@ -31,11 +23,13 @@ from myinvestor.session_info import SessionInfo
 PASSWORD_ENV = "MYINVESTOR_PASSWORD"
 
 
-def _read_secret(from_stdin: bool, prompt: str, env: str | None = None) -> str:
+def _read_secret(from_stdin: bool, prompt: str, env: str | None = None, saved: str | None = None) -> str:
     if from_stdin:
         value = sys.stdin.readline().strip()
     elif env and os.environ.get(env):
         value = os.environ[env]
+    elif saved:
+        value = saved
     elif stdin_is_tty():
         value = getpass.getpass(f"{prompt}: ")
     else:
@@ -86,12 +80,36 @@ def login(
     timeout: Annotated[
         float, typer.Option(help="Segundos para completar el login en el navegador.")
     ] = DEFAULT_LOGIN_TIMEOUT,
+    start: Annotated[
+        bool,
+        typer.Option(
+            "--start",
+            help="--direct en dos pasos: si MyInvestor pide un código, lo envía, deja el login pendiente y sale "
+            "con 13. Si no le pasas la contraseña, usa la guardada con --remember.",
+        ),
+    ] = False,
+    code: Annotated[
+        str | None,
+        typer.Option("--code", help="--direct en dos pasos: completa el login pendiente de --start con este código."),
+    ] = None,
+    code_stdin: Annotated[
+        bool,
+        typer.Option(help="--direct: leer el código SMS de la siguiente línea de stdin cuando se pida."),
+    ] = False,
+    code_fd: Annotated[
+        int | None,
+        typer.Option(
+            min=0, help="--direct: leer el código SMS de este descriptor de fichero (p. ej. 3) cuando se pida."
+        ),
+    ] = None,
 ) -> None:
     """Inicia sesión. Por defecto abre un navegador: entras como siempre y el CLI se queda con la sesión."""
     if direct and refresh_token_stdin:
         raise InputError("Usa --direct o --refresh-token-stdin, no ambos.")
     if remember and not direct:
         raise InputError("--remember solo tiene sentido con --direct (los otros logins no usan la contraseña).")
+    how = DirectLogin(remember=remember, start=start, code=code, code_source=_code_source(code_stdin, code_fd))
+    _check_direct_options(direct, how)
     store = get_store()
     previous = store.load()
     device = device_id or (previous.device_id if previous else None) or new_device_id()
@@ -104,12 +122,9 @@ def login(
                 Session(device_id=device, customer_id=base.customer_id, refresh_token=token)
             )
     elif direct:
-        user = base.customer_id or typer.prompt("DNI/NIE")
-        password = _read_secret(password_stdin, "Contraseña", PASSWORD_ENV)
-        with build_http_client() as http:
-            session = Authenticator(http).login_direct(user, password, base, signature_ui())
-        if remember:  # only once MyInvestor accepted it
-            store.save_password(user, password)
+        session = direct_login(
+            store, base, how, lambda saved: _read_secret(password_stdin, "Contraseña", PASSWORD_ENV, saved)
+        )
     else:
         err.print("Abriendo el navegador: inicia sesión en MyInvestor y espera a que se cierre solo…")
         session = browser_login(timeout=timeout)
@@ -117,12 +132,32 @@ def login(
     if previous and previous.customer_id and previous.customer_id != session.customer_id:
         store.delete_password(previous.customer_id)
     store.save(session)
+    store.clear_pending_login()  # a finished login makes any half-done `--start` useless
     if session.customer_id:  # a manual login resumes a paused unattended re-login
         store.clear_relogin_block(session.customer_id)
     err.print(
         f"[green]Sesión iniciada[/green] (token hasta las {local_time(session.expires_at)}, "
         f"renovable hasta las {local_time(session.refresh_expires_at)} si no se usa)."
     )
+
+
+def _code_source(code_stdin: bool, code_fd: int | None) -> CodeSource | None:
+    if code_stdin and code_fd is not None:
+        raise InputError("Usa --code-stdin o --code-fd, no ambos.")
+    if code_stdin:
+        return line_codes(sys.stdin, "stdin")
+    return fd_codes(code_fd) if code_fd is not None else None
+
+
+def _check_direct_options(direct: bool, how: DirectLogin) -> None:
+    if not direct and (how.start or how.code is not None or how.code_source):
+        raise InputError("--start, --code, --code-stdin y --code-fd solo valen con --direct.")
+    if how.start and how.code is not None:
+        raise InputError("--start envía el código y --code lo completa: son dos ejecuciones distintas.")
+    if how.code_source and (how.start or how.code is not None):
+        raise InputError("--code-stdin/--code-fd son para el login en un paso, no con --start ni --code.")
+    if how.code is not None and not how.code.strip():
+        raise InputError("--code vacío.")
 
 
 @app.command()
@@ -134,6 +169,7 @@ def logout(
     """Borra la sesión local y la contraseña guardada. Los tokens ya emitidos caducan solos (≤ 30 min)."""
     store = get_store()
     session = store.load()
+    store.clear_pending_login()
     if session and session.customer_id:
         store.delete_password(session.customer_id)
     if forget_device or session is None:

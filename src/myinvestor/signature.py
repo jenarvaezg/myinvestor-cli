@@ -18,7 +18,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from myinvestor.errors import ApiError, SignatureError, SignatureRequired
 
@@ -86,6 +86,13 @@ class SignatureUI(Protocol):
     def approve_in_app(self, request: SignatureRequest) -> None: ...
 
 
+@runtime_checkable
+class MethodFilter(Protocol):
+    """A UI that can only do some methods (e.g. codes but no app approval): the rest are never started."""
+
+    def supports(self, method: str) -> bool: ...
+
+
 Call = Callable[..., Any]  # (method, path, *, params=None, json=None) -> response payload `data`
 
 
@@ -114,10 +121,10 @@ class Signer:
             if not request.pending_methods:  # last factor accepted, COMPLETE not set yet
                 request = self._settle(request)
                 continue
-            method = _next_method(request, tried)
-            if method is None:
+            if _next_method(request, tried) is None:
                 raise SignatureError(_no_method_message(request, tried))
-            if ui is None:
+            method = _next_method(request, tried, ui) if ui is not None else None
+            if ui is None or method is None:  # checked before starting it: no SMS or push nobody can answer
                 raise SignatureRequired(sorted({m for g in request.pending_methods for m in g}))
             tried.add(method)
             challenge = self._start(request.id, method)
@@ -129,6 +136,28 @@ class Signer:
         if request.status != COMPLETE:
             raise SignatureError(f"La firma ha terminado en estado {request.status}.")
         return request
+
+    def start_code(self, request: SignatureRequest) -> Challenge:
+        """Send the code (SMS, email…) of the first pending code method, for a two-step login."""
+        method = next((m for group in request.pending_methods for m in group if m in OTP_METHODS), None)
+        if method is None:
+            raise SignatureError(
+                f"MyInvestor no pide un código sino {_describe(request.pending_methods)}: el login en dos pasos solo "
+                "sirve para códigos. Si basta con aprobarlo en la app, usa `myinvestor --approve login --direct`."
+            )
+        return self._start(request.id, method)
+
+    def submit_code(self, request_id: str, challenge: Challenge, code: str) -> SignatureRequest | None:
+        """Validate one code; the updated request, or None when MyInvestor says the code is wrong."""
+        path = f"{self._base}/{request_id}/validate/{challenge.signature_id}"
+        try:
+            data = self._call("POST", path, json={"code": code.strip()})
+        except ApiError as exc:
+            if exc.status not in WRONG_CODE_STATUSES:
+                raise
+            return None  # a wrong code may come back as a 4xx instead of a still-pending request
+        updated = parse_signature_request(data) or self._status(request_id)
+        return None if updated.is_pending and updated.is_waiting_for(challenge.method) else updated
 
     def _start(self, request_id: str, method: str) -> Challenge:
         data = self._call("POST", f"{self._base}/{request_id}", params={"method": method})
@@ -174,26 +203,28 @@ class Signer:
             code = ui.ask_code(challenge, attempt)
             if not code:
                 raise SignatureError("Firma cancelada.")
-            path = f"{self._base}/{request.id}/validate/{challenge.signature_id}"
-            try:
-                data = self._call("POST", path, json={"code": code.strip()})
-            except ApiError as exc:
-                if exc.status not in WRONG_CODE_STATUSES:
-                    raise
-                continue  # a wrong code may come back as a 4xx instead of a still-pending request
-            updated = parse_signature_request(data) or self._status(request.id)
-            if not (updated.is_pending and updated.is_waiting_for(challenge.method)):
+            updated = self.submit_code(request.id, challenge, code)
+            if updated is not None:
                 return updated
-            request = updated
         raise SignatureError(f"Código incorrecto {MAX_CODE_ATTEMPTS} veces.")
 
 
-def _next_method(request: SignatureRequest, tried: set[str]) -> str | None:
+def _next_method(request: SignatureRequest, tried: set[str], ui: SignatureUI | None = None) -> str | None:
+    """First supported method not tried yet; with `ui`, also one that UI can do."""
     for group in request.pending_methods:
         for method in group:
-            if method in SUPPORTED_METHODS and method not in tried:
+            if method in SUPPORTED_METHODS and method not in tried and _can(ui, method):
                 return method
     return None
+
+
+def can_start(ui: SignatureUI | None, method: str) -> bool:
+    """Whether `ui` could complete `method`, so asking for something that needs it is worth it."""
+    return ui is not None and _can(ui, method)
+
+
+def _can(ui: SignatureUI | None, method: str) -> bool:
+    return not isinstance(ui, MethodFilter) or ui.supports(method)
 
 
 def _no_method_message(request: SignatureRequest, tried: set[str]) -> str:
