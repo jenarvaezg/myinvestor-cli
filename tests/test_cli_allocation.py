@@ -56,8 +56,8 @@ def mock_portfolio(mock_api: respx.MockRouter) -> dict[str, respx.Route]:
             "INDEXED_FUND": {"investmentList": [position(FUND_A, 600.0)]},
             "BROKER": {
                 "investmentList": [
-                    position(ETF, 100.0, "BROKER", brokerProductType="ETF"),
-                    position(STOCK, 100.0, "BROKER", brokerProductType="STOCK"),
+                    position(ETF, 100.0, "BROKER", brokerProductType="ETF", investmentName="PHYSICAL GOLD ETC"),
+                    position(STOCK, 100.0, "BROKER", brokerProductType="RV", investmentName="ACME MOTORS"),
                 ]
             },
         },
@@ -99,17 +99,17 @@ def test_allocation_by_asset(mock_api: respx.MockRouter, store: MemorySessionSto
 
     rows = json_rows("allocation")
 
-    assert [(r["clave"], r["valor"], r["peso_pct"]) for r in rows] == [
-        ("VARIABLE_INCOME", Decimal("900.00"), Decimal("45.00")),  # fund A in both accounts + the stock
-        ("RENTA VARIABLE", Decimal("700.00"), Decimal("35.00")),  # the plan, from its sheet
-        ("FIXED_INCOME", Decimal("300.00"), Decimal("15.00")),
-        ("ETF", Decimal("100.00"), Decimal("5.00")),
-        ("total", Decimal("2000.00"), Decimal("100.00")),
+    # equity: fund A in both accounts (VARIABLE_INCOME), the share (RV) and the plan («RENTA VARIABLE»)
+    assert [(r["clave"], r["origen"], r["valor"], r["peso_pct"]) for r in rows] == [
+        ("renta_variable", "RENTA VARIABLE, RV, VARIABLE_INCOME", Decimal("1600.00"), Decimal("80.00")),
+        ("renta_fija", "FIXED_INCOME", Decimal("300.00"), Decimal("15.00")),
+        ("materias_primas", "ETF: PHYSICAL", Decimal("100.00"), Decimal("5.00")),
+        ("total", None, Decimal("2000.00"), Decimal("100.00")),
     ]
     total = rows[-1]
     assert (total["invertido"], total["ganancia"]) == (Decimal("1850.00"), Decimal("150.00"))
     assert total["ter"] == Decimal("0.1273")  # (800 * 0.10 + 300 * 0.20) / 1100: funds only
-    assert rows[0]["ter"] == Decimal("0.1000")  # the stock has no TER: it does not dilute it
+    assert rows[0]["ter"] == Decimal("0.1000")  # the share and the plan have no TER: they do not dilute it
     assert all("consultado_en" in r for r in rows)
     # one sheet per distinct fund; ETFs and stocks are classified without one; no cash by default
     assert (routes[FUND_A].call_count, routes[FUND_B].call_count, routes[ETF].call_count) == (1, 1, 0)
@@ -119,8 +119,8 @@ def test_allocation_by_asset(mock_api: respx.MockRouter, store: MemorySessionSto
 @pytest.mark.parametrize(
     ("by", "keys"),
     [
-        ("geo", ["sin clasificar", "GLOBAL", "EUROPE"]),
-        ("category", ["RV Global", "RV MIXTA", "RF Euro", "sin clasificar"]),
+        ("geo", ["sin_clasificar", "GLOBAL", "EUROPE"]),
+        ("category", ["RV Global", "RV MIXTA", "RF Euro", "sin_clasificar"]),
     ],
 )
 def test_allocation_by_geo_and_category(
@@ -139,8 +139,8 @@ def test_allocation_by_product_needs_no_plan_sheet(mock_api: respx.MockRouter, s
         (FUND_A, f"Fondo {FUND_A}", Decimal("800.00"), Decimal("0.1000")),
         ("N0001", "Plan", Decimal("700.00"), None),
         (FUND_B, f"Fondo {FUND_B}", Decimal("300.00"), Decimal("0.2000")),
-        (ETF, f"Fondo {ETF}", Decimal("100.00"), None),
-        (STOCK, f"Fondo {STOCK}", Decimal("100.00"), None),
+        (ETF, "PHYSICAL GOLD ETC", Decimal("100.00"), None),
+        (STOCK, "ACME MOTORS", Decimal("100.00"), None),
         ("total", None, Decimal("2000.00"), Decimal("0.1273")),
     ]
     assert routes["plan"].call_count == 0
@@ -174,24 +174,35 @@ def test_allocation_target_shows_deviation_and_contribution(
 ) -> None:
     mock_portfolio(mock_api)
     target = tmp_path / "objetivo.json"
-    target.write_text(json.dumps({"VARIABLE_INCOME": 70, "FIXED_INCOME": 20, "COMMODITIES": 10}))
+    target.write_text(json.dumps({"renta_variable": 70, "renta_fija": 20, "monetario": 10}))
 
     result = invoke("allocation", "--target", str(target), "-f", "json")
 
     rows = {r["clave"]: r for r in json.loads(result.stdout, parse_float=Decimal)}
-    # base = 900 + 300 = 1200 (the plan and the ETF have no target); RF at 300 / 0.2 sets the final one at 1500
-    assert (rows["VARIABLE_INCOME"]["desviacion_pct"], rows["VARIABLE_INCOME"]["aportar"]) == (
-        Decimal("5.00"),
-        Decimal("150.00"),
-    )
-    assert (rows["FIXED_INCOME"]["desviacion_pct"], rows["FIXED_INCOME"]["aportar"]) == (
-        Decimal("5.00"),
+    # base = 1600 + 300 = 1900 (commodities have no target); equity at 1600 / 0.7 sets the final one at 2285.71
+    assert (rows["renta_variable"]["desviacion_pct"], rows["renta_variable"]["aportar"]) == (
+        Decimal("14.21"),
         Decimal("0.00"),
     )
-    assert (rows["COMMODITIES"]["valor"], rows["COMMODITIES"]["aportar"]) == (Decimal("0.00"), Decimal("150.00"))
-    assert rows["ETF"]["objetivo_pct"] is None and rows["ETF"]["aportar"] is None
-    assert (rows["total"]["objetivo_pct"], rows["total"]["aportar"]) == (Decimal(100), Decimal("300.00"))
-    assert "RENTA VARIABLE" in result.stderr and "ETF" in result.stderr
+    assert (rows["renta_fija"]["desviacion_pct"], rows["renta_fija"]["aportar"]) == (
+        Decimal("-4.21"),
+        Decimal("157.14"),
+    )
+    assert (rows["monetario"]["valor"], rows["monetario"]["aportar"]) == (Decimal("0.00"), Decimal("228.57"))
+    assert rows["materias_primas"]["objetivo_pct"] is None and rows["materias_primas"]["aportar"] is None
+    assert (rows["total"]["objetivo_pct"], rows["total"]["aportar"]) == (Decimal(100), Decimal("385.71"))
+    assert "materias_primas" in result.stderr
+
+
+def test_allocation_reports_untranslated_asset_labels(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_portfolio(mock_api)
+    mock_api.get(f"{CPERF}/v2/pension-plans/N0001").respond(200, json=ok({"activeType": "Garantizado"}))
+
+    result = invoke("allocation", "-f", "json")
+
+    rows = {r["clave"]: r for r in json.loads(result.stdout, parse_float=Decimal)}
+    assert (rows["sin_clasificar"]["origen"], rows["sin_clasificar"]["valor"]) == ("Garantizado", Decimal("700.00"))
+    assert "«Garantizado»" in result.stderr
 
 
 @pytest.mark.parametrize(

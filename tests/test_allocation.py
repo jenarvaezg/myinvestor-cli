@@ -20,6 +20,7 @@ from myinvestor.allocation import (
     share,
     total_row,
     unbalanced_keys,
+    untranslated_labels,
     weighted_ter,
 )
 from myinvestor.errors import InputError
@@ -59,16 +60,17 @@ def inv(isin: str, kind: str = "INDEXED_FUND", **overrides: Any) -> Investment:
 
 def test_group_by_asset_weights_and_weighted_ter() -> None:
     holdings = [
-        holding("A", "600", asset="VARIABLE_INCOME", ter=Decimal("0.10")),
-        holding("B", "300", asset="VARIABLE_INCOME", ter=Decimal("0.40")),
-        holding("C", "100", asset="FIXED_INCOME", ter=None),
+        holding("A", "600", asset="renta_variable", asset_label="VARIABLE_INCOME", ter=Decimal("0.10")),
+        holding("B", "300", asset="renta_variable", asset_label="Renta Variable", ter=Decimal("0.40")),
+        holding("C", "100", asset="renta_fija", ter=None),
     ]
 
     rows = group(holdings, Grouping.asset)
 
     assert rows == [
         {
-            "clave": "VARIABLE_INCOME",
+            "clave": "renta_variable",
+            "origen": "Renta Variable, VARIABLE_INCOME",
             "valor": Decimal("900"),
             "peso_pct": Decimal("90.00"),
             "invertido": Decimal("880"),
@@ -76,7 +78,8 @@ def test_group_by_asset_weights_and_weighted_ter() -> None:
             "ter": Decimal("0.2000"),  # (600 * 0.10 + 300 * 0.40) / 900
         },
         {
-            "clave": "FIXED_INCOME",
+            "clave": "renta_fija",
+            "origen": None,
             "valor": Decimal("100"),
             "peso_pct": Decimal("10.00"),
             "invertido": Decimal("90"),
@@ -143,7 +146,13 @@ def test_fund_is_classified_with_its_sheet() -> None:
 
     h = from_investment(sec(), inv("IE0000000001"), sheet)
 
-    assert (h.asset, h.geo, h.category, h.ter) == ("VARIABLE_INCOME", "GLOBAL", "RV Global", Decimal("0.12"))
+    assert (h.asset, h.asset_label, h.geo, h.category, h.ter) == (
+        "renta_variable",
+        "VARIABLE_INCOME",
+        "GLOBAL",
+        "RV Global",
+        Decimal("0.12"),
+    )
     assert (h.product, h.account_id, h.account_name, h.account_kind) == ("IE0000000001", "201", "S201", "valores")
     assert (h.value, h.invested, h.profit) == (Decimal("1100.55"), Decimal("1000.0"), Decimal("100.55"))
 
@@ -153,10 +162,29 @@ def test_fund_without_sheet_is_unclassified_but_keeps_myinvestor_category() -> N
     assert (h.asset, h.geo, h.category, h.ter) == (UNCLASSIFIED, UNCLASSIFIED, "INDEXADO", None)
 
 
-@pytest.mark.parametrize(("broker_type", "asset"), [("STOCK", "VARIABLE_INCOME"), ("ETF", "ETF"), (None, UNCLASSIFIED)])
-def test_broker_asset_comes_from_its_product_type(broker_type: str | None, asset: str) -> None:
-    h = from_investment(sec(), inv("US0000000001", "BROKER", brokerProductType=broker_type), None)
-    assert (h.asset, h.geo, h.ter) == (asset, UNCLASSIFIED, None)
+@pytest.mark.parametrize(
+    ("broker_type", "name", "asset", "label"),
+    [
+        ("RV", "ACME MOTORS", "renta_variable", "RV"),  # a share
+        ("ETF", "EUR HEDGED SILVER", "materias_primas", "ETF: SILVER"),
+        ("ETF", "PHYSICAL GOLD ETC", "materias_primas", "ETF: PHYSICAL"),
+        ("ETF", "CORE MSCI WORLD UCITS ETF", "renta_variable", "ETF: MSCI"),
+        ("ETF", "THEMATIC UCITS ETF", UNCLASSIFIED, "ETF"),  # never «ETF» as the class
+        (None, "SOMETHING", UNCLASSIFIED, "BROKER"),
+    ],
+)
+def test_broker_asset_comes_from_its_product_type_or_underlying(
+    broker_type: str | None, name: str, asset: str, label: str
+) -> None:
+    position = inv("US0000000001", "BROKER", brokerProductType=broker_type, investmentName=name)
+    h = from_investment(sec(), position, None)
+    assert (h.asset, h.asset_label, h.geo, h.ter) == (asset, label, UNCLASSIFIED, None)
+    assert untranslated_labels([h]) == ([label] if asset == UNCLASSIFIED else [])
+
+
+def test_broker_unknown_category_is_unclassified() -> None:
+    position = inv("US0000000001", "BROKER", brokerProductType="RV", myInvestorCategory="Desconocido")
+    assert from_investment(sec(), position, None).category == UNCLASSIFIED
 
 
 def test_broker_without_isin_uses_ticker() -> None:
@@ -197,7 +225,7 @@ def test_pension_plan_is_classified_with_its_sheet() -> None:
         "N0001",
         "P301",
         "pensiones",
-        "RENTA VARIABLE",
+        "renta_variable",
         "RV MIXTA",
         UNCLASSIFIED,
     )

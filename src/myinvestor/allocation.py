@@ -1,8 +1,9 @@
 """Portfolio allocation: weights by asset type, region, category, product or account. No I/O.
 
 Each position (fund, ETF, stock, pension plan and, optionally, cash) becomes a `Holding` with the
-classification of its sheet; `group` adds them up per key and `rebalance` compares the result with
-target weights, computing how much to contribute to each key to reach them without selling.
+classification of its sheet, its asset type translated to a canonical class (see `asset_classes`).
+`group` adds them up per key and `rebalance` compares the result with target weights, computing how
+much to contribute to each key to reach them without selling.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 from typing import Any
 
+from myinvestor.asset_classes import AssetClass, asset_class, known, underlying
 from myinvestor.errors import InputError
 from myinvestor.models import (
     CashAccount,
@@ -24,12 +26,11 @@ from myinvestor.models import (
     SecuritiesAccount,
 )
 
-UNCLASSIFIED = "sin clasificar"
-CASH = "efectivo"
+UNCLASSIFIED = AssetClass.sin_clasificar.value  # the one "unknown" marker, in every grouping
+CASH = AssetClass.efectivo.value
 TOTAL = "total"
 BROKER = "BROKER"  # `investmentProductType` of stocks and ETFs
 MANAGED_PORTFOLIO = "SECURITIES_PORTFOLIO"  # `accountType` of a robo-advisor portfolio («Metal»…)
-BROKER_ASSETS = {"STOCK": "VARIABLE_INCOME"}  # a share is equity; ETFs keep their product type
 HUNDRED = Decimal(100)
 PCT_STEP = Decimal("0.01")
 TER_STEP = Decimal("0.0001")
@@ -51,8 +52,9 @@ class Grouping(StrEnum):
     account = "account"
 
 
-# Label columns that follow `clave` in each grouping.
+# Label columns that follow `clave` in each grouping (`origen`: the API labels behind an asset class).
 LABEL_COLUMNS: dict[Grouping, tuple[str, ...]] = {
+    Grouping.asset: ("origen",),
     Grouping.product: ("nombre",),
     Grouping.account: ("cuenta_id", "tipo"),
 }
@@ -60,7 +62,11 @@ LABEL_COLUMNS: dict[Grouping, tuple[str, ...]] = {
 
 @dataclass(frozen=True)
 class Holding:
-    """One position, classified. `ter` is a percent, `None` when unknown (broker, plans, cash)."""
+    """One position, classified. `ter` is a percent, `None` when unknown (broker, plans, cash).
+
+    `asset` is an `AssetClass` value; `asset_label` is what it was translated from (`VARIABLE_INCOME`,
+    «Renta Variable», `RV`, `ETF: GOLD`…), `None` when there was nothing to translate.
+    """
 
     product: str  # ISIN, DGS code, ticker or `efectivo`
     name: str | None
@@ -74,6 +80,7 @@ class Holding:
     geo: str = UNCLASSIFIED
     category: str = UNCLASSIFIED
     ter: Decimal | None = None
+    asset_label: str | None = None
 
     def key(self, by: Grouping) -> str:
         keys = {
@@ -103,6 +110,17 @@ def is_fund(inv: Investment) -> bool:
     return inv.investment_product_type != BROKER and bool(inv.isin)
 
 
+def broker_asset(inv: Investment) -> tuple[AssetClass, str]:
+    """A share (`RV`) is equity; an ETF/ETC is classified by its underlying, read from its name and category."""
+    kind = inv.broker_product_type or BROKER
+    direct = asset_class(kind)
+    if direct is not AssetClass.sin_clasificar:
+        return direct, kind
+    text = " ".join(t for t in (inv.investment_name, known(inv.my_investor_category)) if t)
+    hit = underlying(text)
+    return (hit[0], f"{kind}: {hit[1]}") if hit else (AssetClass.sin_clasificar, kind)
+
+
 def from_investment(sec: SecuritiesAccount, inv: Investment, sheet: FundSheet | None) -> Holding:
     base = Holding(
         product=inv.isin or inv.ticker or inv.investment_name or UNCLASSIFIED,
@@ -113,23 +131,25 @@ def from_investment(sec: SecuritiesAccount, inv: Investment, sheet: FundSheet | 
         value=inv.market_value or Decimal(0),
         invested=inv.initial_investment,
         profit=inv.profit,
-        category=inv.my_investor_category or UNCLASSIFIED,
+        category=known(inv.my_investor_category) or UNCLASSIFIED,
     )
     if inv.investment_product_type == BROKER:
-        kind = inv.broker_product_type
-        return _replace(base, asset=BROKER_ASSETS.get(kind, kind) if kind else UNCLASSIFIED)
+        asset, label = broker_asset(inv)
+        return _replace(base, asset=asset.value, asset_label=label)
     if sheet is None:
         return base
     return _replace(
         base,
-        asset=sheet.asset_type or UNCLASSIFIED,
-        geo=sheet.geo_zone or UNCLASSIFIED,
-        category=sheet.category or base.category,
+        asset=asset_class(sheet.asset_type).value,
+        asset_label=sheet.asset_type,
+        geo=known(sheet.geo_zone) or UNCLASSIFIED,
+        category=known(sheet.category) or base.category,
         ter=sheet.ter,
     )
 
 
 def from_pension(account: PensionAccount, plan: PensionPlanPosition, sheet: PensionPlanSheet | None) -> Holding:
+    label = sheet.active_type if sheet else None
     return Holding(
         product=plan.dgs_code,
         name=plan.name,
@@ -139,8 +159,9 @@ def from_pension(account: PensionAccount, plan: PensionPlanPosition, sheet: Pens
         value=plan.market_value or Decimal(0),
         invested=plan.total_invested,
         profit=plan.profit,
-        asset=(sheet.active_type if sheet else None) or UNCLASSIFIED,
-        category=(sheet.category if sheet else None) or UNCLASSIFIED,
+        asset=asset_class(label).value,
+        asset_label=label,
+        category=known(sheet.category if sheet else None) or UNCLASSIFIED,
     )
 
 
@@ -201,9 +222,12 @@ def _known_sum(values: Iterable[Decimal | None]) -> Decimal | None:
     return sum(known, Decimal(0)) if known else None
 
 
-def _labels(by: Grouping, h: Holding | None) -> dict[str, Any]:
-    if h is None:
+def _labels(by: Grouping, holdings: Sequence[Holding]) -> dict[str, Any]:
+    if not holdings:
         return dict.fromkeys(LABEL_COLUMNS.get(by, ()))
+    h = holdings[0]
+    if by is Grouping.asset:
+        return {"origen": ", ".join(sorted({x.asset_label for x in holdings if x.asset_label})) or None}
     if by is Grouping.product:
         return {"nombre": h.name}
     if by is Grouping.account:
@@ -215,7 +239,7 @@ def _row(key: str, by: Grouping, holdings: Sequence[Holding], total: Decimal) ->
     value = _value(holdings)
     return {
         "clave": key,
-        **_labels(by, holdings[0] if holdings else None),
+        **_labels(by, holdings),
         "valor": value,
         "peso_pct": share(value, total),
         "invertido": _known_sum(h.invested for h in holdings),
@@ -240,7 +264,7 @@ def group(holdings: Sequence[Holding], by: Grouping) -> list[dict[str, Any]]:
 
 def total_row(holdings: Sequence[Holding], by: Grouping, label: str = TOTAL) -> dict[str, Any]:
     """The whole portfolio: `ter` is its value-weighted TER (over the holdings with a known TER)."""
-    return {**_row(label, by, holdings, _value(holdings)), **_labels(by, None)}
+    return {**_row(label, by, holdings, _value(holdings)), **_labels(by, [])}
 
 
 # ---- targets ----------------------------------------------------------------
@@ -249,7 +273,7 @@ def total_row(holdings: Sequence[Holding], by: Grouping, label: str = TOTAL) -> 
 def parse_target(data: Any) -> dict[str, Decimal]:
     """Target weights from a JSON object `{clave: percent}` that sums to 100."""
     if not isinstance(data, dict):
-        raise InputError('El objetivo debe ser un objeto JSON {"clave": porcentaje}, p. ej. {"VARIABLE_INCOME": 80}.')
+        raise InputError('El objetivo debe ser un objeto JSON {"clave": porcentaje}, p. ej. {"renta_variable": 80}.')
     if not data:
         raise InputError("El objetivo está vacío.")
     targets: dict[str, Decimal] = {}
@@ -311,3 +335,8 @@ def target_total(rows: Sequence[dict[str, Any]], total: dict[str, Any]) -> dict[
         "desviacion_pct": None,
         "aportar": _known_sum(r["aportar"] for r in rows),
     }
+
+
+def untranslated_labels(holdings: Iterable[Holding]) -> list[str]:
+    """Asset-type labels that fell into `sin_clasificar`, to report them."""
+    return sorted({h.asset_label for h in holdings if h.asset == UNCLASSIFIED and h.asset_label})

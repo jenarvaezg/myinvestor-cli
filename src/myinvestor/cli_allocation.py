@@ -25,6 +25,7 @@ from myinvestor.allocation import (
     target_total,
     total_row,
     unbalanced_keys,
+    untranslated_labels,
 )
 from myinvestor.cli_common import FormatOpt, app, build_client, err, iso_moment, now_local
 from myinvestor.client import MyInvestorClient
@@ -81,6 +82,12 @@ def load_target(path: Path) -> dict[str, Decimal]:
     return parse_target(data)
 
 
+def _report_untranslated(labels: list[str]) -> None:
+    if labels:
+        names = ", ".join(f"«{escape(label)}»" for label in labels)
+        err.print(f"[dim]Tipos de activo sin traducir (van a sin_clasificar): {names}.[/dim]")
+
+
 def _report_untargeted(keys: list[str]) -> None:
     if keys:
         names = ", ".join(f"«{escape(k)}»" for k in keys)
@@ -100,7 +107,7 @@ def allocation(
         Path | None,
         typer.Option(
             "--target",
-            help='JSON con los pesos objetivo por clave, en %, que sumen 100: {"VARIABLE_INCOME": 80, …}.',
+            help='JSON con los pesos objetivo por clave, en %, que sumen 100: {"renta_variable": 80, …}.',
         ),
     ] = None,
     fmt: FormatOpt = OutputFormat.table,
@@ -108,7 +115,9 @@ def allocation(
     """Reparto de la cartera (fondos, ETF, acciones y planes) con el peso de cada clave y el TER medio.
 
     `ter` es la media ponderada por valor de las posiciones con TER conocido (los fondos); la fila
-    `total` lleva el de toda la cartera. Lo que no tiene clasificación va a «sin clasificar». Con
+    `total` lleva el de toda la cartera. Con `--by asset` la clave es una clase canónica (`renta_variable`,
+    `renta_fija`, `monetario`, `mixto`, `materias_primas`…) y `origen`, las etiquetas de la API de las
+    que sale. Lo que no tiene clasificación va a `sin_clasificar`. Con
     `--target`, `objetivo_pct`, `desviacion_pct` y `aportar`: cuánto aportar a cada clave para llegar
     al objetivo sin vender. En JSON/CSV/TSV cada fila lleva además `consultado_en`.
     """
@@ -116,6 +125,8 @@ def allocation(
     consulted = now_local()
     with build_client() as client:
         holdings = collect(client, by, include_cash=include_cash)
+    if by is Grouping.asset:
+        _report_untranslated(untranslated_labels(holdings))
     rows = group(holdings, by)
     total = total_row(holdings, by, TOTAL.upper() if fmt is OutputFormat.table else TOTAL)
     if targets is not None:

@@ -119,19 +119,43 @@ Los fondos suelen ir con el VL de uno o dos días hábiles antes, así que compa
 
 | `--by` | `clave` | De dónde sale |
 |---|---|---|
-| `asset` (por defecto) | tipo de activo: `VARIABLE_INCOME`, `FIXED_INCOME`, `MONEY_MARKET`, `COMMODITIES`, `MIXED`, `ALTERNATIVES`… | fondos: `assetType` de su ficha; acciones: `VARIABLE_INCOME`; ETF: su tipo de producto (`ETF`); planes: `activeType` de su ficha, tal cual |
-| `geo` | zona: `GLOBAL`, `EUROPE`, `UNITED_STATES`, `EMERGENT_MARKETS`… | fondos: `geoZone` de su ficha; acciones, ETF y planes: «sin clasificar» |
-| `category` | categoría | fondos y planes: `category` de su ficha; si no, el `myInvestorCategory` de la posición |
+| `asset` (por defecto) | clase de activo canónica (tabla de abajo), con `origen`: las etiquetas de la API de las que sale | fondos: `assetType` de su ficha; planes: `activeType` de su ficha; acciones y ETF: ver abajo |
+| `geo` | zona: `GLOBAL`, `EUROPE`, `UNITED_STATES`, `EMERGENT_MARKETS`… | fondos: `geoZone` de su ficha; acciones, ETF y planes: `sin_clasificar` |
+| `category` | categoría | fondos y planes: `category` de su ficha; si no, el `myInvestorCategory` de la posición («Desconocido» cuenta como `sin_clasificar`) |
 | `product` | ISIN (o código del plan, o ticker), con `nombre` | la posición |
 | `account` | nombre de la cuenta (el de la cartera gestionada, p. ej. `METAL`, o el código), con `cuenta_id` y `tipo` (`valores`, `cartera`, `pensiones`, `efectivo`) | la cuenta |
 
-Cada fila trae `valor`, `peso_pct` (% sobre el total), `invertido`, `ganancia` y `ter`, la media ponderada por valor de las posiciones con TER conocido (solo los fondos: acciones, ETF, planes y efectivo no lo tienen y no lo diluyen). La última fila es el total (`clave: "total"`, `TOTAL` en la tabla) y su `ter` es el **TER medio ponderado de la cartera**. Lo que no tiene clasificación va a `sin clasificar`. En JSON/CSV/TSV cada fila lleva `consultado_en`, como `holdings`.
+Cada fila trae `valor`, `peso_pct` (% sobre el total), `invertido`, `ganancia` y `ter`, la media ponderada por valor de las posiciones con TER conocido (solo los fondos: acciones, ETF, planes y efectivo no lo tienen y no lo diluyen). La última fila es el total (`clave: "total"`, `TOTAL` en la tabla) y su `ter` es el **TER medio ponderado de la cartera**. Lo que no tiene clasificación va a `sin_clasificar`, el único marcador de «desconocido» en todas las agrupaciones. En JSON/CSV/TSV cada fila lleva `consultado_en`, como `holdings`.
 
-La clasificación sale de la ficha de cada fondo (`/funds/{isin}`, una petición por ISIN distinto aunque esté en varias cuentas). El catálogo (`/funds`) trae lo mismo, pero solo se puede buscar de uno en uno (costaría igual) o recorrer entero (miles de fondos); la ficha, además, responde también por fondos que ya no se comercializan. Las acciones y ETF no piden nada: se clasifican con el tipo de producto que trae la posición. La ficha del plan de pensiones solo se pide con `--by asset` o `--by category`, que son las que la usan.
+**Clases de activo.** MyInvestor usa vocabularios distintos según el producto (códigos en los fondos, texto libre en los planes, `RV`/`ETF` en el broker), así que `--by asset` los traduce a un conjunto fijo (`src/myinvestor/asset_classes.py`). Las etiquetas se comparan sin tildes ni mayúsculas:
+
+| Clase | Etiquetas |
+|---|---|
+| `renta_variable` | `VARIABLE_INCOME`, `RV` (acción en el broker), `STOCK`, «Renta Variable…» |
+| `renta_fija` | `FIXED_INCOME`, `RF`, «Renta Fija…» |
+| `monetario` | `MONEY_MARKET`, «Mercado monetario», «Monetario» |
+| `mixto` | `MIXED`, «Mixto», «Renta Fija Mixta…», «Renta Variable Mixta…» |
+| `materias_primas` | `COMMODITIES`, «Materias primas», `ETC` |
+| `alternativos` | `ALTERNATIVES`, «Inversión alternativa» |
+| `inmobiliario` | «Inmobiliario», `REAL_ESTATE` (no se ha visto ningún código así en la API) |
+| `efectivo` | las cuentas de efectivo con `--include-cash` |
+| `sin_clasificar` | lo demás («Garantizado», «Desconocido», un ETF cuyo nombre no dice qué replica…); las etiquetas sin traducir se avisan en stderr |
+
+Las **acciones** (`brokerProductType: RV`) son `renta_variable`. Un **ETF o ETC** no se clasifica por el envoltorio sino por lo que replica, leído de su nombre (y de su categoría si la hay) con estas reglas, en orden; `origen` dice qué palabra decidió (`ETF: SILVER`):
+
+1. `MINERS`, `MINING`, `PRODUCERS` → `renta_variable` (empresas del sector: «Gold Miners» no es oro).
+2. `GOLD`, `SILVER`, `PLATINUM`, `PALLADIUM`, `PRECIOUS`, `PHYSICAL`, `ETC`, `COMMODIT…`, `ORO`, `PLATA` → `materias_primas`.
+3. `MONEY MARKET`, `OVERNIGHT`, `ESTR` → `monetario`.
+4. `BOND`, `TREASURY`, `GOVT`, `GOVERNMENT`, `AGGREGATE`, `CORPORATE`, `GILT`, `HIGH YIELD` → `renta_fija`.
+5. `MSCI`, `S&P`, `STOXX`, `NASDAQ`, `FTSE`, `DAX`, `IBEX`, `NIKKEI`, `TOPIX`, `RUSSELL`, `EQUITY`, `DIVIDEND` → `renta_variable`.
+
+Si ninguna encaja, `sin_clasificar` (nunca «ETF»). Con `--target`, las claves de `--by asset` son estas clases.
+
+La clasificación sale de la ficha de cada fondo (`/funds/{isin}`, una petición por ISIN distinto aunque esté en varias cuentas). El catálogo (`/funds`) trae lo mismo, pero solo se puede buscar de uno en uno (costaría igual) o recorrer entero (miles de fondos); la ficha, además, responde también por fondos que ya no se comercializan. Las acciones y ETF no piden nada: se clasifican con lo que trae la posición (tipo de producto, nombre y categoría). La ficha del plan de pensiones solo se pide con `--by asset` o `--by category`, que son las que la usan.
 
 Con `--include-cash` el saldo de las cuentas de efectivo (todas, como en `position`) entra como la clase `efectivo` (con `invertido` = saldo y `ganancia` = 0). En `--by account`, la cuenta de efectivo propia de una cartera gestionada (su `cashAccountId`) se suma a esa cartera en vez de salir como otra cuenta.
 
-`--target objetivo.json` compara con unos pesos objetivo, un objeto JSON `{clave: %}` que sume 100, con las mismas claves que `--by` (por ejemplo `{"VARIABLE_INCOME": 80, "FIXED_INCOME": 15, "COMMODITIES": 5}`). Añade `objetivo_pct`, `desviacion_pct` (peso actual − objetivo) y `aportar`, cuánto meter en cada clave para llegar al objetivo **sin vender**: el total final es el menor en el que ninguna clave queda por encima de su objetivo, y la fila total suma lo que hay que aportar. Las claves del objetivo que no tienes salen con `valor` 0. Las que tienes pero no están en el objetivo (o con 0) no se pueden reducir sin vender, así que quedan fuera del cálculo (se avisa en stderr): el peso actual y `aportar` se calculan solo sobre las claves con objetivo.
+`--target objetivo.json` compara con unos pesos objetivo, un objeto JSON `{clave: %}` que sume 100, con las mismas claves que `--by` (por ejemplo `{"renta_variable": 80, "renta_fija": 15, "materias_primas": 5}`). Añade `objetivo_pct`, `desviacion_pct` (peso actual − objetivo) y `aportar`, cuánto meter en cada clave para llegar al objetivo **sin vender**: el total final es el menor en el que ninguna clave queda por encima de su objetivo, y la fila total suma lo que hay que aportar. Las claves del objetivo que no tienes salen con `valor` 0. Las que tienes pero no están en el objetivo (o con 0) no se pueden reducir sin vender, así que quedan fuera del cálculo (se avisa en stderr): el peso actual y `aportar` se calculan solo sobre las claves con objetivo.
 
 ### Lo que viene: `upcoming`
 
