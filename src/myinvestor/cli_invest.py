@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 import typer
 
-from myinvestor.cli_common import FormatOpt, app, build_client, parse_day
+from myinvestor.cli_common import FormatOpt, app, build_client, iso_moment, now_local, parse_day
 from myinvestor.client import MyInvestorClient, Period
 from myinvestor.errors import InputError
 from myinvestor.models import Investment, Order, SecuritiesAccount
@@ -73,13 +73,20 @@ def holdings(
     ] = None,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
-    """Fondos, ETF y acciones de las cuentas de valores, con coste, valor y rentabilidad."""
+    """Fondos, ETF y acciones de las cuentas de valores, con coste, valor y rentabilidad.
+
+    En JSON/CSV/TSV cada fila lleva además `consultado_en` (fecha y hora de la consulta, con zona).
+    """
+    consulted = now_local()
     with build_client() as client:
         rows = [_holding_row(sec, inv) for sec in _securities(client, account) for inv in sec.investments]
     if kind:
         rows = [r for r in rows if (r["tipo"] == BROKER) == (kind is HoldingKind.broker)]
     rows.sort(key=lambda r: r["valor"] or 0, reverse=True)
-    render(rows, fmt, title="Cartera")
+    if fmt is OutputFormat.table:
+        render(rows, fmt, title=f"Cartera a {consulted:%Y-%m-%d %H:%M}")
+        return
+    render([{**r, "consultado_en": iso_moment(consulted)} for r in rows], fmt)
 
 
 def _order_row(order: Order) -> dict[str, Any]:

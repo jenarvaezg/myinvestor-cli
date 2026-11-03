@@ -252,7 +252,8 @@ def test_commands_only_send_gets(mock_api: respx.MockRouter, store: MemorySessio
     mock_api.get(f"{CPERF}/v2/pension-accounts/self").respond(200, json=ok([]))
     mock_api.get(url__regex=r".*/account/api/v3/account/.*").respond(200, json=ok({"flowList": []}))
     mock_api.get(f"{CPERF}/v2/automatic-contributions/self").respond(200, json=ok([]))
-    for args in (["position"], ["movements"], ["holds"], ["holdings"], ["orders", "--all"], ["contributions"]):
+    commands = ["position"], ["movements"], ["income"], ["holds"], ["holdings"], ["orders", "--all"], ["contributions"]
+    for args in commands:
         assert runner.invoke(app, [*args, "-f", "json"]).exit_code == 0, args
     assert mock_api.calls.call_count > 0
     assert {call.request.method for call in mock_api.calls} == {"GET"}
