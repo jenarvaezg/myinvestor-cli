@@ -297,7 +297,7 @@ Salida: lista de objetos.
 
 ### `pension-plans` — `myinvestor.pension-plans/1`
 
-El catálogo de planes; las mismas claves con filtros.
+El catálogo de planes; las mismas claves con filtros, `--featured` y `--mine`.
 
 Salida: lista de objetos.
 
@@ -308,6 +308,8 @@ Salida: lista de objetos.
 | `gestora` | string | sí | sí |  |
 | `categoria` | string | sí | sí |  |
 | `ter` | number (exacto) | sí | sí | en % |
+| `com_gestion` | number (exacto) | sí | sí | comisión de gestión de la ficha, en %; `null` en el buscador |
+| `com_deposito` | number (exacto) | sí | sí | comisión de depósito de la ficha, en %; `null` en el buscador |
 | `ytd` | number (exacto) | sí | sí | rentabilidad en el año, en % |
 | `1a` | number (exacto) | sí | sí | rentabilidad anualizada a 1 año, en % |
 | `3a` | number (exacto) | sí | sí | rentabilidad anualizada a 3 años, en % |

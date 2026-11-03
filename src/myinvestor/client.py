@@ -62,6 +62,7 @@ from myinvestor.stores import SessionStore
 
 CPERF = "/cperf-server/api"
 FUND_PAGE_SIZE = 50
+CATALOG_MAX_LIMIT = 50  # rows the catalog API returns at most per request
 PORTFOLIO_RETURN_YEARS = 3  # `limit` of the web's returns summary (page 1)
 SIGNATURE_PREFIX = "/signature/api/"
 SIGNER_METHODS = frozenset({"GET", "POST"})
@@ -497,8 +498,7 @@ class MyInvestorClient:
         filters: CatalogFilters | None = None,
     ) -> FundPage:
         """Fund catalog; `query` is the web's free-text box (`mainInputFilter`: name, ISIN…). Pages from 0."""
-        body = self.get(f"{CPERF}/v2/funds", _catalog_params(query, sort, page, limit, filters))
-        rows, total, last = _catalog_page(body)
+        rows, total, last = self._catalog(f"{CPERF}/v2/funds", query, sort, page, limit, filters, first_page=0)
         return FundPage(funds=[FundSummary.model_validate(r) for r in rows], total=total, last=last)
 
     def pension_plan_catalog(
@@ -510,10 +510,44 @@ class MyInvestorClient:
         limit: int = FUND_PAGE_SIZE,
         filters: CatalogFilters | None = None,
     ) -> PensionPlanPage:
-        """Pension-plan catalog, like `funds` but its pages start at 1 (as the web asks for them)."""
-        body = self.get(f"{CPERF}/v2/pension-plans", _catalog_params(query, sort, page, limit, filters))
-        rows, total, last = _catalog_page(body)
+        """Pension-plan catalog, like `funds` but its pages start at 1.
+
+        It does not list the plans the web shows apart (`catalog.FEATURED_PENSION_PLANS`): those are
+        read one by one with `pension_plan_sheet`.
+        """
+        path = f"{CPERF}/v2/pension-plans"
+        rows, total, last = self._catalog(path, query, sort, page, limit, filters, first_page=1)
         return PensionPlanPage(plans=[PensionPlanSummary.model_validate(r) for r in rows], total=total, last=last)
+
+    def _catalog(
+        self,
+        path: str,
+        query: str | None,
+        sort: str,
+        page: int,
+        limit: int,
+        filters: CatalogFilters | None,
+        *,
+        first_page: int,
+    ) -> tuple[list[Any], int | None, bool]:
+        """Page `page` (of `limit` rows) of a catalog, asking for at most CATALOG_MAX_LIMIT rows a request.
+
+        The API caps a page at 50 rows but still uses the `limit` asked for to place it: `limit=100`
+        returned the last 5 of 55 plans (#68). A larger `limit` becomes several pages of 50.
+        """
+        if limit <= CATALOG_MAX_LIMIT:
+            return _catalog_page(self.get(path, _catalog_params(query, sort, page, limit, filters)))
+        start, end = (page - first_page) * limit, (page - first_page + 1) * limit
+        rows: list[Any] = []
+        total, last = None, True
+        for chunk in range(start // CATALOG_MAX_LIMIT, (end - 1) // CATALOG_MAX_LIMIT + 1):
+            params = _catalog_params(query, sort, chunk + first_page, CATALOG_MAX_LIMIT, filters)
+            data, total, last = _catalog_page(self.get(path, params))
+            offset = chunk * CATALOG_MAX_LIMIT
+            rows.extend(data[max(start - offset, 0) : end - offset])
+            if last or len(data) < CATALOG_MAX_LIMIT:
+                return rows, total, True
+        return rows, total, last
 
     def catalog_filter(self, domain: Domain, kind: FilterKind) -> list[str]:
         """Valid values of a searcher filter, spelled exactly as the API sends them (blanks included)."""

@@ -244,6 +244,8 @@ PENSION_PLAN_ROW = (
     Field("gestora", S, True),
     Field("categoria", S, True),
     Field("ter", N, True, "en %"),
+    Field("com_gestion", N, True, "comisión de gestión de la ficha, en %; `null` en el buscador"),
+    Field("com_deposito", N, True, "comisión de depósito de la ficha, en %; `null` en el buscador"),
     Field("ytd", N, True, "rentabilidad en el año, en %"),
     Field("1a", N, True, "rentabilidad anualizada a 1 año, en %"),
     Field("3a", N, True, "rentabilidad anualizada a 3 años, en %"),
@@ -698,7 +700,12 @@ CONTRACTS: tuple[Contract, ...] = (
     Contract("contributions", 1, (_rows(*CONTRIBUTION),)),
     Contract("funds", 1, (_rows(*FUND_ROW),), "Las mismas claves con cualquier filtro."),
     Contract("fund-filters", 1, (_rows(*FUND_FILTER),), "Las mismas claves con un filtro y con `--pension`."),
-    Contract("pension-plans", 1, (_rows(*PENSION_PLAN_ROW),), "El catálogo de planes; las mismas claves con filtros."),
+    Contract(
+        "pension-plans",
+        1,
+        (_rows(*PENSION_PLAN_ROW),),
+        "El catálogo de planes; las mismas claves con filtros, `--featured` y `--mine`.",
+    ),
     Contract(
         "fund-history",
         1,

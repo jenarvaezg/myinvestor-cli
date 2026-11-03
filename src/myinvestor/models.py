@@ -527,14 +527,35 @@ class FundSheet(_Model):
     _currency = field_validator("currency", mode="before")(_currency_code)
 
 
+def _empty_list(value: Any) -> Any:
+    """`null` where the API means "none yet" (e.g. the executions of an order in progress)."""
+    return [] if value is None else value
+
+
+class Commission(_Model):
+    """A fee of a fund's or plan's detail (`commissionList[]`): its name and percentage."""
+
+    name: str | None = None
+    percentage: Decimal | None = None
+
+
 class PensionPlanSheet(_Model):
-    """The part of a pension plan's detail (`/cperf-server/api/v2/pension-plans/{dgs}`) that classifies it."""
+    """A pension plan's detail (`/cperf-server/api/v2/pension-plans/{dgs}`): what classifies it and its fees.
+
+    The web never reads a `ter` there (only the catalog rows have one): it is kept if it comes.
+    """
 
     dgs_code: str | None = None
     name: str | None = None
     category: str | None = None
     plan_type: str | None = None
     active_type: str | None = None  # "Tipo de activo" on the web
+    management_entity: str | None = None
+    ter: Decimal | None = None
+    annualized_profitability: Profitability | None = None
+    commission_list: list[Commission] = Field(default_factory=list)
+
+    _commissions = field_validator("commission_list", mode="before")(_empty_list)
 
 
 class FeedItem(_Model):
@@ -545,11 +566,6 @@ class FeedItem(_Model):
     body: str | None = None
 
     _days = field_validator("date", mode="before")(_day)
-
-
-def _empty_list(value: Any) -> Any:
-    """`null` where the API means "none yet" (e.g. the executions of an order in progress)."""
-    return [] if value is None else value
 
 
 def _euros(value: Any) -> Any:

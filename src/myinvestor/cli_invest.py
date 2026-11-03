@@ -364,6 +364,7 @@ FUND_FIELDS = (
     "geoZone",
     "currency",
     "ter",
+    "commissionList",
     "riskIndicator",
     "morningstarRating",
     "mstarRating",
