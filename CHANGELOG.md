@@ -61,6 +61,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - Las retenciones (`holds`, `pending.holds` de `snapshot`) salen siempre en negativo, como un cargo en `movements`, aunque una respuesta las traiga en positivo. Se ha corregido el ejemplo de docs/snapshot.md, que ahora se valida en los tests contra el contrato (#57).
 - README: en las transferencias recibidas de otros bancos la API no da el ordenante; `origen`, `destino` y `contraparte` van a `null` (#56).
 - Los tests ya no dependen de `FORCE_COLOR`, `NO_COLOR`, `TERM`, `COLUMNS` ni `CI` del entorno, y no pueden leer el llavero ni el fichero de sesión reales: `doctor` también usa el almacén del test (#53, #54).
+- Las tablas ya no parten palabras por la mitad (`Carter`/`a Metal`, `APERTU`/`RA` en 80 columnas) y nunca pasan de `COLUMNS` salvo que ni las fechas y los importes quepan: primero ceden ancho los textos largos (concepto, nombre, detalle…) y después las etiquetas (cuenta, tipo, estado, ISIN, ref…), que saltan de línea en los espacios y, si una palabra no cabe, la acortan con `…`. En `movements -f table`, `valor_fecha` se oculta cuando coincide con `fecha` en todas las filas y la tabla no cabe (#55).
 
 ## [0.1.0]
 
