@@ -35,7 +35,7 @@ MONEY_COLUMNS = frozenset(
 PRICE_COLUMNS = frozenset({"vl", "coste_medio", "vl_compra"})
 AMOUNT_COLUMNS = MONEY_COLUMNS - PRICE_COLUMNS
 PERCENT_COLUMNS = frozenset(
-    {"rentab", "rentab_ytd", "ter", "1a", "3a", "5a", "ytd"}
+    {"rentab", "rentab_ytd", "ter", "com_gestion", "com_deposito", "1a", "3a", "5a", "ytd"}
     | {"peso", "peso_pct", "objetivo_pct", "desviacion_pct", "real_pct", "renta_fija_pct", "renta_variable_pct"}
     | {"tipo_pct", "tipo_base_pct", "tipo_promo_pct", "tae_pct", "tae_promo_pct"}
     | {"variacion_pct"}

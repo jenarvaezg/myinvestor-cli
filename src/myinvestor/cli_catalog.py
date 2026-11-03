@@ -14,7 +14,6 @@ from typing import Annotated, Any
 import typer
 
 from myinvestor.catalog import (
-    FEATURED_PENSION_PLANS,
     PENSION_FILTERS,
     CatalogFilters,
     Domain,
@@ -103,7 +102,7 @@ def pension_plan_row(plan: PensionPlanSummary | PensionPlanSheet) -> dict[str, A
         "nombre": plan.name,
         "gestora": plan.management_entity if sheet else plan.managing_entity,
         "categoria": plan.category,
-        "ter": plan.ter,
+        "ter": plan.ter if plan.ter is not None else commission(commissions, "(ter)"),
         "com_gestion": commission(commissions, "gesti"),
         "com_deposito": commission(commissions, "dep"),
         "ytd": returns.ytd if returns else None,
@@ -125,13 +124,11 @@ def fold(text: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))
 
 
-def plan_codes(client: MyInvestorClient, *, featured: bool, mine: bool) -> list[str]:
-    """DGS codes of the featured plans and/or of the ones held, without duplicates."""
-    codes = [code for group in FEATURED_PENSION_PLANS.values() for code in group] if featured else []
-    if mine:
-        codes += [
-            plan.dgs_code for account in client.pension_accounts() for plan in client.pension_plans(account.account_id)
-        ]
+def plan_codes(client: MyInvestorClient) -> list[str]:
+    """DGS codes of the plans held, without duplicates."""
+    codes = [
+        plan.dgs_code for account in client.pension_accounts() for plan in client.pension_plans(account.account_id)
+    ]
     return list(dict.fromkeys(code.upper() for code in codes))
 
 
@@ -151,36 +148,27 @@ def pension_plans(
     sort: SortOpt = "ter,asc",
     limit: LimitOpt = 20,
     page: Annotated[int, typer.Option(min=1, help="Página (desde 1).")] = 1,
-    featured: Annotated[
-        bool,
-        typer.Option(
-            "--featured",
-            help="Los planes que la web enseña aparte y no salen en el buscador (MyInvestor Indexado S&P 500 "
-            "y Global, Finanbest, Merchbanc), con sus comisiones. Una petición por plan.",
-        ),
-    ] = False,
     mine: Annotated[
         bool,
-        typer.Option("--mine", help="Los planes que tienes, con sus comisiones. Una petición por plan."),
+        typer.Option(
+            "--mine", help="Los planes que tienes, leídos de su ficha, con sus comisiones. Una petición por plan."
+        ),
     ] = False,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
     """Busca en el catálogo de planes de pensiones de MyInvestor: TER y rentabilidades anualizadas.
 
-    El buscador no trae los planes propios de MyInvestor (Indexado S&P 500 `N5394`, Indexado Global
-    `N5396`…): `--featured` los lee de su ficha, como la web, y `--mine` lee los tuyos. Con ellos,
-    QUERY filtra por nombre o código sin distinguir mayúsculas ni tildes, y no valen los filtros del
-    buscador. `com_gestion` y `com_deposito` solo salen de la ficha: en el buscador van a null.
-    Con `-n` mayor que 50 hace una petición por cada 50 planes (la API no da más por página).
+    Con --mine, los planes que tienes, leídos de su ficha: `ter` es su «Coste total (TER)» y salen
+    `com_gestion` y `com_deposito` (en el buscador, null). QUERY filtra entonces por nombre o código
+    sin distinguir mayúsculas ni tildes, y no valen los filtros del buscador ni --page.
     """
-    if featured or mine:
+    if mine:
         if any(v is not None for v in (manager, asset_type, min_ter, max_ter, risk, rating)) or page != 1:
-            raise InputError("--featured y --mine no admiten los filtros del buscador ni --page: solo QUERY y -n.")
+            raise InputError("--mine no admite los filtros del buscador ni --page: solo QUERY y -n.")
         with build_client() as client:
-            sheets = [client.pension_plan_sheet(code) for code in plan_codes(client, featured=featured, mine=mine)]
+            sheets = [client.pension_plan_sheet(code) for code in plan_codes(client)]
         rows = [pension_plan_row(s) for s in sheets if matches(s, query)][:limit]
-        what = " y ".join(w for w, on in (("destacados", featured), ("tuyos", mine)) if on)
-        render(rows, fmt, title=f"Planes de pensiones {what}")
+        render(rows, fmt, title="Tus planes de pensiones")
         return
     low_ter, high_ter = ter_range(min_ter, max_ter)
     filters = CatalogFilters(
@@ -188,6 +176,6 @@ def pension_plans(
     )
     with build_client() as client:
         filters = replace(filters, manager=resolve_filter(client, Domain.pension_plans, FilterKind.managers, manager))
-        result = client.pension_plan_catalog(query, sort=sort, page=page, limit=limit, filters=filters)
+        result = client.pension_plan_catalog(query, sort=sort, page=page - 1, limit=limit, filters=filters)
     suffix = f" ({result.total} en total)" if result.total is not None else ""
     render([pension_plan_row(p) for p in result.plans], fmt, title=f"Catálogo de planes de pensiones{suffix}")
