@@ -8,6 +8,7 @@ Cliente Python y CLI **no oficiales y de solo lectura** para [MyInvestor](https:
 uv tool install 'myinvestor[browser] @ git+https://github.com/jenarvaezg/myinvestor-cli'
 # o, desde el repo:
 uv sync --extra browser && uv run myinvestor --help
+myinvestor --version
 ```
 
 El extra `browser` (Playwright) solo hace falta para `myinvestor login` sin flags. Usa el Chrome instalado; si no hay, `uv run playwright install chromium`.
@@ -22,7 +23,8 @@ myinvestor login --direct -u 12345678Z            # por terminal, sin reCAPTCHA 
 echo "$PASS" | myinvestor login --direct -u 12345678Z --password-stdin   # también vale MYINVESTOR_PASSWORD
 myinvestor login --direct --remember -u 12345678Z # guarda la contraseña → re-login automático (cron)
 myinvestor login --refresh-token-stdin --device-id <_capuid> < token.txt  # importar una sesión de la web
-myinvestor status
+myinvestor status [-f json] [--offline]           # ¿sesión viva? (sin --offline la renueva)
+myinvestor doctor [-f json] [--offline]           # diagnóstico completo, ver «Diagnóstico»
 myinvestor logout [--forget-device]
 ```
 
@@ -159,6 +161,34 @@ myinvestor position -f json                        # semanas después: re-login 
 ```
 
 El primer login desde un dispositivo nuevo pide SMS o aprobación en la app: hazlo una vez en una terminal interactiva con el mismo `--store`.
+
+#### Diagnóstico: `status` y `doctor`
+
+`myinvestor status` confirma la sesión con MyInvestor (lee tu perfil), así que **la renueva** si el token ha caducado (refresh o, con `--remember`, re-login con la contraseña guardada). Con `--offline` solo lee el almacén local: ni llama a la API ni renueva nada, útil como healthcheck barato. Con `-f json` escribe en stdout:
+
+```json
+{"logged_in": true, "name": "Ana", "customer_id_masked": "***678Z", "device_id": "…",
+ "store": "file", "store_path": "/home/ana/.config/myinvestor/session.json",
+ "access_expires_at": "2026-11-03T19:38:00+01:00", "refresh_expires_at": "2026-11-03T19:53:00+01:00",
+ "password_remembered": true, "can_refresh": true, "can_relogin": true,
+ "relogin_blocked_until": null, "last_relogin_error": null, "verified_online": true}
+```
+
+Nunca incluye tokens ni la contraseña, y el DNI/NIE va enmascarado. `logged_in` es «activa o renovable sin `login` manual»; `can_relogin` = contraseña guardada y re-login automático no en pausa (si lo está, `relogin_blocked_until` y `last_relogin_error` dicen hasta cuándo y por qué). `verified_online` solo es `true` si MyInvestor ha respondido (nunca con `--offline`). Sale con 0 si la sesión está activa o es renovable y con **11** si no hay sesión o ha caducado sin forma de renovarla; en ese caso el JSON sale igualmente en stdout, con `logged_in: false`. `-f csv`/`tsv` dan esas mismas claves en una fila.
+
+`myinvestor doctor` da una línea `OK`/`WARN`/`FAIL` por comprobación y sale con **1** si alguna es `FAIL` (0 si solo hay `WARN`):
+
+| Comprobación | Qué mira |
+|---|---|
+| `store` | tipo de almacén (`keyring`/`file`), ruta, permisos `0600` del fichero y de su `.lock`, que el JSON sea válido |
+| `sesion` | tokens, caducidad del access y del refresh token, contraseña guardada sí/no (nunca la muestra), re-login en pausa |
+| `red` | `GET` sin autenticar a `api.myinvestor.es/login/api/v1/features`: latencia y bloqueo de Imperva (cualquier otra respuesta, incluso 401, vale) |
+| `api` | con la sesión, que el perfil de cliente responda (puede renovarla, como `status`) |
+| `reloj` | desfase con la cabecera `Date` del servidor: `WARN` a partir de 30 s (el margen con el que se dan por caducados los tokens), `FAIL` a partir de 5 min |
+| `version` | la versión con la que se presenta el CLI (`x-myinvestor-app`) frente a la de la web, que se lee de su script principal o de los que este importa (primero `api-*.js`; como mucho 5, de hasta 8 MB); `WARN` si no coinciden, si está por debajo de la mínima de `settings.json` o si no se puede leer |
+| `mantenimiento` | `config.myinvestor.es/flags/settings.json`, el mismo aviso que consulta la web: `FAIL` en mantenimiento, `WARN` en modo solo lectura |
+
+Con `--offline` solo se miran `store` y `sesion`; el resto sale como `WARN` «no comprobado». Con `-f json`: `{"ok": false, "cli_version": "0.1.0", "checks": [{"check": "red", "status": "FAIL", "message": "…", "data": {"http_status": 403, "latency_ms": 85}}, …]}`. Las comprobaciones de red no reintentan y esperan 10 s como mucho; `-v` las muestra.
 
 #### Códigos de salida
 

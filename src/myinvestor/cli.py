@@ -9,7 +9,7 @@ import httpx
 from rich.markup import escape
 
 # Importing the command modules registers their commands on `app`.
-from myinvestor import cli_accounts, cli_auth, cli_income, cli_invest  # noqa: F401
+from myinvestor import cli_accounts, cli_auth, cli_doctor, cli_income, cli_invest  # noqa: F401
 from myinvestor.cli_common import app, fatal
 from myinvestor.cli_errors import exit_code, json_error, requested
 from myinvestor.errors import MyInvestorError
