@@ -542,5 +542,15 @@
       "errors[].exit_code": "integer",
       "errors[].message": "string"
     }
+  },
+  "myinvestor.documents/1": {
+    "por defecto": {
+      "id": "string",
+      "tipo": "string",
+      "nombre": "string",
+      "fecha": "date|null",
+      "cuenta": "string|null",
+      "notificado": "boolean|null"
+    }
   }
 }
