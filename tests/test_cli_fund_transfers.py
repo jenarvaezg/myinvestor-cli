@@ -27,6 +27,7 @@ runner = CliRunner()
 TODAY = date.today()
 SECURITIES = f"{CPERF}/v2/securities-accounts"
 PENSIONS = f"{CPERF}/v2/pension-accounts"
+ORDERS = f"{CPERF}/v3/securities-accounts"
 
 
 @pytest.fixture
@@ -73,16 +74,22 @@ def pension_transfer(ref: str, day: str, **overrides: Any) -> dict[str, Any]:
 
 
 def mock_securities(mock_api: respx.MockRouter) -> None:
-    """A plain securities account and a robo-advisor portfolio (`SECURITIES_PORTFOLIO`)."""
+    """A plain securities account and a robo-advisor portfolio (`SECURITIES_PORTFOLIO`), with no orders."""
     mock_api.get(f"{SECURITIES}/self-basic").respond(200, json=ok([{"accountId": "201"}, {"accountId": "202"}]))
     mock_api.get(f"{SECURITIES}/201").respond(200, json=ok(securities_account("201")))
     mock_api.get(f"{SECURITIES}/202").respond(
         200, json=ok(securities_account("202", accountType="SECURITIES_PORTFOLIO", codAccount="S202"))
     )
+    for i in ("201", "202"):
+        mock_api.get(f"{ORDERS}/{i}/orders").respond(200, json=ok([]))
 
 
 def mock_pensions(mock_api: respx.MockRouter) -> None:
+    """Two pension accounts with no orders and an empty history."""
     mock_api.get(f"{PENSIONS}/self").respond(200, json=ok([{"accountId": "301"}, {"accountId": "302"}]))
+    for i in ("301", "302"):
+        mock_api.get(f"{PENSIONS}/{i}/orders").respond(200, json=ok([]))
+        mock_api.get(f"{PENSIONS}/{i}/positions").respond(200, json=ok({"positions": {}}))
 
 
 def rows(result: Any) -> list[dict[str, Any]]:
@@ -132,6 +139,7 @@ def test_default_asks_the_last_60_days_of_every_securities_account(
     assert [r["ref"] for r in got] == ["T2", "T1"]  # newest first
     assert got[1] == {
         "fecha": older,
+        "tipo": "externo",
         "cuenta": "201",
         "origen": "IE0000000001",
         "origen_nombre": None,
@@ -143,6 +151,8 @@ def test_default_asks_the_last_60_days_of_every_securities_account(
         "estado": "IN_PROGRESS",
         "cancelable": True,
         "ref": "T1",
+        "fuente": "api",
+        "ref_destino": None,
     }
     assert got[0]["cancelable"] is False  # like the web: `!!isCancelable`
     assert got[0]["moneda"] == "USD"
@@ -244,6 +254,7 @@ def test_pension_transfers_of_every_pension_account(mock_api: respx.MockRouter, 
     assert [r["ref"] for r in got] == ["P2", "P1"]
     assert got[1] == {
         "fecha": "2026-10-01",
+        "tipo": "externo",
         "cuenta": "301",
         "origen": "N0001",
         "origen_nombre": "Plan de origen",
@@ -255,6 +266,8 @@ def test_pension_transfers_of_every_pension_account(mock_api: respx.MockRouter, 
         "estado": "COMPLETED",
         "cancelable": False,
         "ref": "P1",
+        "fuente": "api",
+        "ref_destino": None,
     }
 
 
@@ -300,8 +313,8 @@ def test_pending_does_not_combine_with_pension_nor_dates(
     assert not mock_api.calls
 
 
-def test_help_points_to_orders_for_switches_inside_myinvestor() -> None:
+def test_help_explains_internal_and_external_transfers() -> None:
     result = runner.invoke(app, ["fund-transfers", "--help"], env={"COLUMNS": "200"})
     assert result.exit_code == 0
-    assert "ALTA IIC SWITCH" in result.stdout
-    assert "orders" in result.stdout
+    for text in ("externo", "interno", "Baja/Alta switch", "fuente: history"):
+        assert text in result.stdout

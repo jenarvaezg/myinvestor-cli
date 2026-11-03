@@ -666,18 +666,29 @@ GAIN = (
 )
 
 FUND_TRANSFER = (
-    Field("fecha", D, True, "`transferDate`"),
+    Field("fecha", D, True, "`transferDate`; en los internos, la de la orden de salida (o de la pata que haya)"),
+    Field(
+        "tipo",
+        S,
+        note="`externo` (lo que lista `…/transfers`) o `interno` (entre dos fondos o planes de la misma cuenta)",
+    ),
     Field("cuenta", S, note="id de la cuenta de valores o, con `--pension`, de pensiones"),
-    Field("origen", S, True, "`isinOrigin` o, con `--pension`, `dgsCodeOrigin`"),
-    Field("origen_nombre", S, True, "`fundNameOrigin` (solo con `--pension`; `null` en los fondos)"),
-    Field("destino", S, True, "`isinDestination` o, con `--pension`, `dgsCodeDestination`"),
-    Field("destino_nombre", S, True, "`pensionPlanNameDestination` (solo con `--pension`; `null` en los fondos)"),
-    Field("participaciones", N, True, "`shares`"),
-    Field("importe", A, True, "`amount`, en `moneda`"),
+    Field("origen", S, True, "`isinOrigin` o, con `--pension`, `dgsCodeOrigin`; `null` si falta la pata de salida"),
+    Field("origen_nombre", S, True, "`fundNameOrigin` o el nombre del fondo de la orden; `null` si no se sabe"),
+    Field("destino", S, True, "`isinDestination` o, con `--pension`, `dgsCodeDestination`; `null` si falta la entrada"),
+    Field("destino_nombre", S, True, "`pensionPlanNameDestination` o el nombre de la orden; `null` si no se sabe"),
+    Field("participaciones", N, True, "`shares` (en los internos, las que salen del origen)"),
+    Field("importe", A, True, "`amount`, en `moneda`; con `fuente: history`, valor aproximado"),
     Field("moneda", S, True, "`currency`"),
-    Field("estado", S, True, "`status`, sin interpretar"),
+    Field("estado", S, True, "`status`, sin interpretar (en los internos, el de la orden de entrada)"),
     Field("cancelable", B, note="`isCancelable` (sin él, `false`, como la web)"),
-    Field("ref", S, note="`reference`"),
+    Field("ref", S, note="`reference` (orden de salida en los internos; `history:…` si se ha deducido)"),
+    Field(
+        "fuente",
+        S,
+        note="`api` (`…/transfers`), `orders` (emparejando órdenes) o `history` (deducido de la evolución)",
+    ),
+    Field("ref_destino", S, True, "referencia de la orden de entrada en el destino (solo con `fuente: orders`)"),
 )
 
 FUND_TRANSFER_PENDING = (

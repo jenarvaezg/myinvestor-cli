@@ -706,18 +706,21 @@ Salida: lista de objetos.
 
 | Clave | Tipo | `null` | Estable | Notas |
 |---|---|---|---|---|
-| `fecha` | date `AAAA-MM-DD` | sí | sí | `transferDate` |
+| `fecha` | date `AAAA-MM-DD` | sí | sí | `transferDate`; en los internos, la de la orden de salida (o de la pata que haya) |
+| `tipo` | string | no | sí | `externo` (lo que lista `…/transfers`) o `interno` (entre dos fondos o planes de la misma cuenta) |
 | `cuenta` | string | no | sí | id de la cuenta de valores o, con `--pension`, de pensiones |
-| `origen` | string | sí | sí | `isinOrigin` o, con `--pension`, `dgsCodeOrigin` |
-| `origen_nombre` | string | sí | sí | `fundNameOrigin` (solo con `--pension`; `null` en los fondos) |
-| `destino` | string | sí | sí | `isinDestination` o, con `--pension`, `dgsCodeDestination` |
-| `destino_nombre` | string | sí | sí | `pensionPlanNameDestination` (solo con `--pension`; `null` en los fondos) |
-| `participaciones` | number (exacto) | sí | sí | `shares` |
-| `importe` | number (€, 2 decimales) | sí | sí | `amount`, en `moneda` |
+| `origen` | string | sí | sí | `isinOrigin` o, con `--pension`, `dgsCodeOrigin`; `null` si falta la pata de salida |
+| `origen_nombre` | string | sí | sí | `fundNameOrigin` o el nombre del fondo de la orden; `null` si no se sabe |
+| `destino` | string | sí | sí | `isinDestination` o, con `--pension`, `dgsCodeDestination`; `null` si falta la entrada |
+| `destino_nombre` | string | sí | sí | `pensionPlanNameDestination` o el nombre de la orden; `null` si no se sabe |
+| `participaciones` | number (exacto) | sí | sí | `shares` (en los internos, las que salen del origen) |
+| `importe` | number (€, 2 decimales) | sí | sí | `amount`, en `moneda`; con `fuente: history`, valor aproximado |
 | `moneda` | string | sí | sí | `currency` |
-| `estado` | string | sí | sí | `status`, sin interpretar |
+| `estado` | string | sí | sí | `status`, sin interpretar (en los internos, el de la orden de entrada) |
 | `cancelable` | boolean | no | sí | `isCancelable` (sin él, `false`, como la web) |
-| `ref` | string | no | sí | `reference` |
+| `ref` | string | no | sí | `reference` (orden de salida en los internos; `history:…` si se ha deducido) |
+| `fuente` | string | no | sí | `api` (`…/transfers`), `orders` (emparejando órdenes) o `history` (deducido de la evolución) |
+| `ref_destino` | string | sí | sí | referencia de la orden de entrada en el destino (solo con `fuente: orders`) |
 
 Con `--pending`: lista de objetos.
 

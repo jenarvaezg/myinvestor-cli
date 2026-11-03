@@ -85,7 +85,7 @@ myinvestor orders --pension --from 2026-01-01        # aportaciones a planes en 
 myinvestor order REF [-a ID] [--pension]         # una orden con su ejecución: VL, participaciones, comisiones, retenciones, neto y resultado fiscal
 myinvestor lots [IE0032126645] [-a ID]            # lotes vivos (FIFO) de cada fondo: coste, valor y plusvalía latente
 myinvestor gains [IE0032126645] [--year 2025] [-a ID]   # plusvalías y minusvalías realizadas: reembolsos y traspasos de salida
-myinvestor fund-transfers [-a ID] [--pension] [--since 2026-01-01 --until …] | --pending   # traspasos de fondos o de planes (últimos 60 días)
+myinvestor fund-transfers [-a ID] [--pension] [--since 2026-01-01 --until …] | --pending   # traspasos de fondos o de planes, internos y externos (últimos 60 días)
 myinvestor pensions                               # planes de pensiones
 myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year | --days 89 | --from … --to …]
 myinvestor contributions [--all] [--new]          # aportaciones periódicas
@@ -330,22 +330,31 @@ Los traspasos entre fondos difieren la tributación, así que salen en la lista 
 
 ### Traspasos de fondos y de planes: `fund-transfers`
 
-`fund-transfers` lista los traspasos de fondos de tus cuentas de valores (todas, también las carteras gestionadas `SECURITIES_PORTFOLIO`): entre fondos, los que entran de otra entidad y los que salen a otra. Con **`--pension`**, los traspasos de planes de pensiones de tus cuentas de planes. Por defecto pide **los últimos 60 días, como la web**; `--since`/`--until` (o `--from`/`--to`) cambian el rango (sin `--since`, 60 días antes de `--until`). Es una sola petición por cuenta con el rango tal cual: la web nunca pide más de 60 días y no se sabe si MyInvestor acepta rangos largos; si uno le parece mal responderá con un error (no se trocea ni se reintenta). `-a` elige cuentas: de valores por id o código, o de pensiones por id con `--pension`. Una fila por traspaso:
+`fund-transfers` lista los traspasos de fondos de tus cuentas de valores (todas, también las carteras gestionadas `SECURITIES_PORTFOLIO`): entre fondos, los que entran de otra entidad y los que salen a otra. Con **`--pension`**, los traspasos de planes de pensiones de tus cuentas de planes. Por defecto pide **los últimos 60 días, como la web**; `--since`/`--until` (o `--from`/`--to`) cambian el rango (sin `--since`, 60 días antes de `--until`). La lista de traspasos es una sola petición por cuenta con el rango tal cual: la web nunca pide más de 60 días y no se sabe si MyInvestor acepta rangos largos; si uno le parece mal responderá con un error (no se trocea ni se reintenta). `-a` elige cuentas: de valores por id o código, o de pensiones por id con `--pension`.
+
+**Traspasos internos.** `…/transfers` lista solicitudes de traspaso (la pestaña «Traspasos» de la web solo enseña las que están en curso: «No tienes traspasos en curso»), y en las cuentas observadas respondió `[]` aunque había habido traspasos entre fondos y una movilización entre planes. Un cambio entre dos fondos de la misma cuenta ya ejecutado está en las **órdenes**, como dos patas: una de salida del fondo de origen («Baja switch» `IIC_SWITCH_DEREGISTRATION`, «Reembolso por Traspaso Interno» `INTERNAL_TRANSFER_REIMBURSEMENT` o «Traspaso interno IIC LP» `INTERNAL_TRANSFER_IIC`) y una de entrada en el destino («Alta switch» `IIC_SWITCH_REGISTRATION`, «Suscripción por Traspaso Interno» `INTERNAL_TRANSFER_SUBSCRIPTION`). `fund-transfers` pide también las órdenes de cada cuenta (el rango, con 7 días de margen a cada lado para la otra pata; nunca más allá de hoy) y empareja las dos patas: misma cuenta, como mucho 7 días entre ellas y, si las dos traen importe, como mucho un 5 % de diferencia; entre varias candidatas gana la del mismo tipo (switch con switch), después la más cercana en días y después en importe. Cada orden va en un solo traspaso; **una pata sin pareja sale sola**, con el otro lado a `null` (no se inventa). Las órdenes canceladas o rechazadas no cuentan. Esas filas llevan `tipo: interno` y `fuente: orders`; si un traspaso de la lista coincide con uno de las órdenes (misma cuenta, origen y destino, a 7 días como mucho), sale una sola fila, la de la lista, con `tipo: interno`.
+
+Con `--pension` pasa lo mismo con las órdenes del plan («Baja/Alta por traspaso interno» `DEREGISTRATION_`/`REGISTRATION_BY_INTERNAL_PLAN_TRANSFER` y «Baja/Alta traspaso interno DE» `…_TRANSFER_PLANS_INTERNAL_FROM`), y además **se deduce la movilización de `history`** cuando no está ni en la lista ni en las órdenes: en la evolución de la cuenta, un plan pierde participaciones (al menos un 1 % de las que tenía, o desaparece de la serie) y otro plan de la misma cuenta nace o sube en los 5 días siguientes por un valor parecido (como mucho un 5 % de diferencia). Esa fila es `tipo: interno` y `fuente: history`: `fecha` es el día en que baja el origen, `participaciones` las que salen del origen e `importe` un valor **aproximado** (participaciones × VL del día en el origen), sin `estado` ni nombres, y `ref` es `history:{cuenta}:{fecha}:{origen}>{destino}`. La evolución se pide con el periodo más corto que llega a `--since` (un mes, tres, seis o un año): la API no da más de un año, así que una movilización más antigua solo sale si está en las órdenes. Un rescate (baja sin alta en otro plan) o una aportación (alta sin baja) no son movilizaciones.
+
+Una fila por traspaso:
 
 | Campo | Origen en la API | Notas |
 |---|---|---|
-| `fecha` | `transferDate` | |
+| `fecha` | `transferDate` | en los internos, la de la orden de salida (o de la única pata) |
+| `tipo` | | `externo` (lo que lista `…/transfers`) o `interno` (entre dos fondos o planes de la misma cuenta) |
 | `cuenta` | id de la cuenta | de valores o, con `--pension`, de pensiones |
-| `origen`, `destino` | `isinOrigin`, `isinDestination`; con `--pension`, `dgsCodeOrigin`, `dgsCodeDestination` | ISIN del fondo o código DGS del plan |
-| `origen_nombre`, `destino_nombre` | con `--pension`, `fundNameOrigin`, `pensionPlanNameDestination` | `null` en los fondos (la API solo da el ISIN) |
-| `participaciones`, `importe`, `moneda` | `shares`, `amount`, `currency` | |
-| `estado` | `status` | tal cual |
-| `cancelable` | `isCancelable` | sin él, `false` (como la web) |
-| `ref` | `reference` | |
+| `origen`, `destino` | `isinOrigin`, `isinDestination`; con `--pension`, `dgsCodeOrigin`, `dgsCodeDestination`; en los internos, el ISIN o código de cada orden | `null` si falta esa pata |
+| `origen_nombre`, `destino_nombre` | con `--pension`, `fundNameOrigin`, `pensionPlanNameDestination`; en los internos de las órdenes, `fundName` | `null` en los fondos de la lista (la API solo da el ISIN) y en lo deducido |
+| `participaciones`, `importe`, `moneda` | `shares`, `amount`, `currency`; en los internos, los de la orden de salida (o de la única pata) | con `fuente: history`, `importe` aproximado |
+| `estado` | `status`; en los internos, el de la orden de entrada | tal cual; `null` en lo deducido |
+| `cancelable` | `isCancelable`; en los internos, el de cualquiera de las dos órdenes | sin él, `false` (como la web) |
+| `ref` | `reference`; en los internos, la de la orden de salida (o de la única pata) | con `fuente: history`, `history:…` |
+| `fuente` | | `api` (la lista de traspasos), `orders` (emparejando órdenes) o `history` (deducido de la evolución) |
+| `ref_destino` | `reference` de la orden de entrada | solo con `fuente: orders` |
 
-La tabla muestra `fecha`, `cuenta`, `origen` y `destino` (código y nombre juntos), `participaciones`, `importe`, `estado`, `cancelable` y `ref`; JSON y CSV, todo. **`--pending`** solo da el contador de traspasos de fondos en curso de cada cuenta de valores (`cuenta`, `pendientes`); no se combina con `--pension` ni con fechas.
+La tabla muestra `fecha`, `tipo` («interno (deducido)» con `fuente: history`), `cuenta`, `origen` y `destino` (código y nombre juntos), `participaciones`, `importe`, `estado`, `cancelable` y `ref`; JSON y CSV, todo. **`--pending`** solo da el contador de traspasos de fondos en curso de cada cuenta de valores (`cuenta`, `pendientes`); no se combina con `--pension` ni con fechas (y no pide órdenes).
 
-**Los cambios entre fondos dentro de MyInvestor no salen aquí**: un «ALTA IIC SWITCH» (o una «Baja switch») es una orden, y se ve en `orders`, `order REF`, `lots` y `gains`. En las cuentas observadas estos endpoints respondieron siempre `[]`: los campos salen del bundle de la web, por eso todos son opcionales salvo `reference` y los desconocidos se ignoran. Fuera de alcance: simular, solicitar o cancelar traspasos, y el detalle de uno (`…/transfers/{reference}`).
+Las órdenes de un traspaso interno también salen en `orders`, `order REF`, `lots` y `gains` (`traspaso: true`). La lista de traspasos respondió siempre `[]` en las cuentas observadas: sus campos salen del bundle de la web, por eso todos son opcionales salvo `reference` y los desconocidos se ignoran. No se sabe si incluye las solicitudes de traspasos internos en curso; si alguna no coincide con sus órdenes saldría como `externo`. Fuera de alcance: simular, solicitar o cancelar traspasos, y el detalle de uno (`…/transfers/{reference}`).
 ### Histórico del VL de un fondo: `fund-history`
 
 `history` solo da la evolución de **tus** posiciones y como mucho un año. **`fund-history ISIN`** da el valor liquidativo de **cualquier fondo o ETF del catálogo**, lo tengas o no, **desde el inicio del fondo**, con `/cperf-server/api/v2/funds/{isin}/graphs/INIT_GRAPH` (la misma petición que la gráfica de la ficha en la web) más la ficha del fondo, para saber su moneda. Sirve para comparar fondos antes de comprar o para ver más de un año de uno que ya tienes.
@@ -732,6 +741,8 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | `fund-transfers` | 1 + V (también con `--pending`); con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
 | `accounts`, `transfers` | 1 + C (`accounts`: C con `--owner`, solo las de ese tipo) |
 | `interest` | 1 + C + R (R: las cuentas con remuneración, sus movimientos de los últimos 90 días); `--no-movements`: 1 + C |
+| `fund-transfers` | 1 + 2V (lista de traspasos y órdenes de cada una); con `-a`: 1 + V + 2 × las elegidas; `--pending`: 1 + V (con `-a`, 1 + V + las elegidas); `--pension`: 1 + 3P (lista, órdenes y evolución de cada una) |
+| `accounts`, `transfers`, `interest` | 1 + C (`accounts`: C con `--owner`, solo las de ese tipo) |
 | `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V |
 | `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
 | `fund-history` | 2 (la serie y la ficha, para la moneda) |
