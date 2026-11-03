@@ -40,6 +40,7 @@ myinvestor position                               # efectivo + cuentas de valore
 myinvestor accounts [--owner me|junior|other]     # cuentas de efectivo: tipo, tu rol, titular, disponible, retenido, saldo
 myinvestor movements [-a "Mi cuenta"] [--from 2026-10-01 --to 2026-10-31 | --days 60] [-s nómina] [--oldest-first] [--owner me|junior|other] [--free-only] [--allow-partial]
 myinvestor movements --id <id> [--from … | --days …]   # un solo movimiento, con todos sus campos
+myinvestor internal-transfers [--from … --to … | --days …] [-a Junior] [--unmatched] [--free-only | --allow-partial]   # traspasos entre tus cuentas: cargo ↔ abono
 myinvestor holds                                  # saldo retenido (p. ej. por órdenes en curso)
 myinvestor balance-history [--from 2026-01-01]    # saldo diario total del efectivo
 myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|year|type|account] [-a …] [--free-only] [--allow-partial]   # intereses, dividendos, retenciones y comisiones
@@ -76,8 +77,10 @@ En la tabla, `movements` muestra `fecha`, `valor_fecha`, `cuenta`, `tipo`, `conc
 | `clase` | `operationClass` | |
 | `origen`, `destino` | `operationOriginLabel`, `operationTargetLabel` | tal cual vienen; en un «CARGO POR TRANSFERENCIA» `destino` es el beneficiario |
 | `contraparte` | — | `destino` en cargos y `origen` en abonos; `null` si viene vacío (en los SEPA entrantes muchas veces solo hay concepto) |
-| `operacion_ref` | `operationRef` | campo de ancho fijo compartido por el cargo y el abono de una misma transferencia; se exporta sin interpretar |
+| `operacion_ref` | `operationRef` | campo de ancho fijo compartido por el cargo y el abono de una misma transferencia; se exporta sin interpretar (ver [Traspasos internos](#traspasos-internos)) |
 | `fichero_ref` | `fileRef` | |
+| `pareja_id` | — | `id` del otro lado si el movimiento es un traspaso entre tus cuentas; si no, `null` |
+| `traspaso_interno` | — | `true` en los dos lados de un traspaso entre tus cuentas |
 
 Lo que la API no trae sale como `null` (vacío en CSV); el CLI no rellena nada por su cuenta.
 
@@ -132,11 +135,50 @@ Categorías (`--by type` muestra cada `operationType` con su categoría y la reg
 | `compra` | «COMPRA RV CONTADO» y «SUSCRIPCION IIC» (observados; acciones/ETF y fondos), «COMPRA» + «RV»/«VALORES», «SUSCRIPC…» |
 | `venta` | «VENTA» + «RV»/«VALORES» |
 | `aportacion_externa` | transferencias: «CARGO POR TRANSFERENCIA», «ABONO POR TRANSFERENCIA», «TRANSFERENCIA INMEDIATA», «TRANSFERENCIA SEPA» (observados) o cualquier tipo con «TRANSFERENCIA»; el signo del importe dice si entra o sale |
-| `traspaso_interno` | «TRASPASO…» |
+| `traspaso_interno` | los dos lados de un traspaso entre tus cuentas, emparejados como en [Traspasos internos](#traspasos-internos) (regla «traspaso emparejado»; se mira antes que el tipo), o «TRASPASO…» |
 | `aportacion_plan` | «APORTACION PLANES» (observado): dinero que sale de la cuenta hacia un plan de pensiones; no es un gasto ni una compra de valores |
 | `otros` | «APERTURA» y todo lo demás |
 
-Solo los tipos marcados como observados se han visto en cuentas reales; el resto son palabras clave, porque la API no publica la lista de tipos. Se comparan sin tildes ni mayúsculas, y cada palabra debe empezar una palabra del tipo (`RV` no casa con «SERVICIO»). Los tipos que no casan con nada van a `otros` y el CLI los lista en stderr para poder [ampliar la tabla](src/myinvestor/classify.py). Las transferencias entre cuentas propias salen de momento como `aportacion_externa`: distinguirlas requiere emparejar el cargo y el abono.
+Solo los tipos marcados como observados se han visto en cuentas reales; el resto son palabras clave, porque la API no publica la lista de tipos. Se comparan sin tildes ni mayúsculas, y cada palabra debe empezar una palabra del tipo (`RV` no casa con «SERVICIO»). Los tipos que no casan con nada van a `otros` y el CLI los lista en stderr para poder [ampliar la tabla](src/myinvestor/classify.py). Una transferencia solo es `traspaso_interno` si su otro lado está entre las cuentas consultadas: con `-a` u `--owner`, un traspaso hacia o desde una cuenta que queda fuera sale como `aportacion_externa`, igual que las transferencias de otros clientes.
+
+### Traspasos internos
+
+`internal-transfers` empareja cada cargo de una cuenta tuya con su abono en otra (p. ej. «Mi Cuenta» → cuenta junior). Una fila por traspaso:
+
+| Campo | Notas |
+|---|---|
+| `fecha`, `importe` | los del cargo; `importe` en positivo |
+| `desde_cuenta`, `desde_id` | cuenta (alias) e `id` del movimiento del cargo |
+| `hacia_cuenta`, `hacia_id` | cuenta e `id` del movimiento del abono |
+| `concepto` | el del cargo (o el del abono si el cargo no trae) |
+| `clave` | id de operación sacado de `operationRef`; `null` si no se pudo leer |
+| `match` | `key` (por la clave), `heuristic` (respaldo) o `null` (sin pareja, solo con `--unmatched`) |
+
+La tabla muestra `fecha`, `importe`, `desde_cuenta`, `hacia_cuenta`, `concepto` y `match`; JSON y CSV, todo.
+
+- **Por clave** (`key`): dos movimientos son el mismo traspaso si su `operationRef` tiene el formato de traspaso interno (abajo) con el mismo id de operación **y** el mismo bloque numérico (posiciones 68–77), los importes son opuestos y las cuentas distintas.
+- Un movimiento con `operationRef` legible solo se empareja por clave. Así, una transferencia de **otro cliente** de MyInvestor (llega como «ABONO POR TRANSFERENCIA», igual que las tuyas) no se confunde con un traspaso tuyo: su id de operación (a veces hasta con otra fecha dentro) no aparece en ninguna de tus cuentas.
+- **Heurístico** (`heuristic`), solo si **ninguno** de los dos lados tiene un `operationRef` legible: un «CARGO POR TRANSFERENCIA» y un «ABONO POR TRANSFERENCIA» (nunca una «TRANSFERENCIA SEPA» ni otro tipo) con importes opuestos, en cuentas distintas, como mucho a 1 día y con «Transferencia desde MyInvestor» en el concepto de alguno de los dos. Ante la duda no empareja: si un cargo tiene más de un abono candidato (o un abono más de un cargo), ninguno sale emparejado.
+- Un movimiento **nunca** está en dos traspasos.
+- `--unmatched` añade los movimientos con pinta de transferencia (`operationRef` legible, ese concepto o un tipo con «TRANSFERENCIA», como los SEPA) que se han quedado sin pareja, con solo `desde_*` (salidas) o solo `hacia_*` (entradas) y `match` vacío: entradas y salidas externas o de otros clientes (p. ej. regalos a la cuenta junior).
+- Siempre se leen todas las cuentas; `-a` solo filtra los traspasos que tocan esa cuenta. En `movements`, en cambio, `pareja_id` solo se encuentra si el otro lado está entre las cuentas consultadas (con `-a` u `--owner` puede quedar fuera) y en el rango de fechas.
+- Más allá de los ~90 días se comporta como `movements` (ver [Movimientos antiguos y segundo factor](#movimientos-antiguos-y-segundo-factor)): si falta un tramo que pide firma, saca lo obtenido y sale con 13, salvo con `--allow-partial` o `--free-only`.
+
+**Formato de `operationRef`** en un traspaso interno (posiciones desde 0, 93 caracteres):
+
+| Posiciones | Contenido | Ejemplo sintético |
+|---|---|---|
+| 0–17 | número de tu cuenta, con ceros a la izquierda | `000000000000000001` |
+| 18–27 | en blanco en los traspasos internos (cargo y abono); con dígitos en SEPA, compras con tarjeta y transferencias inmediatas | |
+| 28–42 | **id de operación**: `1` + fecha `AAAAMMDD` + 6 dígitos; el mismo en los dos lados; es la `clave` | `120261102758295` |
+| 43 | espacio | |
+| 44–67 | nombre de la entidad (relleno con espacios) | `ENTIDAD GENERICA        ` |
+| 68–77 | bloque de 10 dígitos, igual en los dos lados y distinto entre traspasos; se exige que coincida; significado desconocido | `3000000001` |
+| 78–83 | contador del movimiento en su cuenta (= `ref`) | `000259` |
+| 84–91 | fecha (`AAAAMMDD`) | `20261102` |
+| 92 | un dígito; visto `9` en cargos, `7` en abonos internos, `3` en SEPA y `0` en compras y aperturas; significado desconocido | `9` |
+
+En otros movimientos el texto libre empieza en la posición 28 (`MYINVESTOR`, `REMESA:…`, el nombre del valor) y en una «APERTURA» las posiciones 18–67 van en blanco. El `operationRef` solo se da por legible si encaja exactamente: 93 caracteres (o más, solo con espacios detrás); cuenta, id de operación, bloque, contador y último carácter en dígitos; 18–27 en blanco; fechas válidas dentro del id y en 84–91; y el contador igual a `ref` cuando el movimiento lo trae. No se sabe qué significan los 6 últimos dígitos del id de operación, el bloque ni el último dígito.
 
 ### Cuentas: tipo, rol y titulares
 

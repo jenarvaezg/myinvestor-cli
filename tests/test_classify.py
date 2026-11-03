@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from myinvestor import classify as classify_module
-from myinvestor.classify import EXACT_TYPE_RULE, Category, classify, normalize
+from myinvestor.classify import EXACT_TYPE_RULE, PAIRED_RULE, Category, classify, normalize
 
 
 @pytest.mark.parametrize(
@@ -49,6 +49,13 @@ def test_observed_types_match_exactly(operation_type: str, category: Category) -
 def test_keyword_rules(operation_type: str, category: Category) -> None:
     result = classify(operation_type)
     assert result.category is category and result.known and (result.rule or "").startswith("palabra clave")
+
+
+@pytest.mark.parametrize("operation_type", ["CARGO POR TRANSFERENCIA", "ABONO POR TRANSFERENCIA", None])
+def test_a_paired_internal_transfer_is_traspaso_interno(operation_type: str | None) -> None:
+    result = classify(operation_type, internal_transfer=True)
+    assert (result.category, result.rule) == (Category.traspaso_interno, PAIRED_RULE)
+    assert classify(operation_type).category is not Category.traspaso_interno
 
 
 @pytest.mark.parametrize("operation_type", ["PAGO CON TARJETA", "COMPRA TARJETA", "SERVICIO RVX", "", None])

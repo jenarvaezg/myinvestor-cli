@@ -107,6 +107,8 @@ def test_movements_json_exports_account_direction_labels_and_refs(
         "ref": "000259",
         "operacion_ref": "0000000000OPREF0001",
         "fichero_ref": "FILE-1",
+        "pareja_id": None,
+        "traspaso_interno": False,
     }
     assert Decimal(str(out["importe"])) == Decimal("-50.0")
     assert Decimal(str(out["saldo"])) == Decimal("501.0")

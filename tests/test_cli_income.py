@@ -18,6 +18,7 @@ from myinvestor.psd2 import free_start
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
 from tests.conftest import API, CASH_UUID, CPERF, cash_account, flow, ok
+from tests.test_transfers_match import ACCOUNT_A, ACCOUNT_B, op_ref
 
 runner = CliRunner()
 FLOWS = f"{API}/account/api/v3/account/{CASH_UUID}/flows"
@@ -123,6 +124,52 @@ def test_income_by_type_shows_category_type_and_rule(mock_api: respx.MockRouter,
     assert rules["COMPRA RV CONTADO"] == "tipo exacto"
     assert rules["RETENCION IRPF"] == "palabra clave: RETENC"
     assert rules["PAGO CON TARJETA"] is None
+
+
+def test_income_by_type_puts_paired_own_transfers_in_traspaso_interno(
+    mock_api: respx.MockRouter, store: MemorySessionStore
+) -> None:
+    """Both legs of a transfer between my accounts are internal; a gift from another client stays external."""
+    key, stamp = "120261020700001", "2026-10-20T00:00:00.000+0000"
+    day = {"operationDate": stamp, "valueDate": stamp}
+    out = op_ref(key, "000010", account=ACCOUNT_A)
+    into = op_ref(key, "000020", account=ACCOUNT_B, check="7")
+    gift = op_ref("120261014477050", "000021", account=ACCOUNT_B, block="3000000099", check="7")
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account(1), cash_account(2)]))
+    mock_api.get(FLOWS).respond(
+        200,
+        json=ok(
+            {
+                "flowList": [
+                    flow(1, -50.0, reference="000010", operationType="CARGO POR TRANSFERENCIA", operationRef=out, **day)
+                ]
+            }
+        ),
+    )
+    mock_api.get(f"{API}/account/api/v3/account/{SECOND_UUID}/flows").respond(
+        200,
+        json=ok(
+            {
+                "flowList": [
+                    flow(
+                        2, 50.0, reference="000020", operationType="ABONO POR TRANSFERENCIA", operationRef=into, **day
+                    ),
+                    flow(
+                        3, 50.0, reference="000021", operationType="ABONO POR TRANSFERENCIA", operationRef=gift, **day
+                    ),
+                ]
+            }
+        ),
+    )
+
+    rows = json_rows(*OCTOBER, "--by", "type")
+
+    assert [(r["categoria"], r["tipo"], r["regla"], r["movimientos"], r["importe"]) for r in rows] == [
+        ("aportacion_externa", "ABONO POR TRANSFERENCIA", "tipo exacto", 1, Decimal("50.00")),
+        ("traspaso_interno", "ABONO POR TRANSFERENCIA", "traspaso emparejado", 1, Decimal("50.00")),
+        ("traspaso_interno", "CARGO POR TRANSFERENCIA", "traspaso emparejado", 1, Decimal("-50.00")),
+        ("total", None, None, 3, Decimal("50.00")),
+    ]
 
 
 def test_income_by_year(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:

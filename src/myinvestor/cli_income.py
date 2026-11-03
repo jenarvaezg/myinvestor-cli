@@ -29,6 +29,7 @@ from myinvestor.cli_common import FormatOpt, app, build_client, err
 from myinvestor.config import FREE_FLOWS_DAYS
 from myinvestor.errors import InputError
 from myinvestor.output import OutputFormat, render
+from myinvestor.transfers_match import with_transfer_fields
 
 TOTAL = "total"
 INCOME_CATEGORIES = frozenset({Category.intereses, Category.dividendos, Category.retencion, Category.comision})
@@ -167,9 +168,10 @@ def income(
 
     `bruto` = intereses + dividendos tal como se abonan; `neto` = bruto + retenciones; `comisiones`
     aparte. Los movimientos se clasifican por `operationType` (ver `--by type`); los desconocidos
-    van a `otros`. Los movimientos se piden como en `movements`: lo anterior a los últimos ~90 días hay
-    que aprobarlo en la app del móvil, y si falta algún tramo se muestra lo obtenido y se sale con 13
-    (0 con --allow-partial).
+    van a `otros`; los dos lados de un traspaso entre tus cuentas, a `traspaso_interno`. Los
+    movimientos se piden como en `movements`: lo anterior a los últimos ~90 días hay que aprobarlo
+    en la app del móvil, y si falta algún tramo se muestra lo obtenido y se sale con 13 (0 con
+    --allow-partial).
     """
     start, end = _income_range(year, date_from, date_to, days)
     if free_only:
@@ -177,7 +179,10 @@ def income(
     with build_client() as client:
         chosen = filter_owner(match_cash_accounts(client.cash_accounts(), account), owner)
         rows, gaps = _movement_rows(client, chosen, start, end)
-    movements = [(row, classify(row["tipo"], row["clase"])) for row in rows]
+    movements = [
+        (row, classify(row["tipo"], row["clase"], internal_transfer=row["traspaso_interno"]))
+        for row in with_transfer_fields(rows)
+    ]
     if by is not IncomeGrouping.type:
         _report_unknown(movements)
     render(GROUPINGS[by](movements, start, end), fmt, title=f"Ingresos {start} → {end}")

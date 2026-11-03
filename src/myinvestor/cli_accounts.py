@@ -35,6 +35,7 @@ from myinvestor.models import (
 )
 from myinvestor.output import OutputFormat, print_json, render
 from myinvestor.psd2 import Span, free_start, split_range
+from myinvestor.transfers_match import with_transfer_fields
 
 DEFAULT_MOVEMENT_DAYS = 30
 # `movements` in a table keeps these columns; JSON and CSV export every field of the row.
@@ -59,7 +60,7 @@ OwnerOpt = Annotated[
 ]
 
 
-# Shared by `movements` and `income`: how to handle the part of a range that needs a second factor.
+# Shared by `movements`, `income` and `internal-transfers`: the part of a range that needs a second factor.
 FreeOnlyOpt = Annotated[
     bool,
     typer.Option(
@@ -267,6 +268,7 @@ def movements(
         if movement_id:
             chosen = [a for a in chosen if movement_id.startswith(f"{a.account_uuid}:")] or chosen
         rows, gaps = _movement_rows(client, chosen, start, end)
+    rows = with_transfer_fields(rows)  # before --search: the other leg may not match it
     if query:
         needle = query.lower()
         rows = [r for r in rows if needle in f"{r['concepto'] or ''} {r['tipo'] or ''}".lower()]
