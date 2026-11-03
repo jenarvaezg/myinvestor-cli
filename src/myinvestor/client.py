@@ -33,11 +33,13 @@ from myinvestor.models import (
     Contribution,
     FeedItem,
     Flow,
+    FundSheet,
     FundSummary,
     Hold,
     Order,
     PensionAccount,
     PensionPlanPosition,
+    PensionPlanSheet,
     PositionPoint,
     SecuritiesAccount,
 )
@@ -336,6 +338,10 @@ class MyInvestorClient:
         data = self.get_data(f"{CPERF}/v2/pension-plans/{seg(dgs_code)}")
         return data if isinstance(data, dict) else {}
 
+    def pension_plan_sheet(self, dgs_code: str) -> PensionPlanSheet:
+        """Classification of a pension plan (same request as `pension_plan`)."""
+        return PensionPlanSheet.model_validate(self.pension_plan(dgs_code))
+
     # ---- contributions, catalog, feed --------------------------------------
 
     def contributions(self) -> list[Contribution]:
@@ -344,6 +350,10 @@ class MyInvestorClient:
     def fund(self, isin: str) -> dict[str, Any]:
         data = self.get_data(f"{CPERF}/v2/funds/{seg(isin)}")
         return data if isinstance(data, dict) else {}
+
+    def fund_sheet(self, isin: str) -> FundSheet:
+        """Asset type, region, category and TER of a fund (same request as `fund`)."""
+        return FundSheet.model_validate(self.fund(isin))
 
     def fund_price(self, isin: str) -> dict[str, Any]:
         data = self.get_data(f"{CPERF}/v2/funds/{seg(isin)}/prices/last")

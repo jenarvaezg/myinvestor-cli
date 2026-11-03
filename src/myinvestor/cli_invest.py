@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Any
 
 import typer
 
+from myinvestor.allocation import is_fund, share
 from myinvestor.cli_common import FormatOpt, app, build_client, iso_moment, now_local, parse_day
 from myinvestor.client import MyInvestorClient, Period
 from myinvestor.errors import InputError
@@ -65,24 +67,42 @@ def _holding_row(account: SecuritiesAccount, inv: Investment) -> dict[str, Any]:
     }
 
 
+def _with_weights(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`peso`: share of each position in the value of the positions listed."""
+    total = sum((r["valor"] or Decimal(0) for r in rows), Decimal(0))
+    return [{**r, "peso": share(r["valor"] or Decimal(0), total)} for r in rows]
+
+
 @app.command()
 def holdings(
     account: SecAccountOpt = None,
     kind: Annotated[
         HoldingKind | None, typer.Option(help="Solo un tipo: fondos (INDEXED_FUND…) o broker (acciones/ETF).")
     ] = None,
+    ter: Annotated[
+        bool, typer.Option("--ter", help="Añadir el TER de cada fondo (una petición más por fondo distinto).")
+    ] = False,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
-    """Fondos, ETF y acciones de las cuentas de valores, con coste, valor y rentabilidad.
+    """Fondos, ETF y acciones de las cuentas de valores, con coste, valor, rentabilidad y peso.
 
+    `peso` es el % de cada posición sobre el valor de las listadas (tras `-a` y `--kind`). Con
+    `--ter`, el TER de la ficha de cada fondo (vacío en acciones y ETF).
     En JSON/CSV/TSV cada fila lleva además `consultado_en` (fecha y hora de la consulta, con zona).
     """
     consulted = now_local()
     with build_client() as client:
-        rows = [_holding_row(sec, inv) for sec in _securities(client, account) for inv in sec.investments]
-    if kind:
-        rows = [r for r in rows if (r["tipo"] == BROKER) == (kind is HoldingKind.broker)]
-    rows.sort(key=lambda r: r["valor"] or 0, reverse=True)
+        positions = [(sec, inv) for sec in _securities(client, account) for inv in sec.investments]
+        if kind:
+            positions = [
+                (s, i) for s, i in positions if (i.investment_product_type == BROKER) == (kind is HoldingKind.broker)
+            ]
+        isins = dict.fromkeys(i.isin for _, i in positions if is_fund(i)) if ter else {}
+        ters = {isin: client.fund_sheet(isin).ter for isin in isins if isin}
+    positions.sort(key=lambda p: p[1].market_value or 0, reverse=True)
+    rows = _with_weights([_holding_row(sec, inv) for sec, inv in positions])
+    if ter:
+        rows = [{**r, "ter": ters.get(inv.isin or "")} for r, (_, inv) in zip(rows, positions, strict=True)]
     if fmt is OutputFormat.table:
         render(rows, fmt, title=f"Cartera a {consulted:%Y-%m-%d %H:%M}")
         return
