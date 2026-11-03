@@ -26,10 +26,12 @@ from myinvestor.cli_common import (
     optional_range,
     parse_day,
 )
+from myinvestor.cli_fiscal import FiscalOpt, account_cost, fund_costs, pension_cost, plan_costs
 from myinvestor.cli_state import MarkOpt, NewOpt, StateOpt, record, state_file
 from myinvestor.client import MyInvestorClient, Statement
 from myinvestor.config import FREE_FLOWS_DAYS
 from myinvestor.errors import ApiError, InputError, PartialResultError, SignatureError, SignatureRequired
+from myinvestor.fiscal import BLANK, columns, total_columns
 from myinvestor.models import (
     CashAccount,
     Flow,
@@ -228,8 +230,23 @@ def _total_row(rows: list[dict[str, Any]], label: str) -> dict[str, Any]:
     }
 
 
+def _position_fiscal(
+    client: MyInvestorClient,
+    securities: list[SecuritiesAccount],
+    pensions: list[tuple[PensionAccount, list[PensionPlanPosition]]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """`coste_fiscal`, `ganancia_real` and `rentab_real` by (`producto`, `id`); a portfolio's without its cash."""
+    funds = fund_costs(client, ((sec.account_id, inv) for sec in securities for inv in sec.investments))
+    plans = plan_costs(client, [pen for pen, _ in pensions])
+    found = {("valores", s.account_id): columns(s.market_value, account_cost(s, funds)) for s in securities}
+    return found | {
+        ("pensiones", pen.account_id): columns(pen.market_value, pension_cost(pen.account_id, held, plans))
+        for pen, held in pensions
+    }
+
+
 @app.command()
-def position(fmt: FormatOpt = OutputFormat.table) -> None:
+def position(fiscal: FiscalOpt = False, fmt: FormatOpt = OutputFormat.table) -> None:
     """Posición global: efectivo, cuentas de valores y planes de pensiones, con el total.
 
     `fecha_valor` es el VL más reciente de las inversiones de cada producto (hoy, en el efectivo).
@@ -238,20 +255,29 @@ def position(fmt: FormatOpt = OutputFormat.table) -> None:
 
     Una cartera del roboadvisor sale como «Cartera METAL (muy agresiva)» y su cuenta de efectivo propia
     va dentro de ella: su `valor` suma ese efectivo (columna `efectivo`) en vez de listarlo aparte.
+
+    `invertido` es el que muestra MyInvestor, que tras un traspaso no es el coste fiscal. Con `--fiscal`,
+    `coste_fiscal` (el coste heredado en los traspasos: lotes vivos de los fondos y planes reconstruidos
+    con su histórico), `ganancia_real` y `rentab_real`; en el total, la suma de los productos sin el efectivo.
     """
     consulted = now_local()
     blank = dict.fromkeys(PORTFOLIO_KEYS)
     with build_client() as client:
-        rows = _position_rows(client.cash_accounts(), client.securities_accounts(), consulted.date())
-        rows += [
-            {**_pension_position(pen, client.pension_plans(pen.account_id)), **blank}
-            for pen in client.pension_accounts()
-        ]
+        cash, securities = client.cash_accounts(), client.securities_accounts()
+        pensions = [(pen, client.pension_plans(pen.account_id)) for pen in client.pension_accounts()]
+        fiscal_rows = _position_fiscal(client, securities, pensions) if fiscal else None
+    rows = _position_rows(cash, securities, consulted.date())
+    rows += [{**_pension_position(pen, plans), **blank} for pen, plans in pensions]
+    if fiscal_rows is not None:
+        rows = [{**r, **fiscal_rows.get((r["producto"], r["id"]), BLANK)} for r in rows]
+    label = POSITION_TOTAL.upper() if fmt is OutputFormat.table else POSITION_TOTAL
+    total = {**_total_row(rows, label), **blank}
+    if fiscal_rows is not None:
+        total |= total_columns(r for r in rows if (r["producto"], r["id"]) in fiscal_rows)
+    rows.append(total)
     if fmt is OutputFormat.table:
-        rows.append({**_total_row(rows, POSITION_TOTAL.upper()), **blank})
         render(_table_columns(rows), fmt, title=f"Posición global a {consulted:%Y-%m-%d %H:%M}")
         return
-    rows.append({**_total_row(rows, POSITION_TOTAL), **blank})
     render([{**r, "consultado_en": iso_moment(consulted)} for r in rows], fmt)
 
 

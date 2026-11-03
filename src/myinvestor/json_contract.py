@@ -109,11 +109,26 @@ MOVEMENT_DETAILS = (
 )
 
 PRODUCT_VALUES = (
-    Field("invertido", A, True),
+    Field("invertido", A, True, "el que muestra MyInvestor: en el destino de un traspaso, lo traspasado"),
     Field("valor", A, True),
-    Field("ganancia", A, True),
+    Field("ganancia", A, True, "`valor` - `invertido`, según MyInvestor"),
     Field("rentab", N, True, "rentabilidad total, en %"),
 )
+FISCAL_NOTE = (
+    "coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe"
+)
+
+
+def _fiscal(only_with: str | None = None, cost_note: str = FISCAL_NOTE, gain_note: str = "") -> tuple[Field, ...]:
+    """`coste_fiscal`, `ganancia_real` and `rentab_real`, the gain over the cost that transfers carry over."""
+    return (
+        Field("coste_fiscal", A, True, cost_note, only_with=only_with),
+        Field("ganancia_real", A, True, gain_note or "`valor` - `coste_fiscal`", only_with=only_with),
+        Field("rentab_real", N, True, "`ganancia_real` / `coste_fiscal`, en %, a 2 decimales", only_with=only_with),
+    )
+
+
+FISCAL_NAMES = frozenset(f.name for f in _fiscal())
 
 POSITION = (
     Field("producto", S, note="`efectivo`, `valores`, `pensiones` o `total` (última fila)"),
@@ -128,6 +143,11 @@ POSITION = (
     Field("perfil", S, True, "`portfolioProfileType` de la cartera (`VERY_AGGRESSIVE`…); `null` en el resto"),
     Field("efectivo", A, True, "saldo de la cuenta de efectivo propia de la cartera, ya sumado en `valor`"),
     Field("efectivo_id", S, True, "id de esa cuenta de efectivo, que ya no sale como fila aparte"),
+    *_fiscal(
+        "--fiscal",
+        f"{FISCAL_NOTE}; `null` en efectivo; en el total, la suma de los productos",
+        "`valor` - `coste_fiscal` (en una cartera, sin su efectivo); en el total, la suma de los productos",
+    ),
     CONSULTED,
 )
 
@@ -171,6 +191,7 @@ HOLDING = (
     Field("perfil", S, True, "`portfolioProfileType` de esa cartera (`VERY_AGGRESSIVE`…); si no, `null`"),
     Field("peso", N, True, "% sobre el valor de las posiciones listadas, a 2 decimales"),
     Field("ter", N, True, "TER de la ficha del fondo, en %; `null` en acciones y ETF", only_with="--ter"),
+    *_fiscal("--fiscal", f"suma del coste de los lotes vivos del fondo; en acciones y ETF, `invertido`; {FISCAL_NOTE}"),
     CONSULTED,
 )
 
@@ -186,7 +207,7 @@ ORDER = (
     Field("participaciones", N, True),
 )
 
-PENSION = (
+PENSION_BASE = (
     Field("cuenta", S),
     Field("codigo", S, note="código DGS del plan (`N1234`)"),
     Field("nombre", S, True),
@@ -196,6 +217,8 @@ PENSION = (
     Field("fecha_vl", D, True),
     *PRODUCT_VALUES,
 )
+PLAN_COST_NOTE = f"reconstruido con el histórico del último año de la cuenta; {FISCAL_NOTE}"
+PENSION = (*PENSION_BASE, *_fiscal("--fiscal", PLAN_COST_NOTE))
 
 HISTORY = (
     Field("fecha", D),
@@ -206,6 +229,10 @@ HISTORY = (
     Field("rentab", N, True, "en %"),
     Field("participaciones", N, True),
     Field("coste_medio", N, True),
+    *_fiscal(
+        cost_note="en fondos, acciones y ETF, `invertido`; en planes, el heredado en las movilizaciones, "
+        f"reconstruido con la serie de la cuenta; {FISCAL_NOTE}"
+    ),
 )
 
 CONTRIBUTION = (
@@ -433,6 +460,7 @@ ALLOCATION_TAIL = (
     Field("peso_pct", N, True, "% del total, a 2 decimales"),
     Field("invertido", A, True),
     Field("ganancia", A, True),
+    *_fiscal("--fiscal", f"{FISCAL_NOTE} en alguna de sus posiciones; en el efectivo, su saldo"),
     Field("ter", N, True, "TER medio ponderado por valor de lo que lo tiene, en %"),
     Field("objetivo_pct", N, True, "peso objetivo en %", only_with="--target"),
     Field("desviacion_pct", N, True, "peso actual - objetivo, en puntos", only_with="--target"),
@@ -500,15 +528,25 @@ SNAPSHOT_ACCOUNT_VALUES = (
     Field("ganancia", A, True),
     Field("rentab", N, True, "en %"),
     Field("fecha_valor", D, True, "VL más reciente de sus posiciones"),
+    *_fiscal(cost_note=f"suma del de sus posiciones o planes; {FISCAL_NOTE}"),
 )
-SNAPSHOT_HOLDING = tuple(f for f in HOLDING if f.name not in ("ter", "consultado_en", "cartera", "perfil"))
+SNAPSHOT_HOLDING = (
+    *(f for f in HOLDING if f.name not in {"ter", "consultado_en", "cartera", "perfil", *FISCAL_NAMES}),
+    *_fiscal(cost_note=f"suma del coste de los lotes vivos del fondo; en acciones y ETF, `invertido`; {FISCAL_NOTE}"),
+)
 SNAPSHOT_SECTION = "`null` si la sección ha fallado (ver `errors`)"
 DELTA_ROW = (
     Field("producto", S, note="`efectivo`, `valores` o `pensiones`"),
     Field("id", S, note="id de la cuenta"),
     Field("nombre", S, True),
     Field("valor", A, note="valor ahora - valor antes (en efectivo, el saldo)"),
-    Field("aportado", A, True, "dinero neto que ha entrado en el producto; `null` si no se puede saber"),
+    Field(
+        "aportado",
+        A,
+        True,
+        "dinero neto que ha entrado en el producto (con `coste_fiscal` si las dos fotos lo tienen; si no, "
+        "con `invertido`); `null` si no se puede saber",
+    ),
     Field("mercado", A, True, "valor - aportado"),
 )
 SNAPSHOT = (
@@ -524,7 +562,12 @@ SNAPSHOT = (
         SNAPSHOT_SECTION,
         fields=(
             *SNAPSHOT_ACCOUNT_VALUES,
-            Field("posiciones", ARR, note="como `holdings`; `peso` sobre toda la cartera", fields=SNAPSHOT_HOLDING),
+            Field(
+                "posiciones",
+                ARR,
+                note="como `holdings --fiscal`; `peso` sobre toda la cartera",
+                fields=SNAPSHOT_HOLDING,
+            ),
         ),
     ),
     Field(
@@ -532,7 +575,15 @@ SNAPSHOT = (
         ARR,
         True,
         SNAPSHOT_SECTION,
-        fields=(*SNAPSHOT_ACCOUNT_VALUES, Field("planes", ARR, note="como `pensions`", fields=PENSION)),
+        fields=(
+            *SNAPSHOT_ACCOUNT_VALUES,
+            Field(
+                "planes",
+                ARR,
+                note="como `pensions --fiscal`",
+                fields=(*PENSION_BASE, *_fiscal(cost_note=PLAN_COST_NOTE)),
+            ),
+        ),
     ),
     Field(
         "pending",
@@ -598,7 +649,7 @@ SNAPSHOT = (
         ARR,
         note="secciones que han fallado",
         fields=(
-            Field("section", S, note="`cash`, `pensions`, `movements`, `new.orders`…"),
+            Field("section", S, note="`cash`, `pensions`, `pensions.fiscal`, `movements`, `new.orders`…"),
             Field("error", S, note="como `error` de la línea de error"),
             Field("exit_code", INT),
             Field("message", S, note="texto para personas", stable=False),

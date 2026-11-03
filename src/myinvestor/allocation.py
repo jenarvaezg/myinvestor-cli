@@ -17,6 +17,7 @@ from typing import Any
 
 from myinvestor.asset_classes import AssetClass, asset_class, known, normalize, underlying
 from myinvestor.errors import InputError
+from myinvestor.fiscal import columns, strict_total
 from myinvestor.models import (
     CashAccount,
     FundSheet,
@@ -73,6 +74,7 @@ class Holding:
     «Renta Variable», `RV`, `ETF: GOLD`…), `None` when there was nothing to translate. `geo_label` is
     what decided the region (`geoZone`, `nombre: S&P 500`, `categoría: GLOBAL`, `ISIN: US`, the asset
     class of a `no_aplica`), `None` when it is unknown.
+    `fiscal_cost`: the tax cost carried over by transfers (see `fiscal`); `None` when unknown or not asked.
     """
 
     product: str  # ISIN, DGS code, ticker or `efectivo`
@@ -89,6 +91,7 @@ class Holding:
     ter: Decimal | None = None
     asset_label: str | None = None
     geo_label: str | None = None
+    fiscal_cost: Decimal | None = None
 
     def key(self, by: Grouping) -> str:
         keys = {
@@ -162,7 +165,9 @@ def broker_geo(asset: str, inv: Investment) -> tuple[str, str | None]:
     return geo_of(asset, ("nombre", inv.investment_name), ("categoría", known(inv.my_investor_category)))
 
 
-def from_investment(sec: SecuritiesAccount, inv: Investment, sheet: FundSheet | None) -> Holding:
+def from_investment(
+    sec: SecuritiesAccount, inv: Investment, sheet: FundSheet | None, fiscal_cost: Decimal | None = None
+) -> Holding:
     geo, geo_label = geo_of(UNCLASSIFIED, ("nombre", inv.investment_name))
     base = Holding(
         product=inv.isin or inv.ticker or inv.investment_name or UNCLASSIFIED,
@@ -176,6 +181,7 @@ def from_investment(sec: SecuritiesAccount, inv: Investment, sheet: FundSheet | 
         category=known(inv.my_investor_category) or UNCLASSIFIED,
         geo=geo,
         geo_label=geo_label,
+        fiscal_cost=fiscal_cost,
     )
     if inv.investment_product_type == BROKER:
         asset, label = broker_asset(inv)
@@ -196,8 +202,12 @@ def from_investment(sec: SecuritiesAccount, inv: Investment, sheet: FundSheet | 
     )
 
 
-def from_pension(account: PensionAccount, plan: PensionPlanPosition, sheet: PensionPlanSheet | None) -> Holding:
-    """A plan's region comes from its category and name (`RV Global PP`, «… S&P 500, PP»)."""
+def from_pension(
+    account: PensionAccount,
+    plan: PensionPlanPosition,
+    sheet: PensionPlanSheet | None,
+    fiscal_cost: Decimal | None = None,
+) -> Holding:
     label = sheet.active_type if sheet else None
     asset = asset_class(label)
     name = (sheet.name if sheet else None) or plan.name
@@ -216,6 +226,7 @@ def from_pension(account: PensionAccount, plan: PensionPlanPosition, sheet: Pens
         geo=geo,
         geo_label=geo_label,
         category=known(sheet.category if sheet else None) or UNCLASSIFIED,
+        fiscal_cost=fiscal_cost,
     )
 
 
@@ -244,6 +255,7 @@ def from_cash(acc: CashAccount, portfolio: SecuritiesAccount | None = None) -> H
         geo=NOT_APPLICABLE,
         geo_label=CASH,
         category=CASH,
+        fiscal_cost=acc.balance,
     )
 
 
@@ -305,6 +317,7 @@ def _row(key: str, by: Grouping, holdings: Sequence[Holding], total: Decimal) ->
         "peso_pct": share(value, total),
         "invertido": _known_sum(h.invested for h in holdings),
         "ganancia": _known_sum(h.profit for h in holdings),
+        **columns(value, strict_total(h.fiscal_cost for h in holdings)),
         "ter": weighted_ter(holdings),
     }
 
@@ -314,7 +327,8 @@ def _sorted(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def group(holdings: Sequence[Holding], by: Grouping) -> list[dict[str, Any]]:
-    """One row per key, biggest first: `{clave, [labels], valor, peso_pct, invertido, ganancia, ter}`."""
+    """One row per key, biggest first: `{clave, [labels], valor, peso_pct, invertido, ganancia, coste_fiscal,
+    ganancia_real, rentab_real, ter}`. A group's tax cost is unknown if any of its holdings' is."""
     buckets: dict[str, list[Holding]] = {}
     for h in holdings:
         buckets.setdefault(h.key(by), []).append(h)

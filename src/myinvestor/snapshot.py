@@ -8,7 +8,9 @@ missing on one side counts as 0 there):
 
 - `valor` = value now - value before (`saldo` for cash, `valor` for securities and pension accounts).
 - `aportado`, the net money that went into the product:
-  - securities and pension accounts: `invertido` now - `invertido` before;
+  - securities and pension accounts: `coste_fiscal` now - `coste_fiscal` before, when both snapshots
+    know it (a transfer between funds or a mobilisation between plans keeps it, so it adds nothing);
+    otherwise, `invertido` now - `invertido` before;
   - cash accounts: the sum of the account's movements booked since the previous snapshot, except
     interest, dividends, withholding and fees (`classify.INCOME_CATEGORIES`), which are return. A
     movement is "since the previous snapshot" when its `id` is not among the previous snapshot's
@@ -66,7 +68,9 @@ class Section(StrEnum):
 
     cash = "cash"
     securities = "securities"
+    securities_fiscal = "securities.fiscal"  # `coste_fiscal` of the funds (their lots): the rest still comes out
     pensions = "pensions"
+    pensions_fiscal = "pensions.fiscal"  # `coste_fiscal` of the plans (their history)
     pending = "pending"
     upcoming = "upcoming"
     movements = "movements"
@@ -148,6 +152,7 @@ class _Holding:
     name: str | None
     value: Decimal
     invested: Decimal | None
+    fiscal: Decimal | None = None  # `coste_fiscal`
 
 
 def compute_delta(current: Mapping[str, Any], previous: Mapping[str, Any]) -> dict[str, Any]:
@@ -181,7 +186,13 @@ def _holdings(snapshot: Mapping[str, Any], product: Product, section: str) -> di
     if product is Product.cash:
         return {str(r["id"]): _Holding(str(r["id"]), r.get("alias"), _decimal(r["saldo"]) or ZERO, None) for r in rows}
     return {
-        str(r["id"]): _Holding(str(r["id"]), r.get("nombre"), _decimal(r["valor"]) or ZERO, _decimal(r["invertido"]))
+        str(r["id"]): _Holding(
+            str(r["id"]),
+            r.get("nombre"),
+            _decimal(r["valor"]) or ZERO,
+            _decimal(r["invertido"]),
+            _decimal(r.get("coste_fiscal")),
+        )
         for r in rows
     }
 
@@ -198,7 +209,8 @@ def _delta_row(
     if product is Product.cash:
         contributed = flows.of(pid) if flows else None
     else:
-        invested_now, invested_before = _invested(now), _invested(before)
+        basis = _fiscal if _knows_fiscal(now) and _knows_fiscal(before) else _invested
+        invested_now, invested_before = basis(now), basis(before)
         contributed = None if invested_now is None or invested_before is None else invested_now - invested_before
     named = now or before
     return {
@@ -219,6 +231,15 @@ def _value(holding: _Holding | None) -> Decimal:
 def _invested(holding: _Holding | None) -> Decimal | None:
     """0 for a product missing from a snapshot; None if the API did not say."""
     return ZERO if holding is None else holding.invested
+
+
+def _fiscal(holding: _Holding | None) -> Decimal | None:
+    return ZERO if holding is None else holding.fiscal
+
+
+def _knows_fiscal(holding: _Holding | None) -> bool:
+    """A snapshot without the product (worth 0 there) or one whose `coste_fiscal` is known."""
+    return holding is None or holding.fiscal is not None
 
 
 @dataclass(frozen=True)

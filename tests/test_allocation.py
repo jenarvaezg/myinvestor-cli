@@ -62,9 +62,23 @@ def inv(isin: str, kind: str = "INDEXED_FUND", **overrides: Any) -> Investment:
 
 def test_group_by_asset_weights_and_weighted_ter() -> None:
     holdings = [
-        holding("A", "600", asset="renta_variable", asset_label="VARIABLE_INCOME", ter=Decimal("0.10")),
-        holding("B", "300", asset="renta_variable", asset_label="Renta Variable", ter=Decimal("0.40")),
-        holding("C", "100", asset="renta_fija", ter=None),
+        holding(
+            "A",
+            "600",
+            asset="renta_variable",
+            asset_label="VARIABLE_INCOME",
+            ter=Decimal("0.10"),
+            fiscal_cost=Decimal(500),
+        ),
+        holding(
+            "B",
+            "300",
+            asset="renta_variable",
+            asset_label="Renta Variable",
+            ter=Decimal("0.40"),
+            fiscal_cost=Decimal(300),
+        ),
+        holding("C", "100", asset="renta_fija", ter=None),  # tax cost unknown
     ]
 
     rows = group(holdings, Grouping.asset)
@@ -77,6 +91,9 @@ def test_group_by_asset_weights_and_weighted_ter() -> None:
             "peso_pct": Decimal("90.00"),
             "invertido": Decimal("880"),
             "ganancia": Decimal("20"),
+            "coste_fiscal": Decimal("800"),
+            "ganancia_real": Decimal("100"),
+            "rentab_real": Decimal("12.50"),
             "ter": Decimal("0.2000"),  # (600 * 0.10 + 300 * 0.40) / 900
         },
         {
@@ -86,6 +103,9 @@ def test_group_by_asset_weights_and_weighted_ter() -> None:
             "peso_pct": Decimal("10.00"),
             "invertido": Decimal("90"),
             "ganancia": Decimal("10"),
+            "coste_fiscal": None,
+            "ganancia_real": None,
+            "rentab_real": None,
             "ter": None,
         },
     ]
@@ -93,9 +113,9 @@ def test_group_by_asset_weights_and_weighted_ter() -> None:
 
 def test_total_row_has_portfolio_ter_over_known_ter_only() -> None:
     holdings = [
-        holding("A", "600", ter=Decimal("0.10")),
-        holding("B", "300", ter=Decimal("0.40")),
-        holding(CASH, "1000", invested=Decimal(1000), profit=Decimal(0)),
+        holding("A", "600", ter=Decimal("0.10"), fiscal_cost=Decimal(500)),
+        holding("B", "300", ter=Decimal("0.40"), fiscal_cost=Decimal(300)),
+        holding(CASH, "1000", invested=Decimal(1000), profit=Decimal(0), fiscal_cost=Decimal(1000)),
     ]
     assert total_row(holdings, Grouping.product) == {
         "clave": "total",
@@ -104,6 +124,9 @@ def test_total_row_has_portfolio_ter_over_known_ter_only() -> None:
         "peso_pct": Decimal("100.00"),
         "invertido": Decimal("1880"),
         "ganancia": Decimal("20"),
+        "coste_fiscal": Decimal("1800"),
+        "ganancia_real": Decimal("100"),
+        "rentab_real": Decimal("5.56"),
         "ter": Decimal("0.2000"),
     }
 

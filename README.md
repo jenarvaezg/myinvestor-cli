@@ -65,7 +65,7 @@ Protección:
 ## Uso
 
 ```bash
-myinvestor position                               # efectivo + cuentas de valores + planes, con total y fecha de valor
+myinvestor position [--fiscal]                    # efectivo + cuentas de valores + planes, con total y fecha de valor
 myinvestor accounts [--owner me|junior|other]     # cuentas de efectivo: tipo, tu rol, titular, disponible, retenido, saldo y TAE
 myinvestor movements [-a "Mi cuenta"] [--from 2026-10-01 --to 2026-10-31 | --days 60] [-s nómina] [--oldest-first] [--owner me|junior|other] [--free-only] [--allow-partial]
 myinvestor movements --id <id> [--from … | --days …]   # un solo movimiento, con todos sus campos
@@ -78,8 +78,8 @@ myinvestor holds                                  # saldo retenido (p. ej. por �
 myinvestor balance-history [--from 2026-01-01 | --days 90] [--to …]   # saldo diario total del efectivo
 myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|year|type|account] [-a …] [--free-only] [--allow-partial]   # intereses, dividendos, retenciones y comisiones
 
-myinvestor holdings [-a 123456] [--kind fondos|broker] [--ter]   # posiciones: participaciones, coste, VL, valor, rentabilidad y peso
-myinvestor allocation [--by asset|geo|category|product|account] [--include-cash] [--target objetivo.json]   # reparto de la cartera y TER medio
+myinvestor holdings [-a 123456] [--kind fondos|broker] [--ter] [--fiscal]   # posiciones: participaciones, coste, VL, valor, rentabilidad y peso
+myinvestor allocation [--by asset|geo|category|product|account] [--include-cash] [--target objetivo.json] [--fiscal]   # reparto de la cartera y TER medio
 myinvestor orders [--all | --from 2025-01-01 --to …] [--status EXECUTED] [--pension] [--new]
 myinvestor orders --pension --from 2026-01-01        # aportaciones a planes en el año (límite fiscal: 1.500 € individuales)
 myinvestor order REF [-a ID] [--pension]         # una orden con su ejecución: VL, participaciones, comisiones, retenciones, neto y resultado fiscal
@@ -88,7 +88,7 @@ myinvestor gains [IE0032126645] [--year 2025] [-a ID]   # plusvalías y minusval
 myinvestor fund-transfers [-a ID] [--pension] [--since 2026-01-01 --until …] | --pending   # traspasos de fondos o de planes, internos y externos (últimos 60 días)
 myinvestor gains [IE0032126645] [--year 2025] [-a ID]   # plusvalías y minusvalías realizadas: reembolsos, traspasos de salida y ventas del bróker
 myinvestor fund-transfers [-a ID] [--pension] [--since 2026-01-01 --until …] | --pending   # traspasos de fondos o de planes (últimos 60 días)
-myinvestor pensions                               # planes de pensiones
+myinvestor pensions [--fiscal]                    # planes de pensiones
 myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year | --days 89 | --from … --to …]
 myinvestor contributions [--all] [--new]          # aportaciones periódicas
 myinvestor upcoming [--days 14] [--owner me|junior|other] [--future-only]   # lo que viene: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre
@@ -176,6 +176,15 @@ Los fondos suelen ir con el VL de uno o dos días hábiles antes, así que compa
 
 `holdings` lleva además `peso`: el % de cada posición sobre el valor de **las posiciones listadas** (todas las cuentas de valores, o las elegidas con `-a` y `--kind`), así que la columna siempre suma 100. Con `--ter` añade `ter`, el de la ficha de cada fondo (`null` en acciones y ETF); cuesta una petición más por fondo distinto, por eso no va por defecto.
 
+#### Coste fiscal tras un traspaso: `--fiscal`
+
+El `invertido` (y `ganancia`, `rentab`) es el que muestra MyInvestor, y tras un traspaso entre fondos o una movilización entre planes cambia de significado: el destino empieza con el **valor** traspasado y el origen solo pierde el **coste** de lo que sale, así que la suma de los `invertido` sube sin que entre dinero y la ganancia de la cartera se hunde de un día para otro. Con **`--fiscal`**, `holdings`, `pensions`, `position` (por producto y en el total, sin el efectivo) y `allocation` añaden:
+
+- **`coste_fiscal`**: el coste de adquisición heredado a través de los traspasos, el que usa Hacienda. En un fondo, la suma del coste de sus lotes vivos (como `lots`); en una acción o un ETF, `invertido` (no se traspasan); en un plan de pensiones, reconstruido con el histórico del último año de su cuenta, porque la API no lo da (en una movilización, el destino hereda el coste proporcional que pierde el origen, más las aportaciones posteriores).
+- **`ganancia_real`** = `valor` - `coste_fiscal`, y **`rentab_real`**, en %.
+
+`null` cuando no se sabe (y un total con alguna posición sin coste también es `null`). Cuesta una petición más por fondo (sus lotes) y otra por cuenta de pensiones (su histórico), por eso va tras una opción. `snapshot` las lleva siempre, y `history` también (en fondos su `invertido` ya es el coste heredado; en planes, el reconstruido). Cómo se reconstruye el de los planes y sus límites (una movilización de hace más de un año o desde otra entidad no se ve): [docs/json.md](docs/json.md#invertido-y-coste_fiscal).
+
 ### Carteras del roboadvisor: `portfolios`
 
 `myinvestor portfolios` lista el catálogo de carteras gestionadas (`/cperf-server/api/v2/portfolios`): `id`, `nombre` (`METAL`…), `perfil` (`CONSERVATIVE`, `MODERATE`, `DYNAMIC`, `AGGRESSIVE` o `VERY_AGGRESSIVE`; en la tabla, «conservadora»… «muy agresiva»), `renta_fija_pct`/`renta_variable_pct`, `rentab` (la que publica MyInvestor: % **acumulado**, no anual, entre `rentab_desde` y `rentab_hasta`, un periodo de unos 3 años; la API manda esas fechas como `DD/MM/AAAA` y salen en ISO, o `null` si no se pueden leer), `horizonte_anos` (horizonte recomendado) y el número de `fondos`. `myinvestor portfolios metal` (el nombre sin distinguir mayúsculas, o el `id`) da su composición objetivo: cada fondo con `isin`, `nombre`, `categoria`, `categoria_myinvestor`, `moneda` y `peso` (%). En JSON es `{"cartera": {…, "descripcion", "benchmark"}, "fondos": […]}`; en CSV/TSV, una fila por fondo.
@@ -201,7 +210,7 @@ Una cartera contratada es una cuenta de valores más (`accountType: SECURITIES_P
 | `product` | ISIN (o código del plan, o ticker), con `nombre` | la posición |
 | `account` | nombre de la cuenta (el de la cartera gestionada, p. ej. `METAL`, o el código), con `cuenta_id` y `tipo` (`valores`, `cartera`, `pensiones`, `efectivo`) | la cuenta |
 
-Cada fila trae `valor`, `peso_pct` (% sobre el total), `invertido`, `ganancia` y `ter`, la media ponderada por valor de las posiciones con TER conocido (solo los fondos: acciones, ETF, planes y efectivo no lo tienen y no lo diluyen). La última fila es el total (`clave: "total"`, `TOTAL` en la tabla) y su `ter` es el **TER medio ponderado de la cartera**. Lo que no tiene clasificación va a `sin_clasificar`, el único marcador de «desconocido» en todas las agrupaciones; lo que no puede tenerla (la zona del oro o del efectivo) va a `no_aplica`. En JSON/CSV/TSV cada fila lleva `consultado_en`, como `holdings`.
+Cada fila trae `valor`, `peso_pct` (% sobre el total), `invertido`, `ganancia` y `ter`, la media ponderada por valor de las posiciones con TER conocido (solo los fondos: acciones, ETF, planes y efectivo no lo tienen y no lo diluyen). La última fila es el total (`clave: "total"`, `TOTAL` en la tabla) y su `ter` es el **TER medio ponderado de la cartera**. Lo que no tiene clasificación va a `sin_clasificar`, el único marcador de «desconocido» en todas las agrupaciones; lo que no puede tenerla (la zona del oro o del efectivo) va a `no_aplica`. En JSON/CSV/TSV cada fila lleva `consultado_en`, como `holdings`. Con `--fiscal`, `coste_fiscal`, `ganancia_real` y `rentab_real` de cada clave (ver [`--fiscal`](#coste-fiscal-tras-un-traspaso---fiscal); el efectivo cuenta con su saldo como coste).
 
 **Clases de activo.** MyInvestor usa vocabularios distintos según el producto (códigos en los fondos, texto libre en los planes, `RV`/`ETF` en el broker), así que `--by asset` los traduce a un conjunto fijo (`src/myinvestor/asset_classes.py`). Las etiquetas se comparan sin tildes ni mayúsculas:
 
@@ -290,7 +299,7 @@ myinvestor summary                                          # en tablas (no marc
 myinvestor summary --from-file fotos/2026-11-04.json        # una guardada, sin conexión
 ```
 
-Si una sección falla (un 5xx en pensiones, un tramo de movimientos que pide firma), el resto sale igual, el fallo va a `errors: [{section, error, exit_code, message}]` y el CLI sale con el peor código de las secciones. Esquema completo, fórmula del delta y sus límites (ventas, dividendos…): **[docs/snapshot.md](docs/snapshot.md)**.
+Si una sección falla (un 5xx en pensiones, un tramo de movimientos que pide firma), el resto sale igual, el fallo va a `errors: [{section, error, exit_code, message}]` y el CLI sale con el peor código de las secciones. Las cuentas, posiciones y planes llevan siempre `coste_fiscal`, `ganancia_real` y `rentab_real` (ver [`--fiscal`](#coste-fiscal-tras-un-traspaso---fiscal)), y el `aportado` del delta usa `coste_fiscal` cuando las dos fotos lo tienen, así que un traspaso entre fondos o planes ya no sale como dinero aportado. Esquema completo, fórmula del delta y sus límites (ventas, dividendos…): **[docs/snapshot.md](docs/snapshot.md)**.
 
 ### Ingresos: intereses, dividendos, retenciones y comisiones
 
@@ -741,7 +750,7 @@ stdout solo lleva el resultado: con `-f json` y sin datos sale `[]`, con `-f csv
 
 Dentro de una misma orden, las consultas `GET` idénticas (misma ruta y parámetros) se responden de memoria; las firmadas y las `202` no se guardan, y nada se guarda en disco.
 
-Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de pensiones, C = cuentas de efectivo elegidas, por defecto todas, F = fondos distintos en cartera, cuya ficha se pide una vez, D = planes de pensiones distintos):
+Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de pensiones, C = cuentas de efectivo elegidas, por defecto todas, F = fondos distintos en cartera, cuya ficha se pide una vez, L = fondos de cada cuenta de valores, cuyos lotes se piden con `--fiscal`, D = planes de pensiones distintos):
 
 | Orden | Peticiones |
 |---|---|
@@ -749,21 +758,21 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | `funds` con `--category` o `--manager` | 1 + 1 por cada una (la lista de valores) |
 | `fund-filters` | 1 por filtro: 5 sin argumento, 2 con `--pension` |
 | `pension-plans` | 1 (+ 1 con `--manager`); con `--mine`, 1 + 1 por cuenta + 1 por plan |
-| `position` | 3 + V |
+| `position` | 3 + V; `--fiscal`: + L + P |
 | `movements`, `holds` | 1 + C (`movements --new`: igual; `--since-id`: 1 + 1; `--details`: + 1 por cuenta con algún cargo de transferencia emitida) |
 | `export` | 4 + C + 2V + P; la primera vez (o con un hueco), + C del tramo antiguo y sus firmas |
-| `holdings` | 1 + V (también con `-a`: se leen todas para resolverla); `--ter`: + F |
-| `allocation` | 2 + V + P + F; con `--by asset`, `geo` o `category`: + D; con `--include-cash`: + 1 |
+| `holdings` | 1 + V (también con `-a`: se leen todas para resolverla); `--ter`: + F; `--fiscal`: + L (solo las listadas) |
+| `allocation` | 2 + V + P + F; con `--by asset`, `geo` o `category`: + D; con `--include-cash`: + 1; `--fiscal`: + L + P |
 | `orders` | 1 + V; con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
-| `pensions` | 1 + P |
+| `pensions` | 1 + P; `--fiscal`: + P |
 | `upcoming` | 4 + 2·C + 2·V + P (C: con `--owner`, solo las de ese tipo; por cuenta, retenciones y transferencias emitidas) |
-| `snapshot`, `summary` | 4 + 3·C + 2·V + 2·P (`summary --from-file`: 0) |
+| `snapshot`, `summary` | 4 + 3·C + 2·V + 3·P + L (`summary --from-file`: 0) |
 | `fund-transfers` | 1 + V (también con `--pending`); con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
 | `accounts`, `transfers` | 1 + C (`accounts`: C con `--owner`, solo las de ese tipo) |
 | `interest` | 1 + C + R (R: las cuentas con remuneración, sus movimientos de los últimos 90 días); `--no-movements`: 1 + C |
 | `fund-transfers` | 1 + 2V (lista de traspasos y órdenes de cada una); con `-a`: 1 + V + 2 × las elegidas; `--pending`: 1 + V (con `-a`, 1 + V + las elegidas); `--pension`: 1 + 3P (lista, órdenes y evolución de cada una) |
 | `accounts`, `transfers`, `interest` | 1 + C (`accounts`: C con `--owner`, solo las de ese tipo) |
-| `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V |
+| `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V. Con un `--period` que no sea `year`, + 1 por cuenta de pensiones (su año, para `coste_fiscal`) |
 | `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
 | `fund-history` | 2 (la serie y la ficha, para la moneda) |
 | `login` | `--direct` o `--refresh-token-stdin`: 1 |
@@ -832,14 +841,14 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/securities-accounts/self-basic` | ids de cuentas de valores |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}` | totales + `securitiesAccountInvestments` por tipo (`INDEXED_FUND`, `BROKER`…) con `investmentList` |
 | GET | `/cperf-server/api/v3/securities-accounts/{id}/orders[?dateFrom&dateTo]` | sin fechas, solo recientes; con fechas, el histórico (la v2 con fechas da 500) |
-| GET | `/cperf-server/api/v2/{securities,pension}-accounts/{id}/positions?groupType=` | serie diaria por ISIN/código; `ONE_MONTH`, `THREE_MONTHS`, `SIX_MONTHS`, `ONE_YEAR` (`ONE_WEEK`, `THREE_YEAR` y `MAX` → 400: no hay más de un año) |
+| GET | `/cperf-server/api/v2/{securities,pension}-accounts/{id}/positions?groupType=` | serie diaria por ISIN/código; `ONE_MONTH`, `THREE_MONTHS`, `SIX_MONTHS`, `ONE_YEAR` (`ONE_WEEK`, `THREE_YEAR` y `MAX` → 400: no hay más de un año). En fondos, `investmentAddedValue` es el coste heredado en los traspasos; en planes, el dinero recibido en una movilización (de ahí sale el `coste_fiscal` reconstruido, con `ONE_YEAR`) |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/investment-summary` | totales fondos/acciones |
 | GET | `/cperf-server/api/v2/pension-accounts/self` · `/{id}` · `/{id}/orders?order=DATE&dateFrom&dateTo` | planes y sus aportaciones; sin fechas, `orders` solo trae las 2 últimas; con `--from`/`--to`/`--all` van `dateFrom`/`dateTo` en `AAAAMMDD`, como en la web (#69) |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/orders/{reference}` | detalle de una orden: `orderReference`, `isin`, `orderStatus` (`INITIAL`, `PENDING`, `IN_PROGRESS`, `COMPLETE`, `CANCEL`, `REJECTED`), `orderDate`, `orderTypeName`, `orderClass`, `operationType`, `grossAmountEUR`, `grossAmountFundCurrency`, `cash`, `shares`, `fundName`, `currency`, `expirationDate`, `periodicityCode`, `accountNumber`, `ordererCustomer` (el DNI: no se lee) y `relatedOperations: [{operationNumber, executionDate, executedShares, liquidationValue, grossAmountOperationFundCurrency, commissions, originRetention, destinyRetention, netAmountFundCurrency, exchangeRate, netAmountEUR, netAmountAccountCurrency, taxResult}]` |
 | GET | `/cperf-server/api/v2/pension-accounts/{id}/orders/{reference}` | lo mismo para un plan (en `isin`, el código DGS); visto en el bundle, no con una cuenta real |
 | GET | `/broker/v2/stock-orders?stockAccountId&type=ALL&dateFrom&dateTo` | órdenes del bróker (acciones, ETF, ETC) de una cuenta de valores (`AAAA-MM-DD`; `type`: `ON_DEMAND`, `RECURRENT` o `ALL`): `[{id, orderDate, status, toolName, operation, orderTypeId, orderTypeDescription, amount, shares, currency, isCancelable}]`, sin ISIN ni ejecución; visto en el bundle, no con una cuenta real |
 | GET | `/broker/v2/stock-orders/{id}` | detalle de una orden del bróker: `orderReference`, `orderStatus`, `orderOperationTypeEnum` (`BUY`, `SELL`), `orderType`, `orderDate`, `executionDate`, `instrumentIsin`, `instrumentName`, `instrumentCurrency`, `shares`, `executedShares`, `priceCurrency`, `grossAmountCurrency` (estimado), `grossAmountOperationCurrency`, `netAmountCurrency`, `netAmountAccountCurrency`, `tradeCommissions`, `otherCommissions`, `exchangeRate`, `accountNumber` y `ordererCustomer` (no se leen); sin resultado fiscal; visto en el bundle |
-| GET | `/cperf-server/api/v2/securities-accounts/{id}/investment-summary/funds/{isin}/added-values` | lotes vivos de un fondo: `{currency, fundName, investmentAddedValue, addedValue, plusMinusList: [{operationType, operationDesc, operationNum, fiscalDate, securities, netAssetValue, investment, marketValue, plusMinus, fiscalResult}]}`; solo fondos |
+| GET | `/cperf-server/api/v2/securities-accounts/{id}/investment-summary/funds/{isin}/added-values` | lotes vivos de un fondo: `{currency, fundName, investmentAddedValue, addedValue, plusMinusList: [{operationType, operationDesc, operationNum, fiscalDate, securities, netAssetValue, investment, marketValue, plusMinus, fiscalResult}]}`; solo fondos. La suma de `investment` es el `coste_fiscal` de `--fiscal` y `snapshot` |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/transfers?initDate&endDate` | traspasos de fondos (`AAAA-MM-DD`; sin las fechas, 400; la web pide 60 días): `[{reference, isinOrigin, isinDestination, status, transferDate, shares, amount, currency, isCancelable}]` (campos del bundle: solo se ha visto `[]`); `…/transfers/pending` → `{pendingTransfers}` |
 | GET | `/cperf-server/api/v2/pension-accounts/{id}/transfers?initDate&endDate` | traspasos de planes, igual: `[{reference, dgsCodeOrigin, fundNameOrigin, dgsCodeDestination, pensionPlanNameDestination, status, transferDate, shares, amount, currency, isCancelable}]` |
 | GET | `/cperf-server/api/v2/pension-plans/{dgsCode}` | ficha del plan: `name`, `category`, `planType`, `activeType`, `managementEntity`, `commissionList: [{name, percentage}]`, `annualizedProfitability`… (sin `ter`); su «Coste total (TER)» va en `commissionList` |

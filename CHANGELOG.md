@@ -22,6 +22,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - Nuevo `myinvestor.portfolios/1` (catálogo; con CARTERA, objeto `{cartera, fondos}`; con `--mine`, filas con `posiciones` y `rentabilidad_anual`). `myinvestor.position/1` gana `cartera`, `perfil`, `efectivo` y `efectivo_id`, y `myinvestor.holdings/1`, `cartera` y `perfil` (compatible: claves añadidas, `null` fuera de las carteras del roboadvisor). En `position`, el `valor` de una cartera incluye el saldo de su cuenta de efectivo propia, que deja de salir como fila `efectivo` aparte (#6).
 - `myinvestor.fund-transfers/1` gana `tipo` (`interno`/`externo`), `fuente` (`api`, `orders` o `history`) y `ref_destino` (compatible: claves añadidas). En las filas internas, `origen_nombre`/`destino_nombre` traen el nombre del fondo de la orden y `ref` puede ser `history:…` (#70).
 - `myinvestor.gains/1` gana `coste` (coste FIFO de las ventas del bróker; `null` en los fondos) y tiene filas de ventas del bróker con `operacion: SALE_VARIABLE_INCOME_CASH` y `resultado` que puede ser `null` (ya era nulable); compatible (#71).
+- `myinvestor.holdings/1`, `myinvestor.pensions/1`, `myinvestor.position/1` y `myinvestor.allocation/1` ganan `coste_fiscal`, `ganancia_real` y `rentab_real`, solo con `--fiscal`; `myinvestor.history/1` y `securities[]`, `securities[].posiciones[]`, `pensions[]` y `pensions[].planes[]` de `myinvestor.snapshot/1`, siempre (compatible: claves añadidas, `null` cuando no se sabe). `invertido` sigue siendo el que muestra MyInvestor. En `snapshot`, `errors[].section` puede valer `securities.fiscal` o `pensions.fiscal` (#73).
 
 ### Añadido
 
@@ -50,6 +51,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - `upcoming`: `estado` en cada fila (`programada`: aportaciones y transferencias; `en_curso`: órdenes y retenciones, aunque su fecha haya pasado) y `--future-only`, que deja solo lo programado; la regla para no contar dos veces lo de `pending` en `snapshot` está en docs/snapshot.md (#58).
 - `portfolios [CARTERA] [--mine]`: catálogo de carteras del roboadvisor (perfil, % RF/RV, rentabilidad, horizonte), composición objetivo de una y, con `--mine`, desviación de tus carteras frente a los pesos objetivo y su rentabilidad anual. `position` muestra una cartera contratada como «Cartera METAL (muy agresiva)» con su cuenta de efectivo propia dentro (ya no sale suelta) y `holdings` añade `cartera` y `perfil` (#6).
 - `fund-transfers` añade los traspasos internos, que la lista de MyInvestor no daba: los cambios entre fondos de la misma cuenta, emparejando las órdenes de salida y entrada (`IIC_SWITCH_*`, `INTERNAL_TRANSFER_*`; una pata sin pareja sale sola) y, con `--pension`, las movilizaciones entre planes de la misma cuenta, de las órdenes del plan o deducidas de `history` (`fuente: history`, valor aproximado). Cada fila dice si es `interno` o `externo`. Pide además las órdenes de cada cuenta y, con `--pension`, su evolución (#70).
+- `--fiscal` en `holdings`, `pensions`, `position` y `allocation`: `coste_fiscal` (el coste de adquisición heredado en los traspasos: lotes vivos de los fondos, `invertido` en acciones y ETF, y en planes, reconstruido con el histórico del último año detectando las movilizaciones), `ganancia_real` y `rentab_real`. `history` las lleva siempre, con el mismo criterio en fondos y planes (una petición más por cuenta de pensiones si `--period` no es `year`), y `snapshot` también (una petición más por fondo y otra por cuenta de pensiones). Qué es cada coste: docs/json.md (#73).
 
 ### Cambiado
 
@@ -57,6 +59,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - **Incompatible:** la fila del total de `position` se llama `total` en JSON/CSV/TSV (antes `TOTAL`) (#42).
 - **Incompatible:** el código de salida depende del tipo de error (antes, 1 casi siempre) (#38).
 - El re-login desatendido solo borra la contraseña guardada si MyInvestor dice que es incorrecta; con cualquier otro rechazo se pausa 24 h (#38).
+- `snapshot`: el `aportado` del delta de las cuentas de valores y de pensiones usa `coste_fiscal` cuando las dos fotos lo tienen (si no, `invertido`, como antes), así que un traspaso entre fondos o una movilización entre planes ya no sale como dinero aportado ni hunde el `mercado` (#73).
 
 ### Corregido
 

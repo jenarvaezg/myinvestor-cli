@@ -36,14 +36,18 @@ Las claves y sus tipos están también en la referencia generada, [docs/json.md]
            "titulares": [{"nombre": "…", "rol": "OWNER", "yo": true}], "fecha_valor": "2026-11-04"}],
  "securities": [{"producto": "valores", "id": "201", "nombre": "…", "valor": 1100.55, "invertido": 1000.00,
                  "ganancia": 100.55, "rentab": 10.06, "fecha_valor": "2026-11-02",
+                 "coste_fiscal": 920.00, "ganancia_real": 180.55, "rentab_real": 19.63,
                  "posiciones": [{"cuenta": "201", "tipo": "INDEXED_FUND", "isin": "…", "nombre": "…",
                                  "participaciones": 12.345678, "coste_medio": 81.0, "vl": 89.15, "fecha_vl": "2026-11-02",
-                                 "invertido": 1000.00, "valor": 1100.55, "ganancia": 100.55, "rentab": 10.06, "peso": 100}]}],
+                                 "invertido": 1000.00, "valor": 1100.55, "ganancia": 100.55, "rentab": 10.06, "peso": 100,
+                                 "coste_fiscal": 920.00, "ganancia_real": 180.55, "rentab_real": 19.63}]}],
  "pensions": [{"producto": "pensiones", "id": "301", "nombre": "…", "valor": 2000.00, "invertido": 1800.00,
                "ganancia": 200.00, "rentab": 11.11, "fecha_valor": "2026-11-02",
+               "coste_fiscal": 1800.00, "ganancia_real": 200.00, "rentab_real": 11.11,
                "planes": [{"cuenta": "301", "codigo": "N1234", "nombre": "…", "participaciones": 150.123456,
                            "coste_medio": 11.99, "vl": 13.32, "fecha_vl": "2026-11-02", "invertido": 1800.00,
-                           "valor": 2000.00, "ganancia": 200.00, "rentab": 11.11}]}],
+                           "valor": 2000.00, "ganancia": 200.00, "rentab": 11.11,
+                           "coste_fiscal": 1800.00, "ganancia_real": 200.00, "rentab_real": 11.11}]}],
  "pending": {"orders": [{"fecha": "2026-11-03", "cuenta": "201", "ref": "…", "producto": "…", "nombre": "…",
                          "operacion": "INVESTMENT_FUNDS_SUBSCRIPTION", "estado": "IN_PROGRESS", "importe": 50.00,
                          "participaciones": null}],
@@ -75,8 +79,8 @@ Las claves y sus tipos están también en la referencia generada, [docs/json.md]
 | `cli_version` | versión del CLI que la ha hecho | `myinvestor --version` |
 | `total` | `saldo` de las cuentas de efectivo + `valor` de las de valores y de pensiones; `null` si falla alguna de esas tres secciones | la fila total de `position` |
 | `cash` | una fila por cuenta de efectivo, con `titulares` y `fecha_valor` (hoy: el saldo es en tiempo real) | `accounts -f json` |
-| `securities` | una fila por cuenta de valores (como en `position`) con sus `posiciones`; `peso` es sobre **toda** la cartera de valores, como en `holdings` sin filtros | `position` + `holdings` |
-| `pensions` | una fila por cuenta de pensiones (como en `position`) con sus `planes` | `position` + `pensions` |
+| `securities` | una fila por cuenta de valores (como en `position`) con sus `posiciones`; `peso` es sobre **toda** la cartera de valores, como en `holdings` sin filtros. Siempre con `coste_fiscal`, `ganancia_real` y `rentab_real` (ver [`invertido` y `coste_fiscal`](json.md#invertido-y-coste_fiscal)) | `position --fiscal` + `holdings --fiscal` |
+| `pensions` | una fila por cuenta de pensiones (como en `position`) con sus `planes`, también con las tres claves fiscales | `position --fiscal` + `pensions --fiscal` |
 | `pending.orders` | órdenes de valores y de planes en curso (`INITIAL`, `PENDING`, `IN_PROGRESS`), de la más reciente a la más antigua | `orders` / `orders --pension` |
 | `pending.holds` | retenciones de saldo de cada cuenta de efectivo; `importe` **negativo** (dinero que sale del disponible, como un cargo en `movements`), mientras que `retenido` de `cash` es el total retenido de la cuenta, en positivo (es un saldo) | `holds` |
 | `upcoming` | lo que viene en los próximos **14 días**, cada fila con su `estado` (ver [abajo](#lo-que-viene-programada-y-en_curso)) | `upcoming -f json` |
@@ -110,7 +114,8 @@ Por producto (cada cuenta de efectivo, de valores y de pensiones, emparejadas po
 
 ```
 valor    = valor ahora − valor antes            (efectivo: saldo)
-aportado = valores y pensiones: invertido ahora − invertido antes
+aportado = valores y pensiones: coste_fiscal ahora − coste_fiscal antes, si las dos fotos lo tienen;
+                                 si no, invertido ahora − invertido antes
            efectivo: Σ importe de los movimientos de la cuenta posteriores a la foto anterior,
                      salvo intereses, dividendos, retenciones y comisiones
 mercado  = valor − aportado
@@ -121,11 +126,12 @@ Y en total: `total` = `total` ahora − `total` antes, `aportado` = Σ `aportado
 - **Qué movimientos son posteriores a la foto anterior.** Los movimientos solo traen el día, no la hora, así que se usan los `id` estables: cuenta un movimiento de `movements` cuyo `id` **no** estaba en el `movements` de la foto anterior y cuya fecha no es anterior al `desde` de esa foto. Así una transferencia que llega por la tarde del mismo día de la foto anterior, o una que aparece con unos días de retraso (hasta 3), cuenta una sola vez.
 - **Intereses, dividendos, retenciones y comisiones** (las categorías de [`income`](../README.md#ingresos-intereses-dividendos-retenciones-y-comisiones)) no son dinero aportado sino rendimiento: van a `mercado`. El resto de movimientos del efectivo (transferencias, compras y ventas de valores, aportaciones a planes, pagos con tarjeta, tipos desconocidos) son `aportado`, con su signo.
 - **Movimientos entre tus productos.** Un traspaso interno emparejado, una compra de un fondo con el efectivo o una aportación a un plan salen de un producto y entran en otro: cada producto los ve como aportado (negativo en uno, positivo en el otro) y en el total se anulan. Por eso el `aportado` total es el dinero que ha entrado (o salido) de MyInvestor, que es lo que se quiere leer cada mañana, y el `mercado` de cada cuenta de efectivo son sus intereses y comisiones.
+- **Por qué `coste_fiscal`.** Un traspaso entre fondos o una movilización entre planes de la misma cuenta sube la suma de los `invertido` (el destino empieza con el valor traspasado y el origen solo pierde el coste de lo que sale) sin que entre dinero: con `invertido`, ese día saldría como `aportado` y el `mercado` caería lo mismo. El `coste_fiscal` pasa del origen al destino sin cambiar, así que el traspaso no aporta nada. Si una de las dos fotos no lo tiene para esa cuenta (una guardada antes de que existiera, o con `securities.fiscal`/`pensions.fiscal` fallido), se usa `invertido` en las dos.
 - `null` cuando no se puede calcular: si una de las dos fotos no tiene la sección (`cash`, `securities`, `pensions` o `movements`) o la cuenta tiene un hueco en `movements`, o si el `movements` de ahora no llega hasta el día de la foto anterior (la anterior es de hace más de 89 días). El total solo se calcula si están todos los productos.
 
 **Límites** (lo que la fórmula no sabe ver):
 
-- **Ventas.** Al vender, `invertido` baja por el **coste** de lo vendido, mientras que el efectivo recibe el **importe** de la venta. Ese día la ganancia realizada sale como `aportado` (positivo en el total) y como `mercado` negativo en el producto vendido, aunque nada haya entrado de fuera.
+- **Ventas.** Al vender, `invertido` (y `coste_fiscal`) baja por el **coste** de lo vendido, mientras que el efectivo recibe el **importe** de la venta. Ese día la ganancia realizada sale como `aportado` (positivo en el total) y como `mercado` negativo en el producto vendido, aunque nada haya entrado de fuera.
 - **Dividendos y cupones** cuentan como `mercado` solo si su tipo de movimiento se reconoce como dividendo (o interés); uno con un tipo desconocido (`income --by type` los lista) cuenta como `aportado`.
 - **Dinero en tránsito.** Si el cargo de una compra aparece en el efectivo un día y la posición (`invertido`) al siguiente, el total baja ese día con `aportado` negativo y sube al siguiente con `aportado` positivo: el `mercado` sale bien los dos días.
 - **Traspasos de fondos o planes desde otra entidad** no pasan por el efectivo: suben `invertido` y salen como `aportado`, que es correcto.
@@ -140,7 +146,9 @@ Todo va con un solo cliente: un login/refresh y las mismas consultas compartidas
 |---|---|
 | `cash` | cuentas de efectivo |
 | `securities` | cuentas de valores |
+| `securities.fiscal` | los lotes vivos de cada fondo; si falla, solo `coste_fiscal`, `ganancia_real` y `rentab_real` de los fondos (y de su cuenta) quedan `null` |
 | `pensions` | cuentas y planes de pensiones |
+| `pensions.fiscal` | el histórico del último año de cada cuenta de pensiones; si falla, solo las tres claves fiscales de los planes quedan `null` |
 | `pending` | órdenes de valores y de planes, retenciones |
 | `upcoming` | cuentas de efectivo, retenciones, transferencias emitidas (para las programadas), aportaciones periódicas, órdenes |
 | `movements` | cuentas de efectivo y sus movimientos (un tramo que pide firma deja un hueco y un error `partial_result`, 13; lo que sí se ha obtenido sale) |
@@ -157,4 +165,4 @@ Cada error es `{"section", "error", "exit_code", "message"}`, con `error` y `exi
 
 ## Peticiones
 
-`snapshot` y `summary`: 4 + 3·C + 2·V + 2·P (C cuentas de efectivo, V cuentas de valores, P cuentas de pensiones; por cada cuenta de efectivo: movimientos, retenciones y transferencias emitidas, estas para las programadas de `upcoming`); `--from-file`: ninguna. Con `--new`, una cuenta cuyo estado empiece antes que la ventana del delta se pide desde ahí (sigue siendo una petición por cuenta).
+`snapshot` y `summary`: 4 + 3·C + 2·V + 3·P + F (C cuentas de efectivo, V cuentas de valores, P cuentas de pensiones, F fondos distintos en cada cuenta de valores; por cada cuenta de efectivo: movimientos, retenciones y transferencias emitidas, estas para las programadas de `upcoming`; por cada cuenta de pensiones, además, su histórico de un año, y por cada fondo, sus lotes vivos, para `coste_fiscal`); `--from-file`: ninguna. Con `--new`, una cuenta cuyo estado empiece antes que la ventana del delta se pide desde ahí (sigue siendo una petición por cuenta).

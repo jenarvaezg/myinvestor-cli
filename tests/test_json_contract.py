@@ -223,6 +223,7 @@ def full_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> No
     mock_api.get(f"{CPERF}/v2/securities-accounts/201").respond(200, json=ok(securities))
     mock_api.get(f"{CPERF}/v3/securities-accounts/201/orders").respond(200, json=ok([order("o1", "2026-11-02")]))
     mock_api.get(f"{CPERF}/v2/securities-accounts/201/positions").respond(200, json=ok({"positions": {FUND: [POINT]}}))
+    mock_api.get(added_values(FUND)).respond(200, json=ok(fund_lots(lot("N1", "2024-03-01", investment=920.0))))
     pension = {"accountId": "301", "externalAccountCode": "P301", "marketValue": 700.0, "totalInvested": 600.0}
     mock_api.get(f"{CPERF}/v2/pension-accounts/self").respond(
         200, json=ok([{**pension, "profit": 100.0, "totalReturn": 16.67}])
@@ -373,6 +374,7 @@ def portfolio_api(mock_api: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) -
         securitiesAccountInvestments={"INDEXED_FUND": {"investmentList": [investment(FUND, accountId="202")]}},
     )
     mock_api.get(f"{CPERF}/v2/securities-accounts/202").respond(200, json=ok(metal))
+    mock_api.get(added_values(FUND).replace("/201/", "/202/")).respond(200, json=ok(fund_lots(lot("N2", "2025-01-02"))))
     mock_api.get(f"{CPERF}/v2/portfolios").respond(200, json=ok([METAL]))
     summary = {
         "indexedAccountId": 202,
@@ -438,7 +440,7 @@ class Case:
 
 
 CASES = (
-    Case("position", "", ("position",), setup=portfolio_api),
+    Case("position", "", ("position",), setup=portfolio_api, options=("--fiscal",)),
     Case("accounts", "", ("accounts",)),
     Case("movements", "", ("movements",), options=("--details",)),
     Case(
@@ -450,9 +452,9 @@ CASES = (
     ),
     Case("holds", "", ("holds",)),
     Case("balance-history", "", ("balance-history",)),
-    Case("holdings", "", ("holdings",), setup=portfolio_api, options=("--ter",)),
+    Case("holdings", "", ("holdings",), setup=portfolio_api, options=("--ter", "--fiscal")),
     Case("orders", "", ("orders",)),
-    Case("pensions", "", ("pensions",)),
+    Case("pensions", "", ("pensions",), options=("--fiscal",)),
     Case("history", "", ("history",)),
     Case("contributions", "", ("contributions",)),
     Case("funds", "", ("funds",)),
@@ -475,14 +477,14 @@ CASES = (
         "allocation",
         "--by asset",
         ("allocation",),
-        options=("--target", "{target}"),
+        options=("--target", "{target}", "--fiscal"),
         target={"renta_variable": 100},
     ),
     Case(
         "allocation",
         "--by geo | --by category",
         ("allocation", "--by", "geo"),
-        options=("--target", "{target}"),
+        options=("--target", "{target}", "--fiscal"),
         activates=frozenset({"--by geo"}),
         target={"global": 100},
     ),
@@ -490,14 +492,14 @@ CASES = (
         "allocation",
         "--by product",
         ("allocation", "--by", "product"),
-        options=("--target", "{target}"),
+        options=("--target", "{target}", "--fiscal"),
         target={FUND: 100},
     ),
     Case(
         "allocation",
         "--by account",
         ("allocation", "--by", "account"),
-        options=("--target", "{target}"),
+        options=("--target", "{target}", "--fiscal"),
         target={"Cartera": 100},
     ),
     Case("order", "", ("order", "R1", "-a", "201"), setup=order_api),
