@@ -49,6 +49,7 @@ from tests.conftest import API, CASH_UUID, CPERF, cash_account, flow, investment
 from tests.test_cli_transfers import JUNIOR_UUID, STAMP, junior_flows, own_flows
 from tests.test_cli_upcoming import NOW, mock_everything
 from tests.test_documents import document
+from tests.test_sent_transfers import sent
 from tests.test_transfers_match import sepa_ref
 
 runner = CliRunner()
@@ -139,6 +140,37 @@ SHEET = {
     "ter": 0.12,
 }
 
+# a periodic transfer already emitted once and still running, so every key of `transfers` is filled
+PERIODIC = sent(
+    reference="120261001000001",
+    status="ACTIVE",
+    periodicity="MONTHLY",
+    startDate="2026-10-05",
+    endDate="2099-12-31",
+    emissionDate="2026-10-05T00:00:00.000+0000",
+)
+REMUNERATION = {
+    "remunerationDate": "2026-09-01T00:00:00.000+0000",
+    "paymentDate": "2026-10-07",
+    "officialRemunerationDate": "2026-10-01",
+    "remunerationType": "DEFAULT",
+    "remunerationPercentage": 2.5,
+    "baseRemunerationPercentage": 2.0,
+    "promotionRemunerationPercentage": 0.5,
+    "taePromotion": 2.53,
+    "calculateTaeAverage": 2.52,
+    "applicableBaseBalance": 10000,
+    "balancePromo": 5000,
+    "totalBalance": 15000,
+    "baseResults": 16.44,
+    "promoResults": 2.05,
+    "finalResult": 18.49,
+    "taxChargeAmount": 3.51,
+    "endDateRemuneration": "2026-12-31",
+    "promotionCode": "PROMO",
+    "snapshotDate": "",
+}
+
 
 def full_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> None:
     """Two cash accounts with an own transfer, a fund and a stock, a pension plan, a contribution…"""
@@ -188,6 +220,10 @@ def full_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> No
     mock_api.get(f"{API}/feed/api/feed/self").respond(200, json=ok({"feed": [feed]}))
     mock_api.get(f"{API}/feed/api/x").respond(200, json=ok([1]))
     mock_api.get(f"{CPERF}/v3/customers/self").respond(200, json=ok({"name": "Ana"}))
+    mock_api.get(f"{CPERF}/v2/cash-accounts/101/transfers").respond(200, json=ok([sent(), PERIODIC]))
+    mock_api.get(f"{CPERF}/v2/cash-accounts/102/transfers").respond(200, json=ok([]))
+    mock_api.get(f"{CPERF}/v2/cash-accounts/101/remuneration").respond(200, json=ok(REMUNERATION))
+    mock_api.get(f"{CPERF}/v2/cash-accounts/102/remuneration").respond(200, json=ok(REMUNERATION))
 
 
 def documents_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> None:
@@ -273,11 +309,12 @@ class Case:
 CASES = (
     Case("position", "", ("position",)),
     Case("accounts", "", ("accounts",)),
-    Case("movements", "", ("movements",)),
+    Case("movements", "", ("movements",), options=("--details",)),
     Case(
         "movements",
         "--id",
         ("movements", "--id", f"{CASH_UUID}:000259"),
+        options=("--details",),
         always_null=frozenset({"pareja_id"}),  # --id only reads the movement's account: the other leg is not there
     ),
     Case("holds", "", ("holds",)),
@@ -292,6 +329,8 @@ CASES = (
     Case("internal-transfers", "", ("internal-transfers", "--unmatched")),
     Case("upcoming", "", ("upcoming",), setup=upcoming_api),
     Case("documents", "", ("documents",), setup=documents_api),
+    Case("transfers", "", ("transfers", "--from", "2026-01-01")),
+    Case("interest", "", ("interest",)),
     Case("income", "--by month | --by year", ("income",)),
     Case("income", "--by type", ("income", "--by", "type")),
     Case("income", "--by account", ("income", "--by", "account")),

@@ -43,7 +43,9 @@ from myinvestor.models import (
     PensionPlanPosition,
     PensionPlanSheet,
     PositionPoint,
+    Remuneration,
     SecuritiesAccount,
+    SentTransfer,
 )
 from myinvestor.session import Session
 from myinvestor.signature import SIGNATURE_HEADER, SignatureUI, Signer, parse_signature_request
@@ -335,6 +337,19 @@ class MyInvestorClient:
             end_balance=data.get("endBalance"),
             flows=[Flow.model_validate(f) for f in data.get("flowList") or []],
         )
+
+    def transfers(self, account_id: str) -> list[SentTransfer]:
+        """Transfers sent from a cash account (its numeric `accountId`), periodic ones included.
+
+        The API takes no date range (the web only filters by concept and amount): filter locally.
+        """
+        rows = self._list(f"{CPERF}/v2/cash-accounts/{seg(account_id)}/transfers")
+        return [SentTransfer.model_validate(t) for t in rows]
+
+    def remuneration(self, account_id: str) -> Remuneration | None:
+        """Last interest settlement of a cash account (its numeric `accountId`); None if there is none."""
+        data = self.get_data(f"{CPERF}/v2/cash-accounts/{seg(account_id)}/remuneration")
+        return Remuneration.model_validate(data) if isinstance(data, dict) and data else None
 
     def holds(self, account_uuid: str) -> list[Hold]:
         return [Hold.model_validate(h) for h in self._list(f"/account/api/v3/account/{seg(account_uuid)}/holds")]

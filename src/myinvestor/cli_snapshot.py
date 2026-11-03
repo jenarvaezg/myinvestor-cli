@@ -44,9 +44,11 @@ from myinvestor.models import (
     PensionAccount,
     PensionPlanPosition,
     SecuritiesAccount,
+    SentTransfer,
 )
 from myinvestor.output import OutputFormat, print_json, render
 from myinvestor.psd2 import free_start
+from myinvestor.sent_transfers import transfer_items
 from myinvestor.snapshot import (
     SCHEMA,
     IncompleteSnapshotError,
@@ -255,6 +257,11 @@ class _Sources:
             "holds", lambda: {a.account_id: self.client.holds(a.account_uuid) for a in self.cash_accounts()}
         )
 
+    def sent_transfers(self) -> dict[str, list[SentTransfer]]:
+        return self.once(
+            "sent_transfers", lambda: {a.account_id: self.client.transfers(a.account_id) for a in self.cash_accounts()}
+        )
+
     def securities(self) -> list[SecuritiesAccount]:
         return self.once("securities", self.client.securities_accounts)
 
@@ -382,6 +389,9 @@ class _Builder:
             contributions=self.sources.contributions(),
             orders=self.sources.securities_orders() + self.sources.pension_orders(),
             holds=self.sources.holds(),
+            transfers=transfer_items(
+                self.sources.sent_transfers(), self.today, self.today + timedelta(days=DEFAULT_UPCOMING_DAYS)
+            ),
         )
 
     def movements_section(self) -> dict[str, Any]:

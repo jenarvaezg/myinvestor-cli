@@ -25,6 +25,13 @@ def _day(value: Any) -> Any:
     return value
 
 
+def _day_or_none(value: Any) -> Any:
+    """Like `_day`, but some endpoints send `""` for a missing date: that is None."""
+    if isinstance(value, str) and not value.strip():
+        return None
+    return _day(value)
+
+
 class _Model(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="ignore", frozen=True)
 
@@ -198,6 +205,74 @@ class Hold(_Model):
     type: str | None = None
     amount: Decimal
     currency: str = "EUR"
+
+
+class SentTransfer(_Model):
+    """A transfer sent from a cash account (`…/cash-accounts/{accountId}/transfers`).
+
+    `amount` is positive, as the API sends it. The API also sends `sender` (name and ID card of
+    who sent it): never parsed.
+    """
+
+    reference: str  # 15 digits; the operation id inside the charge's `operationRef` (positions 28-42)
+    account_id: str | None = None
+    account_alias: str | None = None
+    amount: Decimal
+    currency: str = "EUR"
+    concept: str | None = None
+    emission_date: dt.date | None = None
+    start_date: dt.date | None = None  # scheduled and periodic transfers
+    end_date: dt.date | None = None
+    periodicity: str | None = None  # WEEKLY | BIWEEKLY | MONTHLY | BIMONTHLY | QUARTERLY | BIANNUAL | ANNUAL
+    name_destination: str | None = None
+    iban_destination: str | None = None
+    bank: str | None = None
+    bic_swift: str | None = None
+    country_id_destination: str | None = None
+    transfer_type: str | None = None  # PUNCTUAL (the only value seen)
+    execution_type: str | None = None  # STANDARD | INSTANT
+    status: str | None = None  # COMMITED (sic) | ACTIVE | PENDING | ACCEPTED_SETTLEMENT_IN_PROGRESS | …
+    cancelable: bool | None = None
+
+    _days = field_validator("emission_date", "start_date", "end_date", mode="before")(_day_or_none)
+
+
+class Remuneration(_Model):
+    """Last interest settlement of a cash account (`…/cash-accounts/{accountId}/remuneration`).
+
+    Rates are percentages (`2.5` is 2.5 %), as the web shows them. Per the web's own mapping,
+    `final_result` is the gross interest of the period and `tax_charge_amount` the withholding on it
+    (the web shows `final_result - tax_charge_amount` as the net interest).
+    """
+
+    remuneration_date: dt.date | None = None  # the month settled (its first day)
+    payment_date: dt.date | None = None
+    official_remuneration_date: dt.date | None = None
+    creation_update_date: dt.date | None = None
+    remuneration_type: str | None = None
+    remuneration_percentage: Decimal | None = None
+    base_remuneration_percentage: Decimal | None = None
+    promotion_remuneration_percentage: Decimal | None = None
+    tae_promotion: Decimal | None = None
+    calculate_tae_average: Decimal | None = None
+    applicable_base_balance: Decimal | None = None
+    balance_promo: Decimal | None = None
+    total_balance: Decimal | None = None
+    base_results: Decimal | None = None
+    promo_results: Decimal | None = None
+    final_result: Decimal | None = None
+    tax_charge_amount: Decimal | None = None
+    end_date_remuneration: dt.date | None = None
+    promotion_code: str | None = None
+
+    _days = field_validator(
+        "remuneration_date",
+        "payment_date",
+        "official_remuneration_date",
+        "creation_update_date",
+        "end_date_remuneration",
+        mode="before",
+    )(_day_or_none)
 
 
 class Investment(_Model):

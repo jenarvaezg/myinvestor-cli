@@ -29,10 +29,13 @@ def store(monkeypatch: pytest.MonkeyPatch, session: Session) -> MemorySessionSto
     return memory
 
 
-def mock_everything(mock_api: respx.MockRouter, *, contribution_amount: float = 60.0) -> None:
+def mock_everything(
+    mock_api: respx.MockRouter, *, contribution_amount: float = 60.0, transfers: list[dict[str, Any]] | None = None
+) -> None:
     mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(
         200, json=ok([cash_account(1, enabledBalance=100.0, withheldBalance=25.0)])
     )
+    mock_api.get(f"{CPERF}/v2/cash-accounts/101/transfers").respond(200, json=ok(transfers or []))
     mock_api.get(f"{API}/account/api/v3/account/{CASH_UUID}/holds").respond(
         200,
         json=ok([{"id": "h1", "accountId": CASH_UUID, "type": "INVESTMENT_ORDER", "amount": 25.0, "currency": "EUR"}]),

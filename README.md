@@ -70,7 +70,10 @@ myinvestor accounts [--owner me|junior|other]     # cuentas de efectivo: tipo, t
 myinvestor movements [-a "Mi cuenta"] [--from 2026-10-01 --to 2026-10-31 | --days 60] [-s nómina] [--oldest-first] [--owner me|junior|other] [--free-only] [--allow-partial]
 myinvestor movements --id <id> [--from … | --days …]   # un solo movimiento, con todos sus campos
 myinvestor movements --new [--no-mark] [--state PATH] | --since-date 2026-11-01 | --since-id <id>   # solo lo nuevo
+myinvestor movements --details [-a …] [--days …]   # + beneficiario e IBAN de destino de las transferencias emitidas
 myinvestor internal-transfers [--from … --to … | --days …] [-a Junior] [--unmatched] [--free-only | --allow-partial]   # traspasos entre tus cuentas: cargo ↔ abono
+myinvestor transfers [-a …] [--from … --to … | --days …] | --scheduled | --ref REF   # transferencias emitidas y programadas
+myinvestor interest [-a …]                        # remuneración: tipo, TAE, intereses brutos, retención y neto de la última liquidación
 myinvestor holds                                  # saldo retenido (p. ej. por órdenes en curso)
 myinvestor balance-history [--from 2026-01-01]    # saldo diario total del efectivo
 myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|year|type|account] [-a …] [--free-only] [--allow-partial]   # intereses, dividendos, retenciones y comisiones
@@ -126,8 +129,11 @@ En la tabla, `movements` muestra `fecha`, `valor_fecha`, `cuenta`, `tipo`, `conc
 | `fichero_ref` | `fileRef` | |
 | `pareja_id` | — | `id` del otro lado si el movimiento es un traspaso entre tus cuentas; si no, `null` |
 | `traspaso_interno` | — | `true` en los dos lados de un traspaso entre tus cuentas |
+| `beneficiario`, `iban_destino` | `nameDestination`, `ibanDestination` de la [transferencia emitida](#transferencias-emitidas-y-programadas-transfers) | **solo con `--details`**; en un cargo que es una transferencia emitida desde esa cuenta; si no, `null` |
 
 Lo que la API no trae sale como `null` (vacío en CSV); el CLI no rellena nada por su cuenta.
+
+**`--details`** enlaza cada cargo con la transferencia emitida que lo originó: el id de operación del `operationRef` del cargo (posiciones 28–42, ver [el formato](#traspasos-internos)) es el `reference` de la transferencia. Cuesta una petición más (`…/cash-accounts/{id}/transfers`) por cada cuenta que tenga algún cargo con ese id, por eso es opcional y `export` no lo usa. También vale con `--new` y `--id`.
 
 **`id`**: no cambia entre ejecuciones ni entre rangos de fechas, así que sirve para saber qué movimientos son nuevos desde la última vez (ver [Solo lo nuevo](#solo-lo-nuevo---new---since-date-y---since-id)) y para deduplicar el [histórico exportado](#exportar-el-histórico-export).
 
@@ -206,17 +212,18 @@ Con `--include-cash` el saldo de las cuentas de efectivo (todas, como en `positi
 |---|---|---|
 | `aportacion` | aportaciones periódicas activas (`contributions`; se descartan `PAUSED`, `FINISHED` y `CANCELED`) | `nextExecutionDate` y, si cabe más de una en el plazo, las siguientes según la frecuencia (estimadas: no se tienen en cuenta festivos) |
 | `orden` | órdenes en curso de las cuentas de valores y de pensiones: estados `INITIAL`, `PENDING` e `IN_PROGRESS`, los mismos que la web da por «en curso» (el resto: `COMPLETE`, `CANCEL`, `REJECTED`, `EXECUTED`) | `orderDate` (nunca más allá del plazo). No se usa `effectiveDate`: en los planes cae un año después de la orden y la web no la muestra |
+| `transferencia` | transferencias programadas o periódicas que aún se van a ejecutar (ver [`transfers --scheduled`](#transferencias-emitidas-y-programadas-transfers)); `producto` es el beneficiario | `startDate` y las siguientes según `periodicity`, hasta `endDate` (estimadas: sin festivos) |
 | `retencion` | `holds` de cada cuenta de efectivo que no casan con ninguna orden (ver abajo); `producto` es un texto legible («retención por orden de inversión») y el `type` de MyInvestor va en `tipo_retencion` | hoy |
 
 Cada fila lleva `{fecha, tipo, producto, importe, cuenta_cargo, retenido, disponible, disponible_tras, falta, tipo_retencion}` (la tabla no muestra `tipo_retencion`). `importe` va con signo, como en `movements`: lo que sale de la cuenta es negativo (una venta en curso, positiva). La cuenta de cargo de una aportación se busca por su `fromAccountId` y, si no casa, por el alias; la de una orden es la cuenta de efectivo asociada a su cuenta de valores o de pensiones. Si no se encuentra, `cuenta_cargo` muestra el alias que da MyInvestor y las columnas de saldo van vacías.
 
 **Órdenes y retenciones.** Una retención solo trae cuenta, `type` e importe, sin referencia a la orden. Por eso cada retención `INVESTMENT_ORDER` se empareja, una a una, con una orden en curso de la misma cuenta de cargo y el mismo importe (`cash` o `amountToBlock`), y las dos salen en una sola fila: la de la orden, con `retenido: true`. Las retenciones que no casan con ninguna orden siguen saliendo como `retencion`.
 
-**Regla del disponible.** `disponible` es el disponible actual de la cuenta de cargo, que MyInvestor ya da descontando lo retenido; y el dinero de una orden en curso queda retenido (o cargado) al darla. Por eso las retenciones y las órdenes se listan pero **no** se restan otra vez: `disponible_tras` solo acumula, por cuenta y en orden de fecha, lo que aún no se ha cargado (las aportaciones). Si baja de cero, `falta` dice cuánto no cubre la cuenta y se avisa en stderr (`-q` lo silencia; el código de salida sigue siendo 0). Con `--owner` solo se ven las filas cargadas a cuentas de ese tipo.
+**Regla del disponible.** `disponible` es el disponible actual de la cuenta de cargo, que MyInvestor ya da descontando lo retenido; y el dinero de una orden en curso queda retenido (o cargado) al darla. Por eso las retenciones y las órdenes se listan pero **no** se restan otra vez: `disponible_tras` solo acumula, por cuenta y en orden de fecha, lo que aún no se ha cargado (las aportaciones y las transferencias programadas). Si baja de cero, `falta` dice cuánto no cubre la cuenta y se avisa en stderr (`-q` lo silencia; el código de salida sigue siendo 0). Con `--owner` solo se ven las filas cargadas a cuentas de ese tipo.
 
-Las transferencias programadas aún no se leen (#4); cuando existan entrarán como `tipo: transferencia` y sí restarán del disponible.
+`upcoming` pide además las transferencias emitidas de cada cuenta (una petición por cuenta) para sacar las programadas.
 
-`upcoming` también va, con los próximos 14 días, en la sección `upcoming` de [`snapshot`](#foto-diaria-snapshot-y-summary).
+`upcoming` también va, con los próximos 14 días y las transferencias programadas, en la sección `upcoming` de [`snapshot`](#foto-diaria-snapshot-y-summary).
 
 ### Foto diaria: `snapshot` y `summary`
 
@@ -303,6 +310,51 @@ La tabla muestra `fecha`, `importe`, `desde_cuenta`, `hacia_cuenta`, `concepto` 
 | 92 | un dígito; visto `9` en cargos, `7` en abonos internos, `3` en SEPA y `0` en compras y aperturas; significado desconocido | `9` |
 
 En otros movimientos el texto libre empieza en la posición 28 (`MYINVESTOR`, `REMESA:…`, el nombre del valor) y en una «APERTURA» las posiciones 18–67 van en blanco. El `operationRef` solo se da por legible si encaja exactamente: 93 caracteres (o más, solo con espacios detrás); cuenta, id de operación, bloque, contador y último carácter en dígitos; 18–27 en blanco; fechas válidas dentro del id y en 84–91; y el contador igual a `ref` cuando el movimiento lo trae. No se sabe qué significan los 6 últimos dígitos del id de operación, el bloque ni el último dígito.
+
+### Transferencias emitidas y programadas: `transfers`
+
+`transfers` lista las transferencias enviadas desde tus cuentas de efectivo (`GET /cperf-server/api/v2/cash-accounts/{accountId}/transfers`, una petición por cuenta). La API no admite rango de fechas (la web solo filtra por concepto e importe) y devuelve todas: el rango de `--from`/`--to`/`--days` (por defecto, los últimos 30 días) se aplica aquí, por fecha de emisión. Una fila por transferencia:
+
+| Campo | Origen en la API | Notas |
+|---|---|---|
+| `fecha` | `emissionDate` | `null` en una periódica que aún no se ha emitido |
+| `cuenta`, `cuenta_id` | cuenta de cargo | |
+| `importe` | `amount` | **en negativo**, como el cargo en `movements` |
+| `concepto` | `concept` | |
+| `beneficiario`, `iban_destino` | `nameDestination`, `ibanDestination` | el IBAN sin espacios |
+| `banco`, `bic` | `bank`, `bicSwift` | |
+| `tipo` | `transferType` | solo se ha visto `PUNCTUAL`; la web no lo usa (distingue las periódicas por `periodicity`) |
+| `ejecucion` | `executionType` | `STANDARD` (ordinaria) o `INSTANT` (inmediata) |
+| `estado` | `status` | `COMMITED` (así, con una T: «Enviada», el único visto); la web conoce además `ACTIVE` («Programada»), `PENDING`, `ACCEPTED_SETTLEMENT_IN_PROGRESS` («Enviando»), `CANCELED` y `REJECTED` |
+| `ref` | `reference` | 15 dígitos; es el id de operación del `operationRef` del cargo (así se enlaza con `movements --details`) |
+| `periodicidad`, `inicio`, `fin` | `periodicity`, `startDate`, `endDate` | de las periódicas; según la web, `periodicity` es `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `BIMONTHLY`, `QUARTERLY` (también acepta la errata `QUATERLY`), `BIANNUAL` o `ANNUAL` |
+| `proxima` | — | próxima ejecución de una programada: `inicio` más los pasos de la periodicidad, hasta `fin` (estimada, sin festivos) |
+
+La tabla muestra `fecha`, `cuenta`, `importe`, `beneficiario`, `concepto`, `ejecucion`, `estado` y `proxima`; JSON y CSV, todo. El ordenante (`sender`, con su DNI) **nunca** se lee ni se exporta.
+
+- `--scheduled`: solo las que aún se van a ejecutar, de cualquier fecha: periódicas sin `fin` o con `fin` desde hoy, o puntuales con `inicio` desde hoy; nunca las `COMMITED`, `CANCELED` ni `REJECTED`. En la cuenta observada no había ninguna periódica: estas reglas salen de lo que hace la web.
+- `--ref REF`: solo esa transferencia, de cualquier fecha.
+- Fuera de alcance: crear, editar o cancelar transferencias (`POST`/`PUT`/`DELETE` de la misma ruta).
+
+### Remuneración de la cuenta: `interest`
+
+`interest` da, para cada cuenta de efectivo, la **última liquidación de intereses** (`GET /cperf-server/api/v2/cash-accounts/{accountId}/remuneration`, una petición por cuenta; si MyInvestor no da remuneración para una cuenta, se avisa en stderr y no sale). Los tipos van en %, como en la web (`2.5` es un 2,5 %).
+
+| Campo | Origen en la API | Notas |
+|---|---|---|
+| `periodo` | `remunerationDate` | mes liquidado, `AAAA-MM` |
+| `fecha_pago` | `paymentDate` | día del abono («LIQUIDAC. INTERESES» en `movements`) |
+| `fecha_oficial` | `officialRemunerationDate` | la web la muestra como fecha de actualización |
+| `saldo_base`, `saldo_promo`, `saldo_total` | `applicableBaseBalance`, `balancePromo`, `totalBalance` | saldo remunerado al tipo base, al promocional y en total |
+| `tipo_pct`, `tipo_base_pct`, `tipo_promo_pct` | `remunerationPercentage`, `baseRemunerationPercentage`, `promotionRemunerationPercentage` | % aplicado: total, base y promocional |
+| `tae_pct`, `tae_promo_pct` | `calculateTaeAverage`, `taePromotion` | la web enseña `calculateTaeAverage` como el tipo medio del periodo |
+| `intereses_base`, `intereses_promo` | `baseResults`, `promoResults` | |
+| `bruto` | `finalResult` | intereses **brutos** del periodo: la web calcula el neto como `finalResult - taxChargeAmount` |
+| `retencion` | `taxChargeAmount` | retención (IRPF), **en negativo** como en `income` |
+| `neto` | — | `bruto` + `retencion` |
+| `remuneracion`, `promocion`, `fin_promocion` | `remunerationType`, `promotionCode`, `endDateRemuneration` | solo se ha visto `DEFAULT` |
+
+Las fechas que la API manda como texto vacío (`""`) salen como `null`. La tabla muestra `cuenta`, `periodo`, `fecha_pago`, `saldo_base`, `tipo_pct`, `tae_pct`, `bruto`, `retencion` y `neto`. Para el histórico de intereses cobrados, `income` suma los abonos de cada mes.
 
 ### Cuentas: tipo, rol y titulares
 
@@ -534,14 +586,15 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 |---|---|
 | `accounts`, `balance-history`, `contributions`, `funds`, `feed`, `raw`, `status` | 1 |
 | `position` | 3 + V |
-| `movements`, `holds` | 1 + C (`movements --new`: igual; `--since-id`: 1 + 1) |
+| `movements`, `holds` | 1 + C (`movements --new`: igual; `--since-id`: 1 + 1; `--details`: + 1 por cuenta con algún cargo de transferencia emitida) |
 | `export` | 4 + C + 2V + P; la primera vez (o con un hueco), + C del tramo antiguo y sus firmas |
 | `holdings` | 1 + V (también con `-a`: se leen todas para resolverla); `--ter`: + F |
 | `allocation` | 2 + V + P + F; con `--by asset` o `category`: + D; con `--include-cash`: + 1 |
 | `orders` | 1 + V; con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
 | `pensions` | 1 + P |
-| `upcoming` | 4 + C + 2·V + P (C: con `--owner`, solo las de ese tipo) |
-| `snapshot`, `summary` | 4 + 2·C + 2·V + 2·P (`summary --from-file`: 0) |
+| `upcoming` | 4 + 2·C + 2·V + P (C: con `--owner`, solo las de ese tipo; por cuenta, retenciones y transferencias emitidas) |
+| `snapshot`, `summary` | 4 + 3·C + 2·V + 2·P (`summary --from-file`: 0) |
+| `transfers`, `interest` | 1 + C |
 | `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V |
 | `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
 | `login` | `--direct` o `--refresh-token-stdin`: 1 |
@@ -603,6 +656,8 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/cash-accounts/self` | `accountId`, `accountUuid`, `alias`, `iban`, `accountType`, `enabledBalance`, `withheldBalance`, `holders` (`name`, `surname1`, `surname2`, `documentNumber`, `me`, `participantType`) |
 | GET | `/account/api/v3/account/{accountUuid}/flows?dateFrom&dateTo` | `{flowList, iban, startBalance, endBalance}`; cada flow: `amount, concept, currency, fileRef, flowType, isMigrated, operationClass, operationDate, operationOriginLabel, operationRef, operationTargetLabel, operationType, reference, totalBalance, valueDate`; más de ~90 días → `202` + firma INAPP |
 | GET | `/account/api/v3/account/{accountUuid}/holds` | retenciones |
+| GET | `/cperf-server/api/v2/cash-accounts/{accountId}/transfers` | transferencias emitidas (sin rango de fechas); `…/transfers/{reference}` da una sola y `…/transfers/details` son datos de la cuenta para el formulario de envío |
+| GET | `/cperf-server/api/v2/cash-accounts/{accountId}/remuneration` | última liquidación de intereses (tipo, TAE, brutos, retención) |
 | GET | `/cperf-server/api/v2/cash-accounts/historical-balance?accountTypes=CASH_ACCOUNT` | `[{date, balance}]` |
 | GET | `/cperf-server/api/v2/securities-accounts/self-basic` | ids de cuentas de valores |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}` | totales + `securitiesAccountInvestments` por tipo (`INDEXED_FUND`, `BROKER`…) con `investmentList` |
@@ -620,7 +675,7 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/funds/{isin}` · `/prices/last` · `/compositions` · `/graphs/{type}` | ficha, último VL |
 | GET | `/feed/api/feed/self` | `text/event-stream` con un evento `data:{…}` |
 
-**Fuera de alcance a propósito**: todo lo que escribe (`…/funds/buy-orders`, `selling-orders`, `inner-transfers`, `external-transfers`, `cash-accounts/{id}/transfers`, cancelar órdenes, aportaciones, Bizum…).
+**Fuera de alcance a propósito**: todo lo que escribe (`…/funds/buy-orders`, `selling-orders`, `inner-transfers`, `external-transfers`, `POST`/`PUT`/`DELETE` de `cash-accounts/{id}/transfers`, cancelar órdenes, aportaciones, Bizum…).
 
 ## Desarrollo
 

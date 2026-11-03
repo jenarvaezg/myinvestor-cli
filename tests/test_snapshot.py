@@ -87,6 +87,7 @@ def mock_everything(mock_api: respx.MockRouter, flows: Flows | None = None) -> F
         json=ok([{"id": "h1", "accountId": CASH_UUID, "type": "INVESTMENT_ORDER", "amount": 25.0, "currency": "EUR"}]),
     )
     mock_api.get(url__regex=FLOWS).mock(side_effect=fake)
+    mock_api.get(f"{CPERF}/v2/cash-accounts/101/transfers").respond(200, json=ok([]))
     mock_api.get(f"{CPERF}/v2/automatic-contributions/self").respond(
         200,
         json=ok(
@@ -249,7 +250,7 @@ def test_snapshot_has_every_section_from_one_client(mock_api: respx.MockRouter, 
     assert '"total": 4100.85' in result.stdout  # exact amounts, as numbers
     assert {c.request.method for c in mock_api.calls} == {"GET"}
     assert sum(c.request.url.path.endswith("/cash-accounts/self") for c in mock_api.calls) == 1
-    assert len(mock_api.calls) == 4 + 2 * 1 + 2 * 1 + 2 * 1  # 4 + 2·C + 2·V + 2·P, as in the README
+    assert len(mock_api.calls) == 4 + 3 * 1 + 2 * 1 + 2 * 1  # 4 + 3·C + 2·V + 2·P, as in the README
 
 
 def test_new_is_marked_unless_no_mark(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
