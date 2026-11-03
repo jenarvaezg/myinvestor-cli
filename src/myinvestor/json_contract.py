@@ -118,12 +118,16 @@ PRODUCT_VALUES = (
 POSITION = (
     Field("producto", S, note="`efectivo`, `valores`, `pensiones` o `total` (última fila)"),
     Field("id", S, note='id de la cuenta; `""` en el total'),
-    Field("nombre", S, True, '`""` en el total'),
-    Field("valor", A, True),
+    Field("nombre", S, True, '`""` en el total; en una cartera del roboadvisor, `Cartera METAL (muy agresiva)`'),
+    Field("valor", A, True, "en una cartera, sus fondos + el saldo de su cuenta de efectivo propia (`efectivo`)"),
     Field("invertido", A, True, "`null` en efectivo y en el total"),
     Field("ganancia", A, True, "`null` en efectivo y en el total"),
     Field("rentab", N, True, "en %; `null` en efectivo y en el total"),
     Field("fecha_valor", D, True, "VL más reciente del producto (hoy en efectivo; `null` en el total)"),
+    Field("cartera", S, True, "`portfolioName` de una cartera del roboadvisor (`METAL`); `null` en el resto"),
+    Field("perfil", S, True, "`portfolioProfileType` de la cartera (`VERY_AGGRESSIVE`…); `null` en el resto"),
+    Field("efectivo", A, True, "saldo de la cuenta de efectivo propia de la cartera, ya sumado en `valor`"),
+    Field("efectivo_id", S, True, "id de esa cuenta de efectivo, que ya no sale como fila aparte"),
     CONSULTED,
 )
 
@@ -163,6 +167,8 @@ HOLDING = (
     Field("vl", N, True, "valor liquidativo / precio"),
     Field("fecha_vl", D, True),
     *PRODUCT_VALUES,
+    Field("cartera", S, True, "`portfolioName` si la cuenta es una cartera del roboadvisor (`METAL`); si no, `null`"),
+    Field("perfil", S, True, "`portfolioProfileType` de esa cartera (`VERY_AGGRESSIVE`…); si no, `null`"),
     Field("peso", N, True, "% sobre el valor de las posiciones listadas, a 2 decimales"),
     Field("ter", N, True, "TER de la ficha del fondo, en %; `null` en acciones y ETF", only_with="--ter"),
     CONSULTED,
@@ -242,6 +248,57 @@ PENSION_PLAN_ROW = (
     Field("1a", N, True, "rentabilidad anualizada a 1 año, en %"),
     Field("3a", N, True, "rentabilidad anualizada a 3 años, en %"),
     Field("5a", N, True, "rentabilidad anualizada a 5 años, en %"),
+)
+
+PORTFOLIO_ROW = (
+    Field("id", INT, note="id de la cartera en el catálogo"),
+    Field("nombre", S, note="`name`: `METAL`… (el `portfolioName` de una cartera contratada)"),
+    Field("perfil", S, True, "`CONSERVATIVE`, `MODERATE`, `DYNAMIC`, `AGGRESSIVE` o `VERY_AGGRESSIVE`"),
+    Field("renta_fija_pct", N, True, "`fixedIncome`, en %"),
+    Field("renta_variable_pct", N, True, "`variableIncome`, en %"),
+    Field(
+        "rentab", N, True, "`profitability`: % acumulado (no anual) entre `rentab_desde` y `rentab_hasta`, unos 3 años"
+    ),
+    Field("rentab_desde", D, True, "`profitabilityFrom` (llega como DD/MM/AAAA); `null` si no se puede leer"),
+    Field("rentab_hasta", D, True, "`profitabilityTo`"),
+    Field("horizonte_anos", INT, True, "`recommendedTimeHorizon`: horizonte recomendado, en años"),
+    Field("fondos", INT, note="número de fondos de la composición objetivo"),
+)
+PORTFOLIO_FUND = (
+    Field("isin", S),
+    Field("nombre", S, True),
+    Field("categoria", S, True),
+    Field("categoria_myinvestor", S, True, "`myInvestorCategory`"),
+    Field("moneda", S, True),
+    Field("peso", N, True, "`percentage`: peso objetivo en la cartera, en %"),
+)
+PORTFOLIO_DRIFT = (
+    Field("isin", S),
+    Field("nombre", S, True),
+    Field("objetivo_pct", N, True, "peso en el catálogo (0 si el fondo no está en él); `null` si la cartera no está"),
+    Field("real_pct", N, True, "% sobre el valor de los fondos de la cartera (sin su efectivo); `null` si está vacía"),
+    Field("desviacion_pct", N, True, "`real_pct - objetivo_pct`, en puntos"),
+    Field("valor", A, note="valor de mercado de la posición (0 si no se tiene)"),
+)
+ANNUAL_RETURN = (
+    Field("periodo", S, note="año, `AAAA`"),
+    Field("importe", A, True, "`amount`"),
+    Field("rentab", N, True, "`percentage`, tal cual"),
+)
+MY_PORTFOLIO = (
+    Field("cuenta", S, note="id de la cuenta de valores (`SECURITIES_PORTFOLIO`)"),
+    Field("cartera", S, True, "`portfolioName`"),
+    Field("perfil", S, True, "`portfolioProfileType`"),
+    Field("valor", A, True, "valor de mercado de sus fondos (`marketValue`)"),
+    Field("efectivo", A, True, "saldo de su cuenta de efectivo propia (`cashAccountId`)"),
+    Field("posiciones", ARR, note="objetivo frente a real, por ISIN", fields=PORTFOLIO_DRIFT),
+    Field(
+        "rentabilidad_anual",
+        ARR,
+        note="`years` de `…/v3/portfolios/{id}/returns/summary` (últimos 3; forma sin verificar con datos reales)",
+        stable=False,
+        fields=ANNUAL_RETURN,
+    ),
 )
 
 FEED = (
@@ -428,7 +485,7 @@ SNAPSHOT_ACCOUNT_VALUES = (
     Field("rentab", N, True, "en %"),
     Field("fecha_valor", D, True, "VL más reciente de sus posiciones"),
 )
-SNAPSHOT_HOLDING = tuple(f for f in HOLDING if f.name not in ("ter", "consultado_en"))
+SNAPSHOT_HOLDING = tuple(f for f in HOLDING if f.name not in ("ter", "consultado_en", "cartera", "perfil"))
 SNAPSHOT_SECTION = "`null` si la sección ha fallado (ver `errors`)"
 DELTA_ROW = (
     Field("producto", S, note="`efectivo`, `valores` o `pensiones`"),
@@ -654,6 +711,31 @@ CONTRACTS: tuple[Contract, ...] = (
         ),
         "Más antiguas primero, desde el inicio del fondo. Con `--every week|month`, el último punto de cada "
         "semana o mes. La `variacion_pct` de la tabla no va en JSON/CSV/TSV.",
+    ),
+    Contract(
+        "portfolios",
+        1,
+        (
+            _rows(*PORTFOLIO_ROW),
+            Variant(
+                "CARTERA",
+                Shape.object,
+                (
+                    Field(
+                        "cartera",
+                        OBJ,
+                        fields=(
+                            *PORTFOLIO_ROW,
+                            Field("descripcion", S, True, "`description`"),
+                            Field("benchmark", S, True, "`codBenchmark`"),
+                        ),
+                    ),
+                    Field("fondos", ARR, note="composición objetivo", fields=PORTFOLIO_FUND),
+                ),
+            ),
+            _rows(*MY_PORTFOLIO, label="--mine"),
+        ),
+        "Catálogo del roboadvisor; con CARTERA, su composición; con `--mine`, una fila por cartera contratada.",
     ),
     Contract("feed", 1, (_rows(*FEED),)),
     Contract("internal-transfers", 1, (_rows(*TRANSFER),)),

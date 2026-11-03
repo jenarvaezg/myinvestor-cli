@@ -28,6 +28,7 @@ MONEY_COLUMNS = frozenset(
     | {"disponible_tras", "falta"}
     | {"aportar"}
     | {"aportado", "mercado"}
+    | {"efectivo"}
     | {"saldo_base", "saldo_promo", "saldo_total", "intereses_base", "intereses_promo", "retencion"}
     | {"coste", "plusvalia", "resultado", "vl_compra"}
 )
@@ -35,7 +36,7 @@ PRICE_COLUMNS = frozenset({"vl", "coste_medio", "vl_compra"})
 AMOUNT_COLUMNS = MONEY_COLUMNS - PRICE_COLUMNS
 PERCENT_COLUMNS = frozenset(
     {"rentab", "rentab_ytd", "ter", "1a", "3a", "5a", "ytd"}
-    | {"peso", "peso_pct", "objetivo_pct", "desviacion_pct"}
+    | {"peso", "peso_pct", "objetivo_pct", "desviacion_pct", "real_pct", "renta_fija_pct", "renta_variable_pct"}
     | {"tipo_pct", "tipo_base_pct", "tipo_promo_pct", "tae_pct", "tae_promo_pct"}
     | {"variacion_pct"}
 )
@@ -45,6 +46,7 @@ DATE_COLUMNS = frozenset(
     {"fecha", "valor_fecha", "fecha_vl", "fecha_valor", "proxima", "consultado_en", "periodo"}
     | {"fecha_pago", "fecha_oficial", "fin_promocion", "inicio", "fin"}
     | {"fecha_fiscal", "vencimiento"}
+    | {"rentab_desde", "rentab_hasta"}
 )
 MAX_QUANTITY_DECIMALS = 6
 # A row with this key is in that currency: its money and price columns are formatted with it.

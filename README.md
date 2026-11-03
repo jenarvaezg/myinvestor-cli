@@ -96,6 +96,7 @@ myinvestor funds "s&p 500" [--sort ter,asc] [-n 20] [--page 0] [--asset-type var
 myinvestor fund-filters [categories|managers|currencies|asset-types|regions] [--pension]   # valores válidos de los filtros
 myinvestor pension-plans ["indexado"] [--manager …] [--asset-type …] [--max-ter 0.5] [--risk 2-4] [--rating 4] [--sort ter,asc] [-n 20] [--page 1]   # catálogo de planes
 myinvestor fund-history IE0032126645 [--since 2024-01-01] [--until …] [--every day|week|month]   # VL de cualquier fondo del catálogo, desde su inicio
+myinvestor portfolios [metal|ID] [--mine]         # carteras del roboadvisor: catálogo, composición objetivo o las tuyas frente al objetivo
 myinvestor feed [-n 20]                           # «Actividad» de la web
 myinvestor raw /cperf-server/api/v2/cash-accounts/self [-p clave=valor]   # GET arbitrario
 
@@ -170,6 +171,19 @@ Las órdenes (`orders`) usan como `ref` el `reference` de MyInvestor, que según
 Los fondos suelen ir con el VL de uno o dos días hábiles antes, así que comparar el valor de un lunes con el del viernes puede no reflejar ningún cambio real: mira `fecha_valor` antes de calcular la variación. La última fila es el total, también en JSON/CSV/TSV, con `producto: "total"` (`TOTAL` en la tabla), `valor` = suma de los productos y `fecha_valor: null`. La salida sigue siendo una lista de filas, compatible con lo que había. En `holdings`, la fecha del VL de cada posición ya iba en `fecha_vl`.
 
 `holdings` lleva además `peso`: el % de cada posición sobre el valor de **las posiciones listadas** (todas las cuentas de valores, o las elegidas con `-a` y `--kind`), así que la columna siempre suma 100. Con `--ter` añade `ter`, el de la ficha de cada fondo (`null` en acciones y ETF); cuesta una petición más por fondo distinto, por eso no va por defecto.
+
+### Carteras del roboadvisor: `portfolios`
+
+`myinvestor portfolios` lista el catálogo de carteras gestionadas (`/cperf-server/api/v2/portfolios`): `id`, `nombre` (`METAL`…), `perfil` (`CONSERVATIVE`, `MODERATE`, `DYNAMIC`, `AGGRESSIVE` o `VERY_AGGRESSIVE`; en la tabla, «conservadora»… «muy agresiva»), `renta_fija_pct`/`renta_variable_pct`, `rentab` (la que publica MyInvestor: % **acumulado**, no anual, entre `rentab_desde` y `rentab_hasta`, un periodo de unos 3 años; la API manda esas fechas como `DD/MM/AAAA` y salen en ISO, o `null` si no se pueden leer), `horizonte_anos` (horizonte recomendado) y el número de `fondos`. `myinvestor portfolios metal` (el nombre sin distinguir mayúsculas, o el `id`) da su composición objetivo: cada fondo con `isin`, `nombre`, `categoria`, `categoria_myinvestor`, `moneda` y `peso` (%). En JSON es `{"cartera": {…, "descripcion", "benchmark"}, "fondos": […]}`; en CSV/TSV, una fila por fondo.
+
+Una cartera contratada es una cuenta de valores más (`accountType: SECURITIES_PORTFOLIO`) con su propia cuenta de efectivo (`cashAccountId`, la que `accounts` muestra como «Cartera Metal»):
+
+- **`position`** la muestra como «Cartera METAL (muy agresiva)» y mete dentro su cuenta de efectivo: esa cuenta ya no sale como fila `efectivo` suelta y su saldo se suma al `valor` de la cartera (el total no cambia). En JSON/CSV/TSV hay cuatro claves nuevas, `null` en el resto de filas: `cartera` (`portfolioName`), `perfil` (`portfolioProfileType`), `efectivo` (el saldo sumado) y `efectivo_id` (el id de esa cuenta). `invertido`, `ganancia` y `rentab` siguen siendo solo los de sus fondos. En la tabla, la columna `efectivo` solo sale si hay alguna cartera con cuenta propia; sin carteras, la salida no cambia.
+- **`holdings`** añade `cartera` y `perfil` a cada posición (`null` en las cuentas normales); en la tabla, la columna `cartera` («METAL (muy agresiva)») solo sale si alguna posición es de una cartera. El efectivo de la cartera no es una posición: no entra en `peso` (como en `allocation` sin `--include-cash`).
+
+`myinvestor portfolios --mine` (con CARTERA, solo esa) compara cada cartera contratada con la del catálogo: empareja `portfolioName` con el `name` del catálogo y cada fondo por ISIN. Por fondo da `objetivo_pct` (peso del catálogo; 0 si tienes un fondo que no está en él), `real_pct` (% sobre el valor de los fondos de la cartera, sin su efectivo), `desviacion_pct` (`real_pct - objetivo_pct`, en puntos) y `valor`. Una cartera aún sin posiciones da los pesos objetivo con `real_pct` y `desviacion_pct` a `null`; si su nombre no está en el catálogo, avisa en stderr y `objetivo_pct` es `null`. Añade `rentabilidad_anual` (`periodo`, `importe`, `rentab`), de `GET /cperf-server/api/v3/portfolios/{accountId}/returns/summary?page=1&limit=3` (lo mismo que pide la web: los últimos tres años). Cuesta dos peticiones más por cartera (catálogo aparte). En JSON, una fila por cartera con `posiciones` y `rentabilidad_anual`; en la tabla, dos tablas por cartera; en CSV/TSV, una fila por fondo, sin la rentabilidad anual.
+
+**Sin verificar:** la única cartera observada estaba vacía y `years` llegaba vacío, así que su forma interior no se ha visto con datos reales. Según la web es un objeto `{"2025": {"amount", "percentage"}, …}`, y en su variante de solo lectura una lista `[{"year", "amount", "percentage"}]`; el CLI acepta las dos e ignora lo que no entienda. `rentab` va tal cual llega (no se sabe si es un % o un tanto por uno). `…/v2/portfolios/{accountId}/returns` (con `aggregates` y `monthlyValues`) no se usa por la misma razón.
 
 ### Reparto de la cartera: `allocation`
 
@@ -794,6 +808,9 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/pension-plans?page&limit&sort&mainInputFilter&…` | catálogo de planes, paginado **desde 1**: `{dgsCode, name, managingEntity, morningstarRating, currency, ter, category, annualizedProfitability, cumulativeProfitability, passedProfitability}`; filtros `manager`, `assetsType`, `mstarRating`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue` |
 | GET | `/cperf-server/api/v2/funds/{isin}/graphs/INIT_GRAPH` | VL desde el inicio del fondo: `{investmentPositionValueList: [{positionDate, marketValue (el VL), profit (igual que marketValue)}]}`, espaciado irregular; cualquier otro `graphType` (`ONE_YEAR`, `MAX`, `THREE_YEARS`, `FIVE_YEARS`) → 400 |
 | GET | `/feed/api/feed/self` | `text/event-stream` con un evento `data:{…}` |
+| GET | `/cperf-server/api/v2/portfolios` | catálogo del roboadvisor: `[{id, name, profile, description, fixedIncome, variableIncome, profitability, profitabilityFrom, profitabilityTo, codBenchmark, type, recommendedTimeHorizon, image, funds: [{isin, name, currency, percentage, category, myInvestorCategory, profitability, profitabilityYTD, …}]}]` |
+| GET | `/cperf-server/api/v3/portfolios/{accountId}/returns/summary?page=1&limit=3` | `{indexedAccountId, portfolioName, years}` + `pagination`; `years` vacío en la única cartera observada (forma interior sin verificar) |
+| GET | `/cperf-server/api/v2/portfolios/{accountId}/returns?format=PERCENTAGE\|CURRENCY&page=1&limit=5` | `{indexedAccountId, portfolioName, portfolioIndexBenchmarkName, portfolioCmsId, years, aggregates, monthlyValues}`; sin uso en el CLI (forma interior sin verificar); `…/rent` da 404 si `rentId` es `null` |
 
 ### Servicio `/read-only/api/v1`
 

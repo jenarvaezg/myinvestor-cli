@@ -313,6 +313,62 @@ def snapshot_api(mock_api: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) ->
     mock_api.get(f"{CPERF}/v2/automatic-contributions/self").respond(200, json=ok([due]))
 
 
+METAL = {
+    "id": 7,
+    "name": "METAL",
+    "profile": "VERY_AGGRESSIVE",
+    "description": "Cartera de ejemplo",
+    "fixedIncome": 20,
+    "variableIncome": 80,
+    "profitability": 8.25,
+    "profitabilityFrom": "31/10/2023",
+    "profitabilityTo": "31/10/2026",
+    "codBenchmark": "BENCH_EJEMPLO",
+    "type": "SAVING",
+    "recommendedTimeHorizon": 10,
+    "funds": [
+        {
+            "isin": FUND,
+            "name": "Fondo indexado",
+            "currency": "EUR",
+            "percentage": 100,
+            "category": "RV Global",
+            "myInvestorCategory": "RV Global",
+        }
+    ],
+}
+
+
+def portfolio_api(mock_api: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`full_api` plus the «METAL» robo-advisor portfolio (202) with its own cash account (103) and returns."""
+    full_api(mock_api, monkeypatch)
+    accounts = [
+        cash_account(1, alias="Mi cuenta", holders=[ANA]),
+        cash_account(2, alias="Junior", holders=[LEO, ANA]),
+        cash_account(3, alias="Cartera Metal", holders=[ANA]),
+    ]
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok(accounts))
+    mock_api.get(f"{CPERF}/v2/securities-accounts/self-basic").respond(
+        200, json=ok([{"accountId": "201"}, {"accountId": "202"}])
+    )
+    metal = securities_account(
+        "202",
+        accountType="SECURITIES_PORTFOLIO",
+        portfolioName="METAL",
+        portfolioProfileType="VERY_AGGRESSIVE",
+        cashAccountId="103",
+        securitiesAccountInvestments={"INDEXED_FUND": {"investmentList": [investment(FUND, accountId="202")]}},
+    )
+    mock_api.get(f"{CPERF}/v2/securities-accounts/202").respond(200, json=ok(metal))
+    mock_api.get(f"{CPERF}/v2/portfolios").respond(200, json=ok([METAL]))
+    summary = {
+        "indexedAccountId": 202,
+        "portfolioName": "METAL",
+        "years": {"2025": {"amount": 40.5, "percentage": 4.05}},
+    }
+    mock_api.get(f"{CPERF}/v3/portfolios/202/returns/summary").respond(200, json=ok(summary))
+
+
 def order_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> None:
     detail = order_detail("R1", executions=[execution()])
     mock_api.get(f"{CPERF}/v2/securities-accounts/201/orders/R1").respond(200, json=ok(detail))
@@ -360,7 +416,7 @@ class Case:
 
 
 CASES = (
-    Case("position", "", ("position",)),
+    Case("position", "", ("position",), setup=portfolio_api),
     Case("accounts", "", ("accounts",)),
     Case("movements", "", ("movements",), options=("--details",)),
     Case(
@@ -372,7 +428,7 @@ CASES = (
     ),
     Case("holds", "", ("holds",)),
     Case("balance-history", "", ("balance-history",)),
-    Case("holdings", "", ("holdings",), options=("--ter",)),
+    Case("holdings", "", ("holdings",), setup=portfolio_api, options=("--ter",)),
     Case("orders", "", ("orders",)),
     Case("pensions", "", ("pensions",)),
     Case("history", "", ("history",)),
@@ -381,6 +437,9 @@ CASES = (
     Case("fund-filters", "", ("fund-filters",)),
     Case("pension-plans", "", ("pension-plans",)),
     Case("fund-history", "", ("fund-history", FUND)),
+    Case("portfolios", "", ("portfolios",), setup=portfolio_api),
+    Case("portfolios", "CARTERA", ("portfolios", "metal"), setup=portfolio_api),
+    Case("portfolios", "--mine", ("portfolios", "--mine"), setup=portfolio_api),
     Case("feed", "", ("feed",)),
     Case("internal-transfers", "", ("internal-transfers", "--unmatched")),
     Case("upcoming", "", ("upcoming",), setup=upcoming_api),

@@ -36,6 +36,7 @@ from myinvestor.client import MyInvestorClient, Period
 from myinvestor.errors import InputError
 from myinvestor.models import Contribution, Investment, Order, PensionAccount, PensionPlanPosition, SecuritiesAccount
 from myinvestor.output import OutputFormat, print_json, render
+from myinvestor.portfolios import is_portfolio, with_profile
 from myinvestor.state import StateKind, changed, snapshot_marks
 
 BROKER = "BROKER"  # `investmentProductType` of stocks and ETFs; every other type is a fund
@@ -94,6 +95,26 @@ def _with_weights(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{**r, "peso": share(r["valor"] or Decimal(0), total)} for r in rows]
 
 
+def _portfolio_columns(account: SecuritiesAccount) -> dict[str, str | None]:
+    if not is_portfolio(account):
+        return {"cartera": None, "perfil": None}
+    return {"cartera": account.portfolio_name, "perfil": account.portfolio_profile_type}
+
+
+def _holdings_table(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`cartera` («METAL (muy agresiva)») after `cuenta`, only if some position is in a portfolio."""
+    if not any(r["cartera"] for r in rows):
+        return [{k: v for k, v in r.items() if k not in ("cartera", "perfil")} for r in rows]
+    return [
+        {
+            "cuenta": r["cuenta"],
+            "cartera": with_profile(r["cartera"], r["perfil"]) if r["cartera"] else None,
+            **{k: v for k, v in r.items() if k not in ("cuenta", "cartera", "perfil")},
+        }
+        for r in rows
+    ]
+
+
 @app.command()
 def holdings(
     account: SecAccountOpt = None,
@@ -110,6 +131,9 @@ def holdings(
     `peso` es el % de cada posición sobre el valor de las listadas (tras `-a` y `--kind`). Con
     `--ter`, el TER de la ficha de cada fondo (vacío en acciones y ETF).
     En JSON/CSV/TSV cada fila lleva además `consultado_en` (fecha y hora de la consulta, con zona).
+
+    Las posiciones de una cartera del roboadvisor llevan su nombre y perfil (`cartera`, `perfil`); en la
+    tabla, la columna `cartera` («METAL (muy agresiva)») solo sale si hay alguna.
     """
     consulted = now_local()
     with build_client() as client:
@@ -121,11 +145,11 @@ def holdings(
         isins = dict.fromkeys(i.isin for _, i in positions if is_fund(i)) if ter else {}
         ters = {isin: client.fund_sheet(isin).ter for isin in isins if isin}
     positions.sort(key=lambda p: p[1].market_value or 0, reverse=True)
-    rows = _with_weights([_holding_row(sec, inv) for sec, inv in positions])
+    rows = _with_weights([{**_holding_row(sec, inv), **_portfolio_columns(sec)} for sec, inv in positions])
     if ter:
         rows = [{**r, "ter": ters.get(inv.isin or "")} for r, (_, inv) in zip(rows, positions, strict=True)]
     if fmt is OutputFormat.table:
-        render(rows, fmt, title=f"Cartera a {consulted:%Y-%m-%d %H:%M}")
+        render(_holdings_table(rows), fmt, title=f"Cartera a {consulted:%Y-%m-%d %H:%M}")
         return
     render([{**r, "consultado_en": iso_moment(consulted)} for r in rows], fmt)
 

@@ -17,6 +17,10 @@
       "ganancia": "amount|null",
       "rentab": "number|null",
       "fecha_valor": "date|null",
+      "cartera": "string|null",
+      "perfil": "string|null",
+      "efectivo": "amount|null",
+      "efectivo_id": "string|null",
       "consultado_en": "datetime"
     }
   },
@@ -121,6 +125,8 @@
       "valor": "amount|null",
       "ganancia": "amount|null",
       "rentab": "number|null",
+      "cartera": "string|null",
+      "perfil": "string|null",
       "peso": "number|null",
       "ter": "number|null (solo con --ter)",
       "consultado_en": "datetime"
@@ -714,6 +720,60 @@
       "fecha": "date",
       "vl": "number",
       "moneda": "string|null"
+    }
+  },
+  "myinvestor.portfolios/1": {
+    "por defecto": {
+      "id": "integer",
+      "nombre": "string",
+      "perfil": "string|null",
+      "renta_fija_pct": "number|null",
+      "renta_variable_pct": "number|null",
+      "rentab": "number|null",
+      "rentab_desde": "date|null",
+      "rentab_hasta": "date|null",
+      "horizonte_anos": "integer|null",
+      "fondos": "integer"
+    },
+    "CARTERA": {
+      "cartera": "object",
+      "cartera.id": "integer",
+      "cartera.nombre": "string",
+      "cartera.perfil": "string|null",
+      "cartera.renta_fija_pct": "number|null",
+      "cartera.renta_variable_pct": "number|null",
+      "cartera.rentab": "number|null",
+      "cartera.rentab_desde": "date|null",
+      "cartera.rentab_hasta": "date|null",
+      "cartera.horizonte_anos": "integer|null",
+      "cartera.fondos": "integer",
+      "cartera.descripcion": "string|null",
+      "cartera.benchmark": "string|null",
+      "fondos": "array",
+      "fondos[].isin": "string",
+      "fondos[].nombre": "string|null",
+      "fondos[].categoria": "string|null",
+      "fondos[].categoria_myinvestor": "string|null",
+      "fondos[].moneda": "string|null",
+      "fondos[].peso": "number|null"
+    },
+    "--mine": {
+      "cuenta": "string",
+      "cartera": "string|null",
+      "perfil": "string|null",
+      "valor": "amount|null",
+      "efectivo": "amount|null",
+      "posiciones": "array",
+      "posiciones[].isin": "string",
+      "posiciones[].nombre": "string|null",
+      "posiciones[].objetivo_pct": "number|null",
+      "posiciones[].real_pct": "number|null",
+      "posiciones[].desviacion_pct": "number|null",
+      "posiciones[].valor": "amount",
+      "rentabilidad_anual": "array",
+      "rentabilidad_anual[].periodo": "string",
+      "rentabilidad_anual[].importe": "amount|null",
+      "rentabilidad_anual[].rentab": "number|null"
     }
   }
 }
