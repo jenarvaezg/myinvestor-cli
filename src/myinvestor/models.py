@@ -305,6 +305,7 @@ class Order(_Model):
     effective_date: dt.date | None = None
     expiration_date: dt.date | None = None
     is_cancelable: bool | None = None
+    amount_to_block: Decimal | None = None  # what a fund buy withholds on the cash account
 
     _days = field_validator("order_date", "effective_date", "expiration_date", mode="before")(_day)
 
@@ -352,6 +353,7 @@ class Contribution(_Model):
     contribution_type: str | None = None
     subscription_type: str | None = None
     to_account_type: str | None = None
+    from_account_id: str | None = None  # `accountId` of the cash account it is charged to
     from_account_alias: str | None = None
     contribution_time_frame: ContributionTimeFrame | None = None
 
