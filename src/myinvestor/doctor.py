@@ -130,7 +130,8 @@ def check_session(info: SessionInfo | None, now: datetime) -> Check:
         f"contraseña guardada: {'sí' if info.password_remembered else 'no'}",
     ]
     if info.relogin_block:
-        parts.append(f"re-login en pausa hasta las {_hhmm(info.relogin_block.until)} ({info.relogin_block.error})")
+        until = info.relogin_block.until.astimezone().strftime("%d/%m %H:%M %Z")
+        parts.append(f"re-login en pausa hasta el {until} ({info.relogin_block.error})")
         level = _worse(level, Level.warn)
     if not session.customer_id:
         parts.append("sin DNI/NIE guardado")
