@@ -736,3 +736,60 @@ class PendingTransfers(_Model):
     """`…/securities-accounts/{id}/transfers/pending`: how many fund transfers are still in progress."""
 
     pending_transfers: int
+
+
+class BrokerOrder(_Model):
+    """A stock/ETF/ETC order in the broker's list (`/broker/v2/stock-orders`), as the web reads it.
+
+    The list has no ISIN nor execution: those are in `BrokerOrderDetail`. Fields from the web bundle.
+    """
+
+    id: str
+    order_date: dt.date | None = None
+    status: str | None = None  # PENDING | COMPLETE | CANCEL | REJECTED
+    tool_name: str | None = None
+    operation: str | None = None  # a description ("Compra", "Venta"…), not a code
+    amount: Decimal | None = None
+    shares: Decimal | None = None
+    currency: str | None = None
+
+    _id = field_validator("id", mode="before")(_text)
+    _days = field_validator("order_date", mode="before")(_day_or_none)
+
+
+class BrokerOrderDetail(_Model):
+    """A broker order with its execution (`/broker/v2/stock-orders/{id}`). Fields from the web bundle.
+
+    `gross_amount_currency` is the estimate given with the order ("Importe estimado en divisa");
+    `gross_amount_operation_currency` and `net_amount_currency` are what was executed, in the
+    instrument's currency, and `net_amount_account_currency` the net in the cash account's (euros).
+    The API also sends `ordererCustomer` (the ID card) and `accountNumber`: never parsed.
+    """
+
+    order_reference: str | None = None
+    order_status: str | None = None
+    side: str | None = Field(None, alias="orderOperationTypeEnum")  # BUY | SELL
+    order_date: dt.date | None = None
+    execution_date: dt.date | None = None
+    instrument_isin: str | None = None
+    instrument_name: str | None = None
+    instrument_currency: str | None = None
+    shares: Decimal | None = None
+    executed_shares: Decimal | None = None
+    price_currency: Decimal | None = None
+    gross_amount_currency: Decimal | None = None
+    gross_amount_operation_currency: Decimal | None = None
+    net_amount_currency: Decimal | None = None
+    net_amount_account_currency: Decimal | None = None
+    trade_commissions: Decimal | None = None
+    other_commissions: Decimal | None = None
+    exchange_rate: Decimal | None = None
+
+    _reference = field_validator("order_reference", mode="before")(_text)
+    _days = field_validator("order_date", "execution_date", mode="before")(_day_or_none)
+
+    @property
+    def commissions(self) -> Decimal | None:
+        """Brokerage plus other fees (`None` when the API sends neither)."""
+        parts = [c for c in (self.trade_commissions, self.other_commissions) if c is not None]
+        return sum(parts, Decimal(0)) if parts else None

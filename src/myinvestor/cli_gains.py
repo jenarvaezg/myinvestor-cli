@@ -10,12 +10,13 @@ from typing import Annotated, Any
 import typer
 
 from myinvestor.allocation import is_fund
+from myinvestor.broker_gains import Sale, Trade, realise, trade_of
 from myinvestor.cli_common import FormatOpt, app, build_client
 from myinvestor.cli_invest import EARLIEST_ORDER_DATE, SecAccountOpt, _securities
 from myinvestor.client import MyInvestorClient
-from myinvestor.errors import InputError
+from myinvestor.errors import ApiError, InputError
 from myinvestor.models import FundLot, Investment, Order, OrderDetail, OrderExecution, SecuritiesAccount
-from myinvestor.output import OutputFormat, normalize_row, print_json, render
+from myinvestor.output import OutputFormat, normalize_row, notices, print_json, render
 
 TOTAL = "total"
 GAINS, LOSSES = "plusvalias", "minusvalias"
@@ -32,8 +33,11 @@ TRANSFERS_OUT = frozenset(
 )
 OUTGOING = TRANSFERS_OUT | {SALE}
 DEAD_STATUSES = frozenset({"CANCEL", "CANCELLED", "REJECTED"})  # never executed: no detail requested
+# `operacion` of a broker sale: the fund-order name of «Venta RV contado» (the broker API says `SELL`).
+BROKER_SALE = "SALE_VARIABLE_INCOME_CASH"
 
 IsinArg = Annotated[str | None, typer.Argument(help="ISIN de un fondo. Sin él: todos.")]
+GainsIsinArg = Annotated[str | None, typer.Argument(help="ISIN de un fondo, una acción o un ETF/ETC. Sin él: todos.")]
 
 
 def _sum(values: Iterable[Decimal | None]) -> Decimal:
@@ -190,20 +194,28 @@ def _lots_total(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 @app.command()
 def gains(
-    isin: IsinArg = None,
+    isin: GainsIsinArg = None,
     year: Annotated[
         int | None, typer.Option("--year", help="Año fiscal (por fecha de ejecución). Por defecto, el actual.")
     ] = None,
     account: SecAccountOpt = None,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
-    """Plusvalías y minusvalías realizadas: reembolsos y traspasos de salida de fondos ejecutados en el año.
+    """Plusvalías y minusvalías realizadas en el año: reembolsos y traspasos de salida de fondos, y ventas del bróker.
 
-    `resultado` es el resultado fiscal de cada ejecución según MyInvestor. Los traspasos entre fondos
-    (`traspaso: true`) difieren la tributación: salen en la lista pero no suman en los totales
-    (`plusvalias`, `minusvalias` y `total`, las tres últimas filas), que son solo los reembolsos.
-    Peticiones: una por cuenta (órdenes desde el 1 de diciembre del año anterior, por si se
-    ejecutaron en enero) y una más por cada orden de salida. Solo fondos.
+    Fondos: `resultado` es el resultado fiscal de cada ejecución según MyInvestor (`taxResult`). Los
+    traspasos entre fondos (`traspaso: true`) difieren la tributación: salen en la lista pero no
+    suman en los totales (`plusvalias`, `minusvalias` y `total`, las tres últimas filas).
+    Bróker (acciones, ETF y ETC, `operacion: SALE_VARIABLE_INCOME_CASH`): la API no da resultado
+    fiscal, así que `coste` es el coste FIFO, con comisiones, de las compras anteriores de la misma
+    cuenta, y `resultado` es `neto` - `coste`. Si las compras que da la API no cubren la venta
+    (anteriores al histórico, un traspaso de valores, un split), `resultado` sale vacío, no suma y
+    se avisa en stderr. No aplica la regla de los dos meses de las minusvalías.
+    `bruto` y `neto` son los de la ejecución (lo liquidado), no el `importe` de `orders`, que es el
+    importe estimado al dar la orden.
+    Peticiones: por cuenta, una de órdenes de fondos (desde el 1 de diciembre del año anterior, por
+    si se ejecutaron en enero) y una más por cada orden de salida; y una de órdenes del bróker (todo
+    el histórico) y, si hay alguna desde ese 1 de diciembre, una más por cada orden del bróker.
     """
     today = date.today()
     fiscal_year = year or today.year
@@ -220,16 +232,60 @@ def gains(
             for run in detail.related_operations
             if _execution_year(run, o) == fiscal_year
         ]
+        trades = [t for i in ids for t in _broker_trades(client, i, start, end)]
+    sales = [s for s in realise(trades) if s.trade.day.year == fiscal_year and _same_isin(s.trade.isin, isin)]
+    for sale in sales:
+        if sale.result is None:
+            _warn_unvalued(sale.trade)
+    rows.extend(_broker_row(s) for s in sales)
     rows.sort(key=lambda r: (r["fecha"], r["ref"]))
     if rows:
         rows.extend(_gains_totals(rows))
-    render(rows, fmt, title=f"Reembolsos y traspasos de salida de {fiscal_year}")
+    render(rows, fmt, title=f"Reembolsos, traspasos de salida y ventas de {fiscal_year}")
+
+
+def _same_isin(product: str | None, isin: str | None) -> bool:
+    return isin is None or (product or "").upper() == isin.upper()
 
 
 def _is_outgoing(order: Order, isin: str | None) -> bool:
     if order.operation_type not in OUTGOING or (order.status or "").upper() in DEAD_STATUSES:
         return False
-    return isin is None or (order.isin or "").upper() == isin.upper()
+    return _same_isin(order.isin, isin)
+
+
+def _broker_trades(client: MyInvestorClient, account_id: str, start: date, end: date) -> list[Trade]:
+    """Executed broker orders of an account up to `end`; none if it had no order since `start`.
+
+    The whole history is needed for the FIFO cost, but a detail per order only when there can be a
+    sale in the year. An account the broker list rejects is skipped with a notice.
+    """
+    try:
+        listed = client.broker_orders(account_id, EARLIEST_ORDER_DATE, end)
+    except ApiError as exc:
+        notices.print(
+            f"Aviso: sin las órdenes del bróker de la cuenta {account_id} ({exc}); `gains` sigue sin ellas.",
+            markup=False,
+        )
+        return []
+    live = [
+        o
+        for o in listed
+        if (o.status or "").upper() not in DEAD_STATUSES and (o.order_date is None or o.order_date <= end)
+    ]
+    if not any(o.order_date is None or o.order_date >= start for o in live):
+        return []
+    found = (trade_of(account_id, o, client.broker_order_detail(o.id)) for o in live)
+    return [t for t in found if t is not None]
+
+
+def _warn_unvalued(trade: Trade) -> None:
+    notices.print(
+        f"Aviso: la venta {trade.reference} de {trade.isin} ({trade.day.isoformat()}) sale sin `resultado` y no "
+        "suma en los totales: las compras que da la API no cubren sus títulos (compras anteriores al histórico, "
+        "un traspaso de valores o un split).",
+        markup=False,
+    )
 
 
 def _execution_day(run: OrderExecution, order: Order) -> date:
@@ -258,12 +314,35 @@ def _gain_row(account_id: str, order: Order, detail: OrderDetail, run: OrderExec
         "comisiones": run.commissions,
         "retenciones": run.retentions,
         "neto": run.net_amount_eur,
+        "coste": None,
         "resultado": run.tax_result,
     }
 
 
+def _broker_row(sale: Sale) -> dict[str, Any]:
+    """One broker sale, in the same columns as a fund execution."""
+    trade = sale.trade
+    return {
+        "cuenta": trade.account_id,
+        "fecha": trade.day.isoformat(),
+        "ref": trade.reference,
+        "isin": trade.isin,
+        "fondo": trade.name,
+        "operacion": BROKER_SALE,
+        "traspaso": False,
+        "participaciones": trade.shares,
+        "vl": trade.price,
+        "bruto": trade.gross,
+        "comisiones": trade.commissions,
+        "retenciones": None,
+        "neto": trade.net,
+        "coste": sale.cost,
+        "resultado": sale.result,
+    }
+
+
 def _gains_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Gains, losses and net of the taxable rows (sales, not transfers)."""
+    """Gains, losses and net of the taxable rows (sales, not transfers) that have a result."""
     results = [r["resultado"] for r in rows if not r["traspaso"] and r["resultado"] is not None]
     empty = dict.fromkeys(rows[0])
     return [

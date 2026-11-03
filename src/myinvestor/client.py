@@ -32,6 +32,8 @@ from myinvestor.errors import (
 )
 from myinvestor.http import build_http_client
 from myinvestor.models import (
+    BrokerOrder,
+    BrokerOrderDetail,
     CashAccount,
     Contribution,
     FeedItem,
@@ -61,6 +63,7 @@ from myinvestor.signature import SIGNATURE_HEADER, SignatureUI, Signer, parse_si
 from myinvestor.stores import SessionStore
 
 CPERF = "/cperf-server/api"
+BROKER = "/broker/v2"  # stocks, ETF and ETC (the web's broker screens)
 FUND_PAGE_SIZE = 50
 PORTFOLIO_RETURN_YEARS = 3  # `limit` of the web's returns summary (page 1)
 SIGNATURE_PREFIX = "/signature/api/"
@@ -415,6 +418,20 @@ class MyInvestorClient:
         """An order with its executions (`relatedOperations`): NAV, shares, fees and tax result."""
         kind = "pension-accounts" if pension else "securities-accounts"
         return OrderDetail.model_validate(self.get_data(f"{CPERF}/v2/{kind}/{seg(account_id)}/orders/{seg(reference)}"))
+
+    def broker_orders(self, account_id: str, date_from: date, date_to: date) -> list[BrokerOrder]:
+        """Stock/ETF/ETC orders of a securities account (any periodicity), as the web's broker screen asks."""
+        params = {
+            "stockAccountId": account_id,
+            "type": "ALL",
+            "dateFrom": date_from.isoformat(),
+            "dateTo": date_to.isoformat(),
+        }
+        return [BrokerOrder.model_validate(r) for r in self._list(f"{BROKER}/stock-orders", params)]
+
+    def broker_order_detail(self, order_id: str) -> BrokerOrderDetail:
+        """A broker order with its execution: shares, price, amounts and fees (no tax result)."""
+        return BrokerOrderDetail.model_validate(self.get_data(f"{BROKER}/stock-orders/{seg(order_id)}"))
 
     def fund_lots(self, account_id: str, isin: str) -> FundLots:
         """Open FIFO lots of a fund with their latent gain (funds only; not realised sales)."""

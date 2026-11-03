@@ -182,7 +182,7 @@ ORDER = (
     Field("nombre", S, True),
     Field("operacion", S, True, "`operationType`"),
     Field("estado", S, True, "`IN_PROGRESS`, `EXECUTED`…"),
-    Field("importe", A, True),
+    Field("importe", A, True, "`cash`: el importe estimado al dar la orden; lo liquidado, en `order REF`"),
     Field("participaciones", N, True),
 )
 
@@ -653,16 +653,28 @@ GAIN = (
     Field("fecha", D, True, "fecha de ejecución; `null` en los totales"),
     Field("ref", S, True, "referencia de la orden; `null` en los totales"),
     Field("isin", S, True),
-    Field("fondo", S, True),
-    Field("operacion", S, True, "`operationType` de la orden"),
+    Field("fondo", S, True, "nombre del fondo o del valor"),
+    Field(
+        "operacion",
+        S,
+        True,
+        "`operationType` de la orden; en las ventas del bróker (acciones, ETF, ETC), `SALE_VARIABLE_INCOME_CASH`",
+    ),
     Field("traspaso", B, True, "traspaso entre fondos: no suma en los totales"),
     Field("participaciones", N, True),
-    Field("vl", N, True),
-    Field("bruto", A, True),
+    Field("vl", N, True, "VL del fondo o precio de la venta, en la divisa del producto"),
+    Field("bruto", A, True, "de la ejecución (lo liquidado), en la divisa del producto"),
     Field("comisiones", A, True),
     Field("retenciones", A, True),
-    Field("neto", A, True),
-    Field("resultado", A, True, "`taxResult`; en los totales, la suma de los reembolsos"),
+    Field("neto", A, True, "de la ejecución, en euros"),
+    Field("coste", A, True, "coste FIFO con comisiones (solo ventas del bróker; `null` si no se puede calcular)"),
+    Field(
+        "resultado",
+        A,
+        True,
+        "`taxResult` en los fondos; `neto` - `coste` en el bróker (`null` si falta el coste: no suma). "
+        "En los totales, la suma de los reembolsos y las ventas",
+    ),
 )
 
 FUND_TRANSFER = (
@@ -837,8 +849,8 @@ CONTRACTS: tuple[Contract, ...] = (
         "gains",
         1,
         (_rows(*GAIN),),
-        "Una fila por ejecución de un reembolso o traspaso de salida y, al final, `plusvalias`, `minusvalias` y "
-        "`total` (solo reembolsos).",
+        "Una fila por ejecución de un reembolso o traspaso de salida de fondos o de una venta del bróker y, al "
+        "final, `plusvalias`, `minusvalias` y `total` (reembolsos y ventas con `resultado`).",
     ),
     Contract(
         "fund-transfers",

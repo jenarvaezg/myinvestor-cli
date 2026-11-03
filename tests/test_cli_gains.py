@@ -21,13 +21,15 @@ from myinvestor.errors import InputError
 from myinvestor.models import FundLots, OrderDetail
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
-from tests.conftest import CPERF, investment, ok, order, securities_account
+from tests.conftest import API, CPERF, investment, ok, order, securities_account
 
 runner = CliRunner()
 DNI = "00000000T"  # synthetic `ordererCustomer`: must never reach the output
 SEC_LIST = f"{CPERF}/v3/securities-accounts/201/orders"
 PENSION_LIST = f"{CPERF}/v2/pension-accounts/301/orders"
 REIMBURSEMENT = "INVESTMENT_FUND_REIMBURSEMENT"
+BROKER_LIST = f"{API}/broker/v2/stock-orders"
+SILVER, GOLD = "XS0000000001", "XS0000000002"  # synthetic ETCs
 
 
 def execution(num: str = "OP1", day: str = "2026-10-02", **overrides: Any) -> dict[str, Any]:
@@ -117,8 +119,89 @@ def json_out(*args: str) -> Any:
 
 
 def mock_securities(mock_api: respx.MockRouter, *ids: str) -> None:
+    """The securities accounts, with no broker orders unless a test mocks some (`mock_broker`)."""
     rows = [{"accountId": i, "status": "ACTIVE"} for i in ids or ("201",)]
     mock_api.get(f"{CPERF}/v2/securities-accounts/self-basic").respond(200, json=ok(rows))
+    mock_api.get(BROKER_LIST).respond(200, json=ok([]))
+
+
+def broker_order(order_id: str, day: str, **overrides: Any) -> dict[str, Any]:
+    """A row of the broker's order list (no ISIN, no execution), as the web bundle reads it."""
+    base = {
+        "id": order_id,
+        "orderDate": f"{day}T10:00:00.000+0000",
+        "status": "COMPLETE",
+        "toolName": "PHYSICAL SILVER ETC",
+        "operation": "Venta",
+        "orderTypeId": "ON_DEMAND",
+        "amount": 100.0,
+        "shares": 10,
+        "currency": "EUR",
+        "isCancelable": False,
+    }
+    return {**base, **overrides}
+
+
+def broker_detail(
+    ref: str, side: str, day: str, shares: int, price: float, fees: float = 1.0, **overrides: Any
+) -> dict[str, Any]:
+    """`/broker/v2/stock-orders/{id}`: an executed order of an EUR ETC; the net includes the fees."""
+    gross = round(shares * price, 2)
+    net = gross + fees if side == "BUY" else gross - fees
+    base = {
+        "ordererCustomer": DNI,
+        "accountNumber": "ACC-0001",
+        "orderReference": ref,
+        "orderStatus": "COMPLETE",
+        "orderOperationTypeEnum": side,
+        "orderType": "MARKET_BEST",
+        "orderDate": f"{day}T10:00:00.000+0000",
+        "executionDate": f"{day}T10:00:05.000+0000",
+        "finishDate": f"{day}T10:00:05.000+0000",
+        "instrumentIsin": SILVER,
+        "instrumentName": "PHYSICAL SILVER ETC",
+        "instrumentMarket": "XETR",
+        "instrumentCurrency": "EUR",
+        "currency": "EUR",
+        "shares": shares,
+        "executedShares": shares,
+        "priceCurrency": price,
+        "limitPrice": 0.0,
+        "grossAmountCurrency": gross,
+        "grossAmountOperationCurrency": gross,
+        "netAmountCurrency": net,
+        "netAmountAccountCurrency": net,
+        "tradeCommissions": fees,
+        "otherCommissions": 0.0,
+        "exchangeRate": 1.0,
+    }
+    return {**base, **overrides}
+
+
+BrokerOrders = tuple[tuple[dict[str, Any], dict[str, Any] | None], ...]
+
+
+def mock_broker(mock_api: respx.MockRouter, orders: BrokerOrders) -> tuple[respx.Route, dict[str, respx.Route]]:
+    """The broker list and the detail of each order (`None`: one that must not be asked for)."""
+    listing = mock_api.get(BROKER_LIST).respond(200, json=ok([row for row, _ in orders]))
+    details = {
+        row["id"]: mock_api.get(f"{BROKER_LIST}/{row['id']}").respond(200, json=ok(detail or {}))
+        for row, detail in orders
+    }
+    return listing, details
+
+
+def etc_trades() -> BrokerOrders:
+    """Two silver buys and a partial sale (a gain), a gold buy and sale (a loss), and a cancelled order."""
+    gold = {"instrumentIsin": GOLD, "instrumentName": "GOLD ETC"}
+    return (
+        (broker_order("1", "2024-03-01"), broker_detail("B1", "BUY", "2024-03-01", 10, 20.0)),  # costs 201.00
+        (broker_order("2", "2024-09-02"), broker_detail("B2", "BUY", "2024-09-02", 10, 30.0)),  # costs 301.00
+        (broker_order("3", "2025-04-01"), broker_detail("S1", "SELL", "2025-04-01", 15, 40.0)),  # yields 599.00
+        (broker_order("4", "2024-05-02"), broker_detail("G1", "BUY", "2024-05-02", 5, 100.0, **gold)),  # 501.00
+        (broker_order("5", "2025-03-03"), broker_detail("G2", "SELL", "2025-03-03", 5, 80.0, **gold)),  # 399.00
+        (broker_order("6", "2025-05-05", status="CANCEL"), None),
+    )
 
 
 # ---- models and client ---------------------------------------------------------------------------
@@ -404,6 +487,7 @@ def test_gains_lists_executed_outgoing_orders_of_the_year_with_totals(
         "comisiones",
         "retenciones",
         "neto",
+        "coste",
         "resultado",
     }
     totals = {r["cuenta"]: r["resultado"] for r in rows if not r["ref"]}
@@ -424,6 +508,95 @@ def test_gains_filters_by_isin(mock_api: respx.MockRouter, store: MemorySessionS
 
     assert [r["ref"] for r in rows if r["ref"]] == ["SALE"]
     assert not skipped.called
+
+
+def test_gains_values_broker_etc_sales_fifo_and_adds_them_to_the_totals(
+    mock_api: respx.MockRouter, store: MemorySessionStore
+) -> None:
+    gains_api(mock_api)
+    listing, details = mock_broker(mock_api, etc_trades())
+
+    result = invoke("gains", "--year", "2025", "-f", "json")
+
+    assert result.exit_code == 0, result.output
+    assert DNI not in result.stdout and "ACC-0001" not in result.stdout
+    rows = json.loads(result.stdout, parse_float=Decimal)
+    assert dict(listing.calls.last.request.url.params) == {
+        "stockAccountId": "201",
+        "type": "ALL",
+        "dateFrom": "2010-01-01",
+        "dateTo": "2025-12-31",
+    }
+    assert not details["6"].called  # cancelled
+    broker = [r for r in rows if r["operacion"] == "SALE_VARIABLE_INCOME_CASH"]
+    assert [(r["fecha"], r["ref"], r["isin"], r["neto"], r["coste"], r["resultado"]) for r in broker] == [
+        ("2025-03-03", "G2", GOLD, Decimal("399.00"), Decimal("501.00"), Decimal("-102.00")),
+        # FIFO: the 10 of March (201.00) and 5 of the 10 of September (301.00 / 2)
+        ("2025-04-01", "S1", SILVER, Decimal("599.00"), Decimal("351.50"), Decimal("247.50")),
+    ]
+    silver = broker[1]
+    assert (silver["cuenta"], silver["traspaso"], silver["participaciones"], silver["vl"]) == ("201", False, 15, 40)
+    assert (silver["bruto"], silver["comisiones"], silver["retenciones"]) == (Decimal("600.00"), Decimal("1.00"), None)
+    totals = {r["cuenta"]: r["resultado"] for r in rows if not r["ref"]}
+    # funds (13.30 / -4.10, see the test above) plus the ETCs (247.50 / -102.00)
+    assert totals == {"plusvalias": Decimal("260.80"), "minusvalias": Decimal("-106.10"), "total": Decimal("154.70")}
+
+
+def test_gains_broker_sale_without_its_purchases_has_no_result_and_warns(
+    mock_api: respx.MockRouter, store: MemorySessionStore
+) -> None:
+    mock_securities(mock_api)
+    mock_api.get(SEC_LIST).respond(200, json=ok([]))
+    mock_broker(mock_api, ((broker_order("3", "2025-04-01"), broker_detail("S1", "SELL", "2025-04-01", 15, 40.0)),))
+
+    result = invoke("gains", "--year", "2025", "-f", "json")
+
+    assert result.exit_code == 0, result.output
+    rows = json.loads(result.stdout, parse_float=Decimal)
+    assert [(r["ref"], r["coste"], r["resultado"]) for r in rows if r["ref"]] == [("S1", None, None)]
+    assert {r["cuenta"]: r["resultado"] for r in rows if not r["ref"]} == {
+        "plusvalias": 0,
+        "minusvalias": 0,
+        "total": 0,
+    }
+    assert "S1" in result.stderr and "sin `resultado`" in result.stderr
+
+
+def test_gains_asks_no_broker_detail_without_broker_orders_in_the_year(
+    mock_api: respx.MockRouter, store: MemorySessionStore
+) -> None:
+    mock_securities(mock_api)
+    mock_api.get(SEC_LIST).respond(200, json=ok([]))
+    old = (broker_order("1", "2023-03-01"), broker_detail("B1", "BUY", "2023-03-01", 10, 20.0))
+    _, details = mock_broker(mock_api, (old,))
+
+    rows = json_out("gains", "--year", "2025")
+
+    assert rows == []
+    assert not details["1"].called
+
+
+def test_gains_filters_broker_sales_by_isin(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_securities(mock_api)
+    mock_api.get(SEC_LIST).respond(200, json=ok([]))
+    mock_broker(mock_api, etc_trades())
+
+    rows = json_out("gains", GOLD.lower(), "--year", "2025")
+
+    assert [r["ref"] for r in rows if r["ref"]] == ["G2"]
+
+
+def test_gains_goes_on_without_the_broker_when_its_list_fails(
+    mock_api: respx.MockRouter, store: MemorySessionStore
+) -> None:
+    gains_api(mock_api)
+    mock_api.get(BROKER_LIST).respond(400, json={"status": {"code": "KO", "message": "Sin cuenta de bróker"}})
+
+    result = invoke("gains", "--year", "2025", "-f", "json")
+
+    assert result.exit_code == 0, result.output
+    assert len([r for r in json.loads(result.stdout) if r["ref"]]) == 4  # the fund rows of `gains_api`
+    assert "bróker" in result.stderr and "201" in result.stderr
 
 
 def test_gains_rejects_a_future_year(store: MemorySessionStore) -> None:

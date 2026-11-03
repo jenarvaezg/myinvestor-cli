@@ -206,6 +206,9 @@ def orders(
 ) -> None:
     """Órdenes de compra/venta/traspaso de fondos y acciones, o de planes de pensiones.
 
+    `importe` es el de la lista de órdenes (`cash`): el importe estimado al dar la orden («Importe
+    estimado» en la web). Lo liquidado (bruto, comisiones, neto) está en `order REF` y en `gains`,
+    así que en un reembolso o un traspaso los dos pueden no casar.
     Con --new solo salen las que no se habían mostrado con --new o han cambiado de estado desde
     entonces (p. ej. IN_PROGRESS → EXECUTED); se guarda `ref → estado` en el estado local.
     """
