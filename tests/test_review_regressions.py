@@ -244,6 +244,37 @@ def test_orders_pension_account_filter(mock_api: respx.MockRouter, store: Memory
     assert isinstance(result.exception, InputError) and "301" in str(result.exception)
 
 
+def pension_order(day: str, reference: str) -> dict[str, Any]:
+    return {"reference": reference, "orderDate": f"{day}T10:00:00.000+0000", "status": "EXECUTED", "cash": 125.0}
+
+
+@pytest.mark.parametrize(
+    ("options", "expected"),
+    [
+        ((), {"order": "DATE"}),
+        (
+            ("--from", "2026-01-01", "--to", "2026-10-31"),
+            {"order": "DATE", "dateFrom": "20260101", "dateTo": "20261031"},
+        ),
+        (("--all", "--to", "2026-10-31"), {"order": "DATE", "dateFrom": "20100101", "dateTo": "20261031"}),
+    ],
+)
+def test_orders_pension_sends_the_range_like_the_web(
+    mock_api: respx.MockRouter, store: MemorySessionStore, options: tuple[str, ...], expected: dict[str, str]
+) -> None:
+    """Without dates the API only returns the last two orders; the web sends `dateFrom`/`dateTo` AAAAMMDD (#69)."""
+    mock_api.get(f"{CPERF}/v2/pension-accounts/self").respond(200, json=ok([{"accountId": "301"}]))
+    route = mock_api.get(f"{CPERF}/v2/pension-accounts/301/orders").respond(
+        200, json=ok([pension_order("2026-10-02", "P2"), pension_order("2026-01-02", "P1")])
+    )
+
+    result = runner.invoke(app, ["orders", "--pension", *options, "-f", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert dict(route.calls.last.request.url.params) == expected
+    assert [o["ref"] for o in json.loads(result.stdout)] == ["P2", "P1"]
+
+
 def test_commands_only_send_gets(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
     """Read-only invariant across the commands that touch every product family."""
     mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account()]))

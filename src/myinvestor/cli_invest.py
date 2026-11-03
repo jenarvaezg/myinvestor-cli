@@ -174,7 +174,8 @@ def orders(
     date_from: Annotated[str | None, typer.Option("--from", help="Desde (AAAA-MM-DD).")] = None,
     date_to: Annotated[str | None, typer.Option("--to", help="Hasta (AAAA-MM-DD).")] = None,
     all_orders: Annotated[
-        bool, typer.Option("--all", help="Todo el histórico (sin fechas: solo las recientes).")
+        bool,
+        typer.Option("--all", help="Todo el histórico (sin fechas: solo las recientes; en planes, las 2 últimas)."),
     ] = False,
     pension: Annotated[
         bool, typer.Option("--pension", help="Aportaciones a planes de pensiones en vez de valores.")
@@ -200,7 +201,7 @@ def orders(
     with build_client() as client:
         if pension:
             ids = _pension_ids(client, account)
-            found = [o for i in ids for o in client.pension_orders(i)]
+            found = [o for i in ids for o in client.pension_orders(i, start, end)]
             found = [o for o in found if (not start or o.order_date >= start) and (not end or o.order_date <= end)]
         else:
             ids = [s.account_id for s in _securities(client, account)] if account else client.securities_account_ids()

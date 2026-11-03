@@ -84,7 +84,7 @@ def _locate(client: MyInvestorClient, reference: str, *, pension: bool) -> tuple
             if _has(client.orders(account_id, EARLIEST_ORDER_DATE, date.today()), reference):
                 return account_id, False
     for acc in client.pension_accounts():
-        if _has(client.pension_orders(acc.account_id), reference):
+        if _has(client.pension_orders(acc.account_id, EARLIEST_ORDER_DATE, date.today()), reference):
             return acc.account_id, True
     where = "tus planes de pensiones" if pension else "tus cuentas de valores ni de pensiones"
     raise InputError(f"No hay ninguna orden {reference} en {where} (mira la columna `ref` de `orders --all`).")

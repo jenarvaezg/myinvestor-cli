@@ -81,6 +81,7 @@ myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|ye
 myinvestor holdings [-a 123456] [--kind fondos|broker] [--ter]   # posiciones: participaciones, coste, VL, valor, rentabilidad y peso
 myinvestor allocation [--by asset|geo|category|product|account] [--include-cash] [--target objetivo.json]   # reparto de la cartera y TER medio
 myinvestor orders [--all | --from 2025-01-01 --to …] [--status EXECUTED] [--pension] [--new]
+myinvestor orders --pension --from 2026-01-01        # aportaciones a planes en el año (límite fiscal: 1.500 € individuales)
 myinvestor order REF [-a ID] [--pension]         # una orden con su ejecución: VL, participaciones, comisiones, retenciones, neto y resultado fiscal
 myinvestor lots [IE0032126645] [-a ID]            # lotes vivos (FIFO) de cada fondo: coste, valor y plusvalía latente
 myinvestor gains [IE0032126645] [--year 2025] [-a ID]   # plusvalías y minusvalías realizadas: reembolsos y traspasos de salida
@@ -793,7 +794,7 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v3/securities-accounts/{id}/orders[?dateFrom&dateTo]` | sin fechas, solo recientes; con fechas, el histórico (la v2 con fechas da 500) |
 | GET | `/cperf-server/api/v2/{securities,pension}-accounts/{id}/positions?groupType=` | serie diaria por ISIN/código; `ONE_MONTH`, `THREE_MONTHS`, `SIX_MONTHS`, `ONE_YEAR` (`ONE_WEEK`, `THREE_YEAR` y `MAX` → 400: no hay más de un año) |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/investment-summary` | totales fondos/acciones |
-| GET | `/cperf-server/api/v2/pension-accounts/self` · `/{id}` · `/{id}/orders?order=DATE` | planes y sus aportaciones |
+| GET | `/cperf-server/api/v2/pension-accounts/self` · `/{id}` · `/{id}/orders?order=DATE&dateFrom&dateTo` | planes y sus aportaciones; sin fechas, `orders` solo trae las 2 últimas; con `--from`/`--to`/`--all` van `dateFrom`/`dateTo` en `AAAAMMDD`, como en la web (#69) |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/orders/{reference}` | detalle de una orden: `orderReference`, `isin`, `orderStatus` (`INITIAL`, `PENDING`, `IN_PROGRESS`, `COMPLETE`, `CANCEL`, `REJECTED`), `orderDate`, `orderTypeName`, `orderClass`, `operationType`, `grossAmountEUR`, `grossAmountFundCurrency`, `cash`, `shares`, `fundName`, `currency`, `expirationDate`, `periodicityCode`, `accountNumber`, `ordererCustomer` (el DNI: no se lee) y `relatedOperations: [{operationNumber, executionDate, executedShares, liquidationValue, grossAmountOperationFundCurrency, commissions, originRetention, destinyRetention, netAmountFundCurrency, exchangeRate, netAmountEUR, netAmountAccountCurrency, taxResult}]` |
 | GET | `/cperf-server/api/v2/pension-accounts/{id}/orders/{reference}` | lo mismo para un plan (en `isin`, el código DGS); visto en el bundle, no con una cuenta real |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/investment-summary/funds/{isin}/added-values` | lotes vivos de un fondo: `{currency, fundName, investmentAddedValue, addedValue, plusMinusList: [{operationType, operationDesc, operationNum, fiscalDate, securities, netAssetValue, investment, marketValue, plusMinus, fiscalResult}]}`; solo fondos |
