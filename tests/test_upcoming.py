@@ -10,8 +10,10 @@ from myinvestor.models import CashAccount, Contribution, Hold, Order, Ownership
 from myinvestor.upcoming import (
     Kind,
     Shortfall,
+    Status,
     Upcoming,
     contribution_dates,
+    scheduled_only,
     shortfalls,
     upcoming_rows,
 )
@@ -75,6 +77,7 @@ def test_contribution_within_window_charges_its_account() -> None:
             "disponible_tras": Decimal("70"),
             "falta": None,
             "tipo_retencion": None,
+            "estado": "programada",
         }
     ]
 
@@ -293,3 +296,43 @@ def test_contribution_dates_follow_the_recurrence_and_stop_at_the_end_date() -> 
     ]
     assert dates("UNKNOWN", "2026-11-04", date(2026, 12, 31)) == ["2026-11-04"]
     assert dates("ONE_MONTH", "2026-10-20", date(2026, 12, 31)) == ["2026-11-20", "2026-12-20"]
+
+
+def test_estado_says_what_has_not_started_yet_and_what_is_already_in_progress() -> None:
+    """`programada`: contributions and scheduled transfers (from today on); `en_curso`: orders and holds,
+    even when their date has passed."""
+    transfer = Upcoming(date(2026, 11, 4), Kind.transfer, "Alquiler", Decimal(-90), "101")
+    rows = rows_for(
+        contributions=[contribution("c1", 30, "2026-11-03")],  # due today: not run yet
+        orders=[(an_order("f1", "PENDING", cash=20.0), "101"), (an_order("f2", "PENDING", cash=7.0), "101")],
+        holds={"101": [hold("h1", 20), hold("h2", 5, kind="CARD")]},
+        transfers=[transfer],
+    )
+
+    assert [(r["fecha"], r["tipo"], r["retenido"], r["estado"]) for r in rows] == [
+        ("2026-11-02", "orden", True, "en_curso"),  # paired with h1, dated yesterday
+        ("2026-11-02", "orden", False, "en_curso"),
+        ("2026-11-03", "retencion", True, "en_curso"),  # h2: not an order hold, unpaired
+        ("2026-11-03", "aportacion", False, "programada"),
+        ("2026-11-04", "transferencia", False, "programada"),
+    ]
+    assert {Status.scheduled.value, Status.in_progress.value} == {r["estado"] for r in rows}
+
+
+def test_scheduled_only_drops_what_already_started_and_keeps_the_balances() -> None:
+    rows = rows_for(
+        contributions=[contribution("c1", 30, "2026-11-05")],
+        orders=[(an_order("f1", "PENDING", cash=20.0), "101")],
+        holds={"101": [hold("h1", 20), hold("h2", 5, kind="CARD")]},
+    )
+
+    kept = scheduled_only(rows)
+
+    assert kept == [r for r in rows if r["tipo"] == "aportacion"]
+    assert kept[0]["disponible_tras"] == Decimal(70)  # orders and holds never lowered it
+
+
+def test_a_hold_is_always_money_going_out_whatever_sign_the_api_uses() -> None:
+    """Real responses send holds negative (`-129.08`); some older ones positive: both are a charge."""
+    assert hold("h1", -129.08).amount == Decimal("-129.08")
+    assert hold("h2", 129.08).amount == Decimal("-129.08")

@@ -328,6 +328,13 @@ UPCOMING = (
     Field("disponible_tras", A, True, "disponible tras lo pendiente hasta esa fila"),
     Field("falta", A, True, "lo que no cubre la cuenta; `null` si lo cubre"),
     Field("tipo_retencion", S, True, "`type` de la retención"),
+    Field(
+        "estado",
+        S,
+        note="`programada` (aportaciones y transferencias: aún no ha empezado, es lo único que resta en "
+        "`disponible_tras`) o `en_curso` (órdenes y retenciones: ya fuera del disponible, también en `orders` "
+        "y `holds`)",
+    ),
 )
 
 INCOME_SUMMARY = (
@@ -408,7 +415,7 @@ HOLD = (
     Field("cuenta", S, note="alias de la cuenta (o su id si no tiene)"),
     Field("id", S),
     Field("tipo", S, True, "`INVESTMENT_ORDER`…"),
-    Field("importe", A),
+    Field("importe", A, note="negativo, como un cargo en `movements`: dinero retenido que sale del disponible"),
 )
 
 SNAPSHOT_ACCOUNT_VALUES = (
@@ -464,7 +471,14 @@ SNAPSHOT = (
             Field("holds", ARR, note="como `holds`", fields=HOLD),
         ),
     ),
-    Field("upcoming", ARR, True, f"como `upcoming`, 14 días; {SNAPSHOT_SECTION}", fields=UPCOMING),
+    Field(
+        "upcoming",
+        ARR,
+        True,
+        "como `upcoming`, 14 días; las filas `en_curso` son las órdenes y retenciones de `pending`: para no "
+        f"contarlas dos veces, suma solo las `programada`; {SNAPSHOT_SECTION}",
+        fields=UPCOMING,
+    ),
     Field(
         "movements",
         OBJ,

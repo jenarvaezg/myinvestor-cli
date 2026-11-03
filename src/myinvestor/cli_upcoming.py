@@ -14,7 +14,7 @@ from myinvestor.client import MyInvestorClient
 from myinvestor.models import Order
 from myinvestor.output import OutputFormat, format_eur, render
 from myinvestor.sent_transfers import transfer_items
-from myinvestor.upcoming import Shortfall, shortfalls, upcoming_rows
+from myinvestor.upcoming import Shortfall, scheduled_only, shortfalls, upcoming_rows
 
 DEFAULT_UPCOMING_DAYS = 14
 MAX_UPCOMING_DAYS = 366
@@ -22,6 +22,7 @@ MAX_UPCOMING_DAYS = 366
 UPCOMING_TABLE_COLUMNS = (
     "fecha",
     "tipo",
+    "estado",
     "producto",
     "importe",
     "cuenta_cargo",
@@ -43,7 +44,8 @@ def _orders(client: MyInvestorClient) -> list[tuple[Order, str | None]]:
 
 
 def _table_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {c: ("sí" if row[c] else "") if c == "retenido" else row[c] for c in UPCOMING_TABLE_COLUMNS}
+    """`get`: a snapshot saved before a key existed (`estado`) still shows."""
+    return {c: ("sí" if row.get(c) else "") if c == "retenido" else row.get(c) for c in UPCOMING_TABLE_COLUMNS}
 
 
 def _warn(shortfall: Shortfall) -> None:
@@ -63,6 +65,12 @@ def upcoming(
         ),
     ] = DEFAULT_UPCOMING_DAYS,
     owner: OwnerOpt = None,
+    future_only: Annotated[
+        bool,
+        typer.Option(
+            "--future-only", help="Solo lo programado (aportaciones y transferencias): sin órdenes ni retenciones."
+        ),
+    ] = False,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
     """Lo que viene: aportaciones y transferencias programadas, órdenes en curso y retenciones, contra el disponible.
@@ -70,7 +78,8 @@ def upcoming(
     `disponible_tras` resta solo lo que aún no se ha cargado (aportaciones y transferencias programadas): las
     retenciones y las órdenes
     en curso ya están descontadas del disponible. Una orden con su retención sale en una sola fila
-    (`retenido`). `falta` dice cuánto no cubre la cuenta; también se avisa
+    (`retenido`). `estado` dice si aún no ha empezado (`programada`) o ya está en curso (`en_curso`);
+    --future-only deja solo lo programado. `falta` dice cuánto no cubre la cuenta; también se avisa
     en stderr.
     """
     today = now_local().date()
@@ -91,7 +100,8 @@ def upcoming(
         transfers=transfer_items(sent, today, today + timedelta(days=days)),
         owner=owner,
     )
-    shown = [_table_row(r) for r in rows] if fmt is OutputFormat.table else rows
+    listed = scheduled_only(rows) if future_only else rows
+    shown = [_table_row(r) for r in listed] if fmt is OutputFormat.table else listed
     render(shown, fmt, title=f"Próximos {days} días")
     for shortfall in shortfalls(rows):
         _warn(shortfall)

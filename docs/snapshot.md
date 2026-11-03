@@ -29,8 +29,8 @@ Lo nuevo se marca **después** de escribir la foto (en `--save` y en stdout): si
 Las claves y sus tipos están también en la referencia generada, [docs/json.md](json.md) (`myinvestor.snapshot/1`), y `myinvestor schema snapshot` da su JSON Schema. `--json-envelope` no la envuelve: ya lleva su `schema`. Los nombres de las secciones van en inglés, como en el issue; los campos de cada fila son los de la orden equivalente (en español, sin tildes). Los importes son números JSON exactos, redondeados a céntimos como en `-f json` (participaciones, VL y porcentajes conservan su precisión): `json.loads(texto, parse_float=Decimal)` los recupera sin pérdida.
 
 ```json
-{"schema": "myinvestor.snapshot/1", "as_of": "2026-11-04T09:00:05+01:00", "cli_version": "0.1.0",
- "total": 12345.67,
+{"schema": "myinvestor.snapshot/1", "as_of": "2026-11-04T09:00:05+01:00", "cli_version": "0.2.0",
+ "total": 4100.55,
  "cash": [{"id": "101", "uuid": "…", "alias": "Mi cuenta", "iban": "…", "tipo": "CASH_ACCOUNT", "rol": "OWNER",
            "titular": "…", "estado": "ACTIVE", "disponible": 950.00, "retenido": 50.00, "saldo": 1000.00,
            "titulares": [{"nombre": "…", "rol": "OWNER", "yo": true}], "fecha_valor": "2026-11-04"}],
@@ -39,17 +39,32 @@ Las claves y sus tipos están también en la referencia generada, [docs/json.md]
                  "posiciones": [{"cuenta": "201", "tipo": "INDEXED_FUND", "isin": "…", "nombre": "…",
                                  "participaciones": 12.345678, "coste_medio": 81.0, "vl": 89.15, "fecha_vl": "2026-11-02",
                                  "invertido": 1000.00, "valor": 1100.55, "ganancia": 100.55, "rentab": 10.06, "peso": 100}]}],
- "pensions": [{"producto": "pensiones", "id": "301", "nombre": "…", "valor": 2000.00, "invertido": 1800.00, …,
-               "planes": [{"cuenta": "301", "codigo": "N1234", "nombre": "…", "participaciones": …, …}]}],
- "pending": {"orders": [{"fecha": "…", "cuenta": "201", "ref": "…", "producto": "…", "nombre": "…",
-                         "operacion": "…", "estado": "IN_PROGRESS", "importe": 150.00, "participaciones": null}],
-             "holds": [{"cuenta": "Mi cuenta", "id": "…", "tipo": "INVESTMENT_ORDER", "importe": 150.00}]},
- "upcoming": [{"fecha": "…", "tipo": "aportacion", "producto": "…", "importe": -60.00, "cuenta_cargo": "Mi cuenta",
-               "retenido": false, "disponible": 950.00, "disponible_tras": 890.00, "falta": null, "tipo_retencion": null}],
- "movements": {"desde": "2026-11-01", "hasta": "2026-11-04", "huecos": [], "movimientos": [ … ]},
- "new": {"movements": [ … ], "orders": [ … ], "pension_orders": [ … ]},
- "delta": {"desde": "2026-11-03T09:00:04+01:00", "total": 12.34, "aportado": 0.00, "mercado": 12.34,
-           "por_producto": [{"producto": "valores", "id": "201", "nombre": "…", "valor": 5.67, "aportado": 0.00, "mercado": 5.67}]},
+ "pensions": [{"producto": "pensiones", "id": "301", "nombre": "…", "valor": 2000.00, "invertido": 1800.00,
+               "ganancia": 200.00, "rentab": 11.11, "fecha_valor": "2026-11-02",
+               "planes": [{"cuenta": "301", "codigo": "N1234", "nombre": "…", "participaciones": 150.123456,
+                           "coste_medio": 11.99, "vl": 13.32, "fecha_vl": "2026-11-02", "invertido": 1800.00,
+                           "valor": 2000.00, "ganancia": 200.00, "rentab": 11.11}]}],
+ "pending": {"orders": [{"fecha": "2026-11-03", "cuenta": "201", "ref": "…", "producto": "…", "nombre": "…",
+                         "operacion": "INVESTMENT_FUNDS_SUBSCRIPTION", "estado": "IN_PROGRESS", "importe": 50.00,
+                         "participaciones": null}],
+             "holds": [{"cuenta": "Mi cuenta", "id": "…", "tipo": "INVESTMENT_ORDER", "importe": -50.00}]},
+ "upcoming": [{"fecha": "2026-11-03", "tipo": "orden", "producto": "…", "importe": -50.00, "cuenta_cargo": "Mi cuenta",
+               "retenido": true, "disponible": 950.00, "disponible_tras": 950.00, "falta": null,
+               "tipo_retencion": "INVESTMENT_ORDER", "estado": "en_curso"},
+              {"fecha": "2026-11-05", "tipo": "aportacion", "producto": "…", "importe": -60.00, "cuenta_cargo": "Mi cuenta",
+               "retenido": false, "disponible": 950.00, "disponible_tras": 890.00, "falta": null,
+               "tipo_retencion": null, "estado": "programada"}],
+ "movements": {"desde": "2026-10-31", "hasta": "2026-11-04", "huecos": [],
+               "movimientos": [{"id": "…:000260", "fecha": "2026-11-03", "valor_fecha": "2026-11-03", "cuenta": "Mi cuenta",
+                                "cuenta_id": "101", "cuenta_uuid": "…", "iban": "…", "sentido": "IN",
+                                "tipo": "TRANSFERENCIA SEPA", "clase": "…", "concepto": "…", "importe": 100.00,
+                                "saldo": 1000.00, "origen": null, "destino": null, "contraparte": null, "ref": "000260",
+                                "operacion_ref": "…", "fichero_ref": null, "pareja_id": null, "traspaso_interno": false}]},
+ "new": {"movements": [], "orders": [], "pension_orders": []},
+ "delta": {"desde": "2026-11-03T09:00:04+01:00", "total": 112.34, "aportado": 100.00, "mercado": 12.34,
+           "por_producto": [{"producto": "efectivo", "id": "101", "nombre": "Mi cuenta", "valor": 100.00, "aportado": 100.00, "mercado": 0.00},
+                            {"producto": "valores", "id": "201", "nombre": "…", "valor": 5.67, "aportado": 0.00, "mercado": 5.67},
+                            {"producto": "pensiones", "id": "301", "nombre": "…", "valor": 6.67, "aportado": 0.00, "mercado": 6.67}]},
  "errors": []}
 ```
 
@@ -63,14 +78,31 @@ Las claves y sus tipos están también en la referencia generada, [docs/json.md]
 | `securities` | una fila por cuenta de valores (como en `position`) con sus `posiciones`; `peso` es sobre **toda** la cartera de valores, como en `holdings` sin filtros | `position` + `holdings` |
 | `pensions` | una fila por cuenta de pensiones (como en `position`) con sus `planes` | `position` + `pensions` |
 | `pending.orders` | órdenes de valores y de planes en curso (`INITIAL`, `PENDING`, `IN_PROGRESS`), de la más reciente a la más antigua | `orders` / `orders --pension` |
-| `pending.holds` | retenciones de saldo de cada cuenta de efectivo | `holds` |
-| `upcoming` | lo que viene en los próximos **14 días** | `upcoming -f json` |
+| `pending.holds` | retenciones de saldo de cada cuenta de efectivo; `importe` **negativo** (dinero que sale del disponible, como un cargo en `movements`), mientras que `retenido` de `cash` es el total retenido de la cuenta, en positivo (es un saldo) | `holds` |
+| `upcoming` | lo que viene en los próximos **14 días**, cada fila con su `estado` (ver [abajo](#lo-que-viene-programada-y-en_curso)) | `upcoming -f json` |
 | `movements` | movimientos de efectivo desde el día de la foto anterior menos 3 días (sin anterior, los últimos 3 días) hasta hoy, de todas las cuentas, con los campos de `movements -f json` (`pareja_id`, `traspaso_interno`…); `huecos`, los tramos que no se han podido pedir. Es la base del `aportado` del efectivo en la foto siguiente | `movements --from … -f json` |
 | `new` | `null` con `--no-new`; si no, lo que `movements --new`, `orders --new` y `orders --pension --new` darían, con el mismo estado local | ver [Solo lo nuevo](../README.md#solo-lo-nuevo---new---since-date-y---since-id) |
 | `delta` | `null` sin foto anterior; si no, `desde` (el `as_of` de la anterior), `total`, `aportado`, `mercado` y `por_producto` (`producto`, `id`, `nombre`, `valor`, `aportado`, `mercado`); ver abajo | |
 | `errors` | `[{"section", "error", "exit_code", "message"}]`, ver abajo | |
 
 Una sección que falla vale `null` (y una lista vacía es que no hay nada): no las confundas. Los movimientos nunca se piden fuera de la ventana de 90 días sin segundo factor.
+
+El ejemplo de arriba se comprueba en los tests (`tests/test_snapshot_docs.py`) contra el contrato de `myinvestor.snapshot/1`: si cambia una clave, el test falla hasta que se corrija aquí.
+
+**Signos.** Como en `movements`, negativo es dinero que sale: `pending.holds[].importe` y el `importe` de las filas de `upcoming` que cargan la cuenta. La excepción es `pending.orders[].importe`, que es el `cash` de la orden tal cual (sin signo), igual que en `orders`; el sentido lo da `operacion`.
+
+## Lo que viene: `programada` y `en_curso`
+
+Cada fila de `upcoming` lleva `estado`:
+
+| `estado` | Qué filas | `fecha` | ¿Resta en `disponible_tras`? | ¿Está también en `pending`? |
+|---|---|---|---|---|
+| `programada` | aportaciones periódicas y transferencias programadas: aún no ha pasado nada | hoy o después | sí | no |
+| `en_curso` | órdenes en curso (con su retención, `retenido: true`) y retenciones sueltas: ya iniciadas, sin liquidar | la de la orden (suele ser hoy o un día pasado); hoy en las retenciones | no: ya están fuera del disponible | sí: en `pending.orders` y `pending.holds` |
+
+No hay `vencida`: una aportación o una transferencia cuya fecha ya ha pasado nunca sale (sus ejecuciones estimadas empiezan hoy), y una orden en curso con fecha de hace días es lo normal hasta que se liquida (sigue `en_curso`).
+
+**Regla para no contar dos veces.** Las filas `en_curso` de `upcoming` son las mismas órdenes y retenciones de `pending`. Para sumar «lo que viene», suma solo las `programada`; es lo que ya hacen `disponible_tras` y `falta`. Para lo ya comprometido, usa `pending`. `upcoming --future-only` da directamente solo las `programada`. La foto no cambia el significado de ningún campo, así que sigue siendo `myinvestor.snapshot/1`. Una foto guardada antes de que existiera `estado` no lo tiene: trata sus filas `orden` y `retencion` como `en_curso` y el resto como `programada`.
 
 ## `delta`: aportado y mercado
 

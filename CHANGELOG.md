@@ -15,6 +15,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - `myinvestor.accounts/1` gana `tipo_pct` y `tae_pct` (números en %, `null` si la cuenta no tiene remuneración; `tae_pct` también es `null` si MyInvestor manda 0, «sin calcular») (compatible) (#5).
 - Nuevos `myinvestor.fund-filters/1` y `myinvestor.pension-plans/1`; `myinvestor.funds/1` no cambia con los filtros (#6).
 - Nuevo `myinvestor.fund-history/1`: filas `{fecha, vl, moneda}`. `myinvestor.funds/1` gana `moneda` (divisa del fondo; compatible) (#7).
+- `myinvestor.upcoming/1` y la sección `upcoming` de `myinvestor.snapshot/1` ganan `estado` (`programada` o `en_curso`) (compatible: ningún campo cambia de significado). En `myinvestor.holds/1` y `pending.holds` de `snapshot`, `importe` es siempre negativo, que es lo que ya mandaba la API (#58, #57).
 
 ### Añadido
 
@@ -40,6 +41,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - README: hallazgos del servicio `/read-only/api/v1` (copia diaria, no sirve como fuente principal ni para más de 90 días) (#10).
 - Filtros del buscador en `funds` (`--category`, `--manager`, `--currency`, `--asset-type`, `--region`, `--min-ter`/`--max-ter`, `--risk N[-M]`, `--rating`, `--esg`, `--hedged`), `fund-filters [FILTRO] [--pension]` (valores válidos de cada filtro) y `pension-plans [TEXTO]` (catálogo de planes de pensiones con TER y rentabilidades, con filtros) (#6).
 - `fund-history ISIN [--since] [--until] [--every day|week|month]`: valor liquidativo de cualquier fondo del catálogo desde su inicio (`…/funds/{isin}/graphs/INIT_GRAPH`), con la variación frente al primer punto en la tabla; README: `INIT_GRAPH` es el único `graphType` válido y no hay más de un año de historial de las posiciones propias. `funds` añade `moneda`, y en las tablas los importes y precios de una fila con `moneda` salen en esa moneda (antes, siempre «€»: un fondo en USD salía en euros) (#7).
+- `upcoming`: `estado` en cada fila (`programada`: aportaciones y transferencias; `en_curso`: órdenes y retenciones, aunque su fecha haya pasado) y `--future-only`, que deja solo lo programado; la regla para no contar dos veces lo de `pending` en `snapshot` está en docs/snapshot.md (#58).
 
 ### Cambiado
 
@@ -54,6 +56,8 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - `--approval-timeout` también vale en el login y el re-login; `logout` borra la pausa del re-login (#46).
 - `movements --id -f json` redondea los importes a céntimos, como la lista (antes, `-50.0` en vez de `-50.00`) (#30).
 - El error de `--account` sin coincidencias dice «no coincide con ninguna cuenta» (antes, «coincide con ninguna cuentas»); con varias, «coincide con varias cuentas».
+- Las retenciones (`holds`, `pending.holds` de `snapshot`) salen siempre en negativo, como un cargo en `movements`, aunque una respuesta las traiga en positivo. Se ha corregido el ejemplo de docs/snapshot.md, que ahora se valida en los tests contra el contrato (#57).
+- README: en las transferencias recibidas de otros bancos la API no da el ordenante; `origen`, `destino` y `contraparte` van a `null` (#56).
 
 ## [0.1.0]
 
