@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -21,6 +22,7 @@ from myinvestor.cli_common import (
     now_local,
     parse_day,
 )
+from myinvestor.cli_state import MarkOpt, NewOpt, StateOpt, record, state_file
 from myinvestor.client import MyInvestorClient, Statement
 from myinvestor.config import FREE_FLOWS_DAYS
 from myinvestor.errors import InputError, PartialResultError, SignatureError, SignatureRequired
@@ -36,6 +38,7 @@ from myinvestor.models import (
 from myinvestor.output import OutputFormat, print_json, render
 from myinvestor.psd2 import Span, free_start, split_range
 from myinvestor.signature import INAPP, can_start
+from myinvestor.state import AccountCursor, StateKind, movement_marks, unseen_movements
 from myinvestor.transfers_match import with_transfer_fields
 
 DEFAULT_MOVEMENT_DAYS = 30
@@ -237,6 +240,21 @@ def movements(
     days: Annotated[
         int | None, typer.Option(min=1, help=f"Últimos N días (por defecto {DEFAULT_MOVEMENT_DAYS}).")
     ] = None,
+    since_date: Annotated[
+        str | None,
+        typer.Option("--since-date", help="Solo los posteriores a este día (AAAA-MM-DD), sin incluirlo."),
+    ] = None,
+    since_id: Annotated[
+        str | None,
+        typer.Option(
+            "--since-id",
+            help="Solo los posteriores a este movimiento en su cuenta (por fecha y luego `ref`/`id`). Se busca "
+            f"en el rango de --from/--days (por defecto, los últimos {DEFAULT_MOVEMENT_DAYS} días).",
+        ),
+    ] = None,
+    new: NewOpt = False,
+    state_path: StateOpt = None,
+    mark: MarkOpt = True,
     query: Annotated[str | None, typer.Option("--search", "-s", help="Filtrar por texto en concepto/tipo.")] = None,
     oldest_first: Annotated[
         bool, typer.Option(help="Orden cronológico (por defecto, lo más reciente primero).")
@@ -260,16 +278,32 @@ def movements(
     tramos: primero los últimos 90 días de todas las cuentas y luego lo anterior, que hay que aprobar
     en la app del móvil (una vez por cuenta, solo en una terminal o con --approve). Si falta algún
     tramo, se muestra lo obtenido y se sale con 13 (0 con --allow-partial).
+
+    Con --new solo salen los que no se mostraron la vez anterior con --new (estado local, ver
+    `myinvestor state`); nunca pide nada fuera de los últimos 90 días.
     """
-    start, end = _range(date_from, date_to, days)
+    if new:
+        _reject_with_new(
+            date_to=date_to, since_date=since_date, since_id=since_id, query=query, movement_id=movement_id
+        )
+        _new_movements(account, owner, (date_from, days), state_path, mark=mark, oldest_first=oldest_first, fmt=fmt)
+        return
+    if since_date and since_id:
+        raise InputError("Usa --since-date o --since-id, no ambos.")
+    if since_date and (date_from or days):
+        raise InputError("Usa --since-date o --from/--days, no ambos.")
+    start, end = _since_range(since_date, date_to) if since_date else _range(date_from, date_to, days)
     if free_only:
         start = _clip_to_free_window(start, end)
+    anchor = since_id or movement_id
     with build_client() as client:
         chosen = filter_owner(match_cash_accounts(client.cash_accounts(), account), owner)
-        if movement_id:
-            chosen = [a for a in chosen if movement_id.startswith(f"{a.account_uuid}:")] or chosen
-        rows, gaps = _movement_rows(client, chosen, start, end)
-    rows = with_transfer_fields(rows)  # before --search: the other leg may not match it
+        if anchor:
+            chosen = [a for a in chosen if anchor.startswith(f"{a.account_uuid}:")] or chosen
+        rows, gaps = _movement_rows(client, chosen, start, end) if start <= end else ([], [])
+    rows = with_transfer_fields(rows)  # before --since-id/--search: the other leg may not match them
+    if since_id:
+        rows = _after_movement(rows, since_id, gaps, start, end)
     if query:
         needle = query.lower()
         rows = [r for r in rows if needle in f"{r['concepto'] or ''} {r['tipo'] or ''}".lower()]
@@ -278,11 +312,109 @@ def movements(
             raise PartialResultError(_gaps_message(gaps))
         _show_movement(rows, movement_id, start, end, fmt)
         return
-    rows.sort(key=lambda r: (r["fecha"], r["ref"] or "", r["id"]), reverse=not oldest_first)
+    _render_movements(rows, f"Movimientos {start} → {end}", oldest_first=oldest_first, fmt=fmt)
+    _report_gaps(gaps, allow_partial=allow_partial)
+
+
+def _movement_order(row: dict[str, Any]) -> tuple[str, str, str]:
+    """Chronological order of movements: operation date, then `ref` (a per-account counter), then `id`."""
+    return row["fecha"], row["ref"] or "", row["id"]
+
+
+def _render_movements(rows: list[dict[str, Any]], title: str, *, oldest_first: bool, fmt: OutputFormat) -> None:
+    rows = sorted(rows, key=_movement_order, reverse=not oldest_first)
     if fmt is OutputFormat.table:
         rows = [{c: r[c] for c in MOVEMENT_TABLE_COLUMNS} for r in rows]
-    render(rows, fmt, title=f"Movimientos {start} → {end}")
-    _report_gaps(gaps, allow_partial=allow_partial)
+    render(rows, fmt, title=title)
+
+
+def _since_range(since_date: str, date_to: str | None) -> tuple[date, date]:
+    """`--since-date D`: from the day after D to `--to` (if that is after `--to`, nothing is asked)."""
+    since = parse_day(since_date, "--since-date") or date.today()
+    end = parse_day(date_to, "--to") or date.today()
+    return since + timedelta(days=1), end
+
+
+def _after_movement(
+    rows: list[dict[str, Any]], since_id: str, gaps: list[_Gap], start: date, end: date
+) -> list[dict[str, Any]]:
+    """Movements of the account of `since_id` that come after it in `_movement_order`."""
+    anchor = next((r for r in rows if r["id"] == since_id), None)
+    if anchor is None:
+        if gaps:
+            raise PartialResultError(_gaps_message(gaps))
+        raise InputError(
+            f"--since-id: no hay ningún movimiento con id {since_id!r} entre {start} y {end}. "
+            "Si es de otra fecha, indica el rango con --from o --days."
+        )
+    after = _movement_order(anchor)
+    return [r for r in rows if r["cuenta_uuid"] == anchor["cuenta_uuid"] and _movement_order(r) > after]
+
+
+_NOT_WITH_NEW = {"date_to": "--to", "since_date": "--since-date", "since_id": "--since-id", "query": "--search"}
+
+
+def _reject_with_new(**given: str | None) -> None:
+    clashing = [_NOT_WITH_NEW.get(k, "--id") for k, v in given.items() if v]
+    if clashing:
+        raise InputError(
+            f"--new no se combina con {', '.join(clashing)}: pide hasta hoy desde lo último visto "
+            "(--from/--days solo cuentan la primera vez)."
+        )
+
+
+def _new_movements(
+    account: list[str] | None,
+    owner: Ownership | None,
+    first_range: tuple[str | None, int | None],
+    state_path: Path | None,
+    *,
+    mark: bool,
+    oldest_first: bool,
+    fmt: OutputFormat,
+) -> None:
+    """`movements --new`: ask each account from its last day minus the margin and emit the unseen ids."""
+    file = state_file(state_path)
+    cursors = file.load().marked.movements
+    today = date.today()
+    date_from, days = first_range
+    first_start = _clip_to_free_window(_range(date_from, None, days)[0], today)
+    with build_client() as client:
+        chosen = filter_owner(match_cash_accounts(client.cash_accounts(), account), owner)
+        by_start: dict[date, list[CashAccount]] = {}
+        for acc in chosen:
+            by_start.setdefault(_new_start(acc, cursors.get(acc.account_uuid), first_start, today), []).append(acc)
+        rows: list[dict[str, Any]] = []
+        gaps: list[_Gap] = []
+        for start, accs in sorted(by_start.items()):
+            got, missing = _movement_rows(client, accs, start, today)
+            rows += got
+            gaps += missing
+    rows = with_transfer_fields(rows)  # over everything fetched: the other leg may have been seen already
+    _render_movements(
+        unseen_movements(rows, cursors), f"Movimientos nuevos (hasta {today})", oldest_first=oldest_first, fmt=fmt
+    )
+    gapped = {g.account.account_uuid for g in gaps}  # never inside the free window, but never mark a gap as seen
+    complete = [a.account_uuid for a in chosen if a.account_uuid not in gapped]
+    marks = movement_marks([r for r in rows if r["cuenta_uuid"] not in gapped], complete, today)
+    record(file, marks, mark=mark, kind=StateKind.movements)
+    _report_gaps(gaps, allow_partial=False)
+
+
+def _new_start(acc: CashAccount, cursor: AccountCursor | None, first_start: date, today: date) -> date:
+    """From the cursor minus the margin, never before the free window (warned) nor after today."""
+    if cursor is None:
+        return first_start
+    wanted = min(cursor.next_start(), today)
+    window = free_start(today)
+    if wanted >= window:
+        return wanted
+    err.print(
+        f"[yellow]{escape(acc.alias or acc.account_id)}:[/yellow] lo último visto es del {cursor.last_day}, "
+        f"antes de la ventana sin firma; se consulta desde el {window}. Lo anterior a esa fecha no se revisa "
+        "(si lo necesitas, pídelo con --from)."
+    )
+    return window
 
 
 @dataclass(frozen=True)
@@ -343,6 +475,15 @@ def _show_movement(rows: list[dict[str, Any]], movement_id: str, start: date, en
         render([{"campo": k, "valor": v} for k, v in row.items()], fmt, title=f"Movimiento {movement_id}")
 
 
+@dataclass(frozen=True)
+class _Fetched:
+    """The statement of one span of an account."""
+
+    account: CashAccount
+    span: Span
+    statement: Statement
+
+
 def _movement_rows(
     client: MyInvestorClient, chosen: list[CashAccount], start: date, end: date
 ) -> tuple[list[dict[str, Any]], list[_Gap]]:
@@ -351,6 +492,14 @@ def _movement_rows(
     Without a way to sign, or once a signature fails, older spans are not asked for and become gaps;
     what was already fetched is kept. Ids are numbered over all the spans of an account together.
     """
+    fetched, gaps = _fetch_statements(client, chosen, start, end)
+    return _rows_of(chosen, fetched), gaps
+
+
+def _fetch_statements(
+    client: MyInvestorClient, chosen: list[CashAccount], start: date, end: date
+) -> tuple[list[_Fetched], list[_Gap]]:
+    """The statements behind `_movement_rows`, one per account and span (`export` checks their balances)."""
     spans = split_range(start, end, date.today())
     can_approve = can_start(client.signature_ui, INAPP)  # /dev/tty alone types codes, it does not approve
     if any(not s.free for s in spans) and can_approve:
@@ -358,8 +507,7 @@ def _movement_rows(
             f"[dim]Más de {FREE_FLOWS_DAYS} días: primero lo posterior al {free_start(date.today())} de cada "
             "cuenta; lo anterior hay que aprobarlo en la app (una vez por cuenta).[/dim]"
         )
-    flows: dict[str, list[Flow]] = {a.account_uuid: [] for a in chosen}
-    ibans: dict[str, str | None] = {a.account_uuid: a.iban for a in chosen}
+    fetched: list[_Fetched] = []
     gaps: list[_Gap] = []
     for span in spans:
         for acc in chosen:
@@ -370,14 +518,20 @@ def _movement_rows(
             if statement is None:
                 gaps.append(_Gap(acc, span))
                 continue
-            flows[acc.account_uuid].extend(statement.flows)
-            ibans[acc.account_uuid] = ibans[acc.account_uuid] or statement.iban
-    rows = [
-        _movement_row(acc, ibans[acc.account_uuid], f, i)
-        for acc in chosen
-        for f, i in zip(flows[acc.account_uuid], stable_ids(acc.account_uuid, flows[acc.account_uuid]), strict=True)
-    ]
-    return rows, gaps
+            fetched.append(_Fetched(acc, span, statement))
+    return fetched, gaps
+
+
+def _rows_of(chosen: list[CashAccount], fetched: list[_Fetched]) -> list[dict[str, Any]]:
+    """Movement rows of the fetched statements; ids are numbered over all the spans of each account."""
+    rows: list[dict[str, Any]] = []
+    for acc in chosen:
+        mine = [f for f in fetched if f.account.account_uuid == acc.account_uuid]
+        flows = [flow for f in mine for flow in f.statement.flows]
+        iban = acc.iban or next((f.statement.iban for f in mine if f.statement.iban), None)
+        ids = stable_ids(acc.account_uuid, flows)
+        rows += [_movement_row(acc, iban, f, i) for f, i in zip(flows, ids, strict=True)]
+    return rows
 
 
 def _span_statement(client: MyInvestorClient, acc: CashAccount, span: Span) -> Statement | None:

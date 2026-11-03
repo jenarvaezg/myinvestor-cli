@@ -12,10 +12,12 @@ import typer
 
 from myinvestor.allocation import is_fund, share
 from myinvestor.cli_common import FormatOpt, app, build_client, iso_moment, now_local, parse_day
+from myinvestor.cli_state import MarkOpt, StateOpt, record, state_file
 from myinvestor.client import MyInvestorClient, Period
 from myinvestor.errors import InputError
-from myinvestor.models import Investment, Order, SecuritiesAccount
+from myinvestor.models import Contribution, Investment, Order, SecuritiesAccount
 from myinvestor.output import OutputFormat, print_json, render
+from myinvestor.state import StateKind, changed, snapshot_marks
 
 BROKER = "BROKER"  # `investmentProductType` of stocks and ETFs; every other type is a fund
 
@@ -135,9 +137,19 @@ def orders(
         bool, typer.Option("--pension", help="Aportaciones a planes de pensiones en vez de valores.")
     ] = False,
     status: Annotated[str | None, typer.Option(help="Filtrar por estado (IN_PROGRESS, EXECUTED…).")] = None,
+    new: Annotated[
+        bool,
+        typer.Option("--new", help="Solo las órdenes nuevas o con otro estado que la vez anterior con --new."),
+    ] = False,
+    state_path: StateOpt = None,
+    mark: MarkOpt = True,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
-    """Órdenes de compra/venta/traspaso de fondos y acciones, o de planes de pensiones."""
+    """Órdenes de compra/venta/traspaso de fondos y acciones, o de planes de pensiones.
+
+    Con --new solo salen las que no se habían mostrado con --new o han cambiado de estado desde
+    entonces (p. ej. IN_PROGRESS → EXECUTED); se guarda `ref → estado` en el estado local.
+    """
     start = parse_day(date_from, "--from") or (EARLIEST_ORDER_DATE if all_orders else None)
     end = parse_day(date_to, "--to")
     if start and end and start > end:
@@ -153,7 +165,15 @@ def orders(
     if status:
         found = [o for o in found if (o.status or "").upper() == status.upper()]
     found.sort(key=lambda o: (o.order_date, o.reference), reverse=True)
-    render([_order_row(o) for o in found], fmt, title="Órdenes")
+    if not new:
+        render([_order_row(o) for o in found], fmt, title="Órdenes")
+        return
+    kind = StateKind.pension_orders if pension else StateKind.orders
+    file = state_file(state_path)
+    fresh = set(changed(((o.reference, o.status) for o in found), file.load().marked.snapshot(kind)))
+    found = [o for o in found if o.reference in fresh]
+    render([_order_row(o) for o in found], fmt, title="Órdenes nuevas o con cambio de estado")
+    record(file, snapshot_marks(kind, [(o.reference, o.status) for o in found]), mark=mark, kind=kind)
 
 
 @app.command()
@@ -247,9 +267,29 @@ def history(
     render(rows, fmt, title=f"Evolución ({period})")
 
 
+def contribution_row(c: Contribution) -> dict[str, Any]:
+    frame = c.contribution_time_frame
+    return {
+        "id": c.contribution_id,
+        "estado": c.status,
+        "producto": c.isin,
+        "nombre": c.fund_name,
+        "importe": c.amount,
+        "frecuencia": frame.recurrence if frame else None,
+        "proxima": frame.next_execution_date.isoformat() if frame and frame.next_execution_date else None,
+        "destino": c.to_account_type,
+    }
+
+
 @app.command()
 def contributions(
     all_contributions: Annotated[bool, typer.Option("--all", help="Incluir las canceladas.")] = False,
+    new: Annotated[
+        bool,
+        typer.Option("--new", help="Solo las nuevas o con otro estado o próxima fecha que la vez anterior con --new."),
+    ] = False,
+    state_path: StateOpt = None,
+    mark: MarkOpt = True,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
     """Aportaciones periódicas programadas a fondos y planes."""
@@ -257,24 +297,16 @@ def contributions(
         found = client.contributions()
     if not all_contributions:
         found = [c for c in found if c.status not in ("CANCELED", "CANCELLED")]
-    rows = [
-        {
-            "id": c.contribution_id,
-            "estado": c.status,
-            "producto": c.isin,
-            "nombre": c.fund_name,
-            "importe": c.amount,
-            "frecuencia": c.contribution_time_frame.recurrence if c.contribution_time_frame else None,
-            "proxima": (
-                c.contribution_time_frame.next_execution_date.isoformat()
-                if c.contribution_time_frame and c.contribution_time_frame.next_execution_date
-                else None
-            ),
-            "destino": c.to_account_type,
-        }
-        for c in found
-    ]
-    render(rows, fmt, title="Aportaciones periódicas")
+    rows = [contribution_row(c) for c in found]
+    if not new:
+        render(rows, fmt, title="Aportaciones periódicas")
+        return
+    file = state_file(state_path)
+    items = [(r["id"], {"estado": r["estado"], "proxima": r["proxima"]}) for r in rows]
+    fresh = set(changed(items, file.load().marked.snapshot(StateKind.contributions)))
+    render([r for r in rows if r["id"] in fresh], fmt, title="Aportaciones periódicas nuevas o con cambios")
+    kind = StateKind.contributions
+    record(file, snapshot_marks(kind, [i for i in items if i[0] in fresh]), mark=mark, kind=kind)
 
 
 FUND_FIELDS = (

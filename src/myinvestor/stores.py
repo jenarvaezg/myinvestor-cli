@@ -12,11 +12,9 @@ completes in another process. It holds the password only with `--remember`.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import os
-import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -25,6 +23,7 @@ from typing import Any, Protocol
 
 import keyring
 
+from myinvestor.atomicfile import locked, write_atomic
 from myinvestor.config import KEYRING_SERVICE
 from myinvestor.errors import CorruptKeyringError, CorruptStoreError
 from myinvestor.session import Session
@@ -196,17 +195,9 @@ class FileSessionStore:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    @contextlib.contextmanager
-    def _locked(self) -> Iterator[None]:
+    def _locked(self) -> contextlib.AbstractContextManager[None]:
         """Serialize read-modify-write across processes (e.g. two cron jobs refreshing the token)."""
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = os.open(self.path.with_suffix(".lock"), os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            yield
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
+        return locked(self.path.with_suffix(".lock"))
 
     def _read(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -220,17 +211,7 @@ class FileSessionStore:
         return data
 
     def _write(self, data: dict[str, Any]) -> None:
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".session-", suffix=".tmp")  # unique, 0600
-        try:
-            with os.fdopen(fd, "w") as fh:
-                json.dump(data, fh)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp, self.path)
-        except BaseException:
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(tmp)
-            raise
+        write_atomic(self.path, json.dumps(data), prefix=".session-")
 
     def _update(self, change: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
         with self._locked():

@@ -19,6 +19,15 @@ def dumps(value: Any) -> str:
     return _encode(value, 0)
 
 
+def dumps_line(value: Any) -> str:
+    """Serialize to JSON on a single line (JSON Lines), with the same rules as `dumps`."""
+    if isinstance(value, Mapping):
+        return "{" + ", ".join(f"{dumps_line(str(k))}: {dumps_line(v)}" for k, v in value.items()) + "}"
+    if isinstance(value, list | tuple):
+        return "[" + ", ".join(dumps_line(item) for item in value) + "]"
+    return _encode(value, 0)
+
+
 def decimal_literal(value: Decimal) -> str:
     """Fixed-point text of a finite Decimal (`1E+3` → `1000`), valid as a JSON number."""
     if not value.is_finite():
