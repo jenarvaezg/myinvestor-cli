@@ -142,7 +142,7 @@ def _datasets(
     """Rows of every file, oldest first, with the same columns as the commands that show them."""
     start = since or EARLIEST_ORDER_DATE
     orders = [o for i in client.securities_account_ids() for o in client.orders(i, start, today)]
-    pension = [o for p in client.pension_accounts() for o in client.pension_orders(p.account_id)]
+    pension = [o for p in client.pension_accounts() for o in client.pension_orders(p.account_id, start, today)]
     return {
         "movements": sorted(with_transfer_fields(_rows_of(accounts, fetched)), key=_movement_order),
         "orders": _order_rows(orders),

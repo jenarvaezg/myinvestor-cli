@@ -443,8 +443,18 @@ class MyInvestorClient:
         rows = self._list(f"{CPERF}/v2/pension-accounts/{seg(account_id)}")
         return [PensionPlanPosition.model_validate(p) for p in rows]
 
-    def pension_orders(self, account_id: str) -> list[Order]:
-        rows = self._list(f"{CPERF}/v2/pension-accounts/{seg(account_id)}/orders", {"order": "DATE"})
+    def pension_orders(
+        self, account_id: str, date_from: date | None = None, date_to: date | None = None
+    ) -> list[Order]:
+        """Like `orders`: without dates the API only returns the last ones (two, with a monthly contribution).
+
+        The web sends `dateFrom`/`dateTo` as `AAAAMMDD` here (#69).
+        """
+        params: dict[str, str] = {"order": "DATE"}
+        if date_from or date_to:
+            params["dateFrom"] = f"{date_from or date(2000, 1, 1):%Y%m%d}"
+            params["dateTo"] = f"{date_to or date.today():%Y%m%d}"
+        rows = self._list(f"{CPERF}/v2/pension-accounts/{seg(account_id)}/orders", params)
         return sorted((Order.model_validate(r) for r in rows), key=lambda o: o.order_date, reverse=True)
 
     def pension_transfers(self, account_id: str, date_from: date, date_to: date) -> list[PensionTransfer]:
