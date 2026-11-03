@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -15,6 +16,7 @@ from typer.testing import CliRunner
 
 from myinvestor import cli_common
 from myinvestor.cli import app
+from myinvestor.cli_accounts import MOVEMENT_TABLE_COLUMNS
 from myinvestor.errors import InputError
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
@@ -271,3 +273,157 @@ def test_movements_owner_filter(mock_api: respx.MockRouter, store: MemorySession
 
     assert [r["cuenta_uuid"] for r in rows] == [SECOND_UUID]
     assert minor.called and not own.called
+
+
+# ---- #55: tables fit COLUMNS and never cut a word in half ------------------------
+
+SPAN = ("--from", "2026-10-01", "--to", "2026-10-31")
+LONG_CONCEPT = "Recibo domiciliado de la comunidad de propietarios del edificio"
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+BOX = re.compile(r"[─-╿]+")  # box-drawing characters: borders and separators
+# Every whole word the movements table may show: title, headers and the synthetic cells.
+TABLE_WORDS = frozenset(
+    " ".join(
+        (
+            "Movimientos 2026-10-01 → 2026-10-31",
+            " ".join(MOVEMENT_TABLE_COLUMNS),
+            "2026-10-11 2026-10-12 2026-10-13 Cartera Metal APERTURA TRANSFERENCIA SEPA Concepto 2",
+            LONG_CONCEPT,
+            "-12.345,67 € 54.321,09 € 23.456,78 € 77.777,87 € 000259 000260",
+        )
+    ).split()
+)
+
+
+def mock_metal_account(
+    mock_api: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    columns: str,
+    *,
+    value_date: str = "2026-10-11",
+    scale: float = 1.0,
+) -> None:
+    """Real-life widths: 5-digit amounts and balances (`scale=0.01`: 3 digits), 6-digit refs.
+
+    `value_date` is the first movement's; the second one's is always its operation date.
+    """
+    monkeypatch.setenv("COLUMNS", columns)
+    monkeypatch.delenv("MYINVESTOR_WIDE", raising=False)
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account(1, alias="Cartera Metal")]))
+    opening = flow(
+        1,
+        round(-12345.67 * scale, 2),
+        operationType="APERTURA",
+        concept=LONG_CONCEPT,
+        totalBalance=round(54321.09 * scale, 2),
+        reference="000259",
+        valueDate=f"{value_date}T00:00:00.000+0000",
+    )
+    flows = [opening, flow(2, round(23456.78 * scale, 2), totalBalance=round(77777.87 * scale, 2), reference="000260")]
+    mock_api.get(FLOWS).respond(200, json=ok({"flowList": flows}))
+
+
+def table_lines(*args: str) -> list[str]:
+    return ANSI.sub("", invoke("movements", *SPAN, *args).stdout).splitlines()
+
+
+def table_tokens(lines: list[str]) -> list[str]:
+    return BOX.sub(" ", " ".join(lines)).split()
+
+
+def assert_whole_words(lines: list[str]) -> None:
+    """Every token is a whole word, or the start of one ending in "…": never a word folded in two."""
+    for token in table_tokens(lines):
+        if token.endswith("…"):
+            assert any(word.startswith(token[:-1]) for word in TABLE_WORDS), (token, lines)
+        else:
+            assert token in TABLE_WORDS, (token, lines)
+
+
+@pytest.mark.parametrize(
+    ("columns", "value_date", "fits"),
+    [
+        (80, "2026-10-11", True),  # `valor_fecha` repeats `fecha`: it goes, the text gets more room
+        (80, "2026-10-13", True),  # it stays: 8 columns, the text squeezed into what is left
+        (60, "2026-10-11", True),
+        # fecha + valor_fecha + 5-digit amounts + borders = 69 > 60: not even they fit (#21)
+        (60, "2026-10-13", False),
+    ],
+)
+def test_movements_table_fits_columns_and_never_cuts_a_word(
+    mock_api: respx.MockRouter,
+    store: MemorySessionStore,
+    monkeypatch: pytest.MonkeyPatch,
+    columns: int,
+    value_date: str,
+    fits: bool,
+) -> None:
+    mock_metal_account(mock_api, monkeypatch, str(columns), value_date=value_date)
+
+    lines = table_lines("-f", "table")
+
+    assert (max(map(len, lines)) <= columns) is fits, "\n".join(lines)
+    assert_whole_words(lines)
+    tokens = set(table_tokens(lines))
+    assert {"2026-10-11", "2026-10-12", "-12.345,67", "54.321,09", "23.456,78", "77.777,87"} <= tokens
+    assert not {"Carter", "a", "Meta", "l", "APERTU", "RA"} & tokens
+
+
+def test_movements_table_at_80_keeps_label_words_whole_when_there_is_room(
+    mock_api: respx.MockRouter, store: MemorySessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The issue's labels: with 3-digit amounts they fit whole once the concept gives way."""
+    mock_metal_account(mock_api, monkeypatch, "80", scale=0.01)
+
+    lines = table_lines()
+
+    assert max(map(len, lines)) <= 80
+    assert {"Cartera", "Metal", "APERTURA"} <= set(table_tokens(lines)), "\n".join(lines)
+    assert not [token for token in table_tokens(lines) if token.startswith(("Car", "Met", "APE")) and "…" in token]
+
+
+def test_movements_table_drops_a_repeated_value_date_only_when_it_does_not_fit(
+    mock_api: respx.MockRouter, store: MemorySessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mock_metal_account(mock_api, monkeypatch, "80")
+    assert "valor_fecha" not in table_tokens(table_lines())  # same as `fecha` in every row, and no room
+
+    mock_metal_account(mock_api, monkeypatch, "80", value_date="2026-10-13")
+    lines = table_lines()
+    assert "valor_fecha" in table_tokens(lines) and "2026-10-13" in table_tokens(lines)  # differs: it stays
+
+    mock_metal_account(mock_api, monkeypatch, "300")
+    assert "valor_fecha" in table_tokens(table_lines())  # room enough: it stays
+
+
+def test_movements_table_gives_labels_room_before_the_concept(
+    mock_api: respx.MockRouter, store: MemorySessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mock_metal_account(mock_api, monkeypatch, "120")
+
+    lines = table_lines()
+
+    assert any("Cartera Metal" in line and "APERTURA" in line for line in lines)
+    assert any("TRANSFERENCIA SEPA" in line for line in lines)
+    assert max(map(len, lines)) <= 120
+
+
+def test_movements_wide_and_machine_formats_keep_whole_values(
+    mock_api: respx.MockRouter, store: MemorySessionStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mock_metal_account(mock_api, monkeypatch, "80")
+
+    wide = ANSI.sub("", invoke("--wide", "movements", *SPAN).stdout)
+    assert LONG_CONCEPT in wide and "Cartera Metal" in wide and "valor_fecha" in wide
+    assert len([line for line in wide.splitlines() if line.startswith("│")]) == 2  # one line per row
+    rows = list(csv.DictReader(io.StringIO(invoke("movements", *SPAN, "-f", "csv").stdout)))
+    assert ("Cartera Metal", "APERTURA", LONG_CONCEPT) in [(r["cuenta"], r["tipo"], r["concepto"]) for r in rows]
+    assert all(r["valor_fecha"] for r in rows)
+    tsv = invoke("movements", *SPAN, "-f", "tsv").stdout
+    assert "\tvalor_fecha\t" in tsv and f"\tAPERTURA\tME\t{LONG_CONCEPT}\t" in tsv
+    [first, _] = json.loads(invoke("movements", *SPAN, "-f", "json").stdout)
+    assert (first["cuenta"], first["valor_fecha"], first["tipo"]) == (
+        "Cartera Metal",
+        "2026-10-12",
+        "TRANSFERENCIA SEPA",
+    )

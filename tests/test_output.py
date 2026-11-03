@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from datetime import date
 from decimal import Decimal
@@ -123,19 +124,29 @@ def test_narrow_table_never_cuts_dates_or_amounts(
     out = _table(monkeypatch, capsys, "60")
     for value in ("2026-10-11", "2026-10-12", "-1.234,50 €", "98.765,43 €"):
         assert value in out
-    assert "…" not in out
-    # Headers stay whole and the concept wraps instead of being truncated.
-    words = " ".join(out.replace("│", " ").replace("┃", " ").split())
-    assert all(word in words for word in ("concepto", "cuenta", "largo", "que", "cabe"))
+    # Dates and amounts alone do not fit 60 (#21): the text keeps TEXT_MIN_WIDTH, by words (#55).
+    _assert_whole_words(out, [*map(str, MOVEMENT.values()), *MOVEMENT, "Movimientos -1.234,50 € 98.765,43 €"])
+    assert all(word in _tokens(out) for word in ("concepto", "cuenta", "SEPA", "largo", "que", "cabe"))
 
 
 def test_table_keeps_cells_whole_even_below_their_width(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     out = _table(monkeypatch, capsys, "30")
-    assert "2026-10-11" in out and "-1.234,50 €" in out and "…" not in out
+    assert "2026-10-11" in out and "-1.234,50 €" in out
     borders = [line for line in out.splitlines() if line[:1] in "┏┃┡│└"]
     assert all(line[-1] in "┓┃┩│┘" for line in borders)  # wider than the terminal, but not cropped
+
+
+def _tokens(out: str) -> list[str]:
+    return re.sub(r"[─-╿]+", " ", out).split()
+
+
+def _assert_whole_words(out: str, values: list[str]) -> None:
+    """Every token is a whole word of `values` or the start of one ending in "…", never half a word."""
+    words = set(" ".join(values).split())
+    for token in _tokens(out):
+        assert token in words or (token.endswith("…") and any(w.startswith(token[:-1]) for w in words)), token
 
 
 def test_column_widths_share_what_is_left_among_text_columns() -> None:
@@ -144,7 +155,34 @@ def test_column_widths_share_what_is_left_among_text_columns() -> None:
     # chrome 13 + fixed 10 + 7 -> 30 left: "tipo" keeps its 4, the concept takes the other 26.
     assert column_widths(columns, cells, 60) == [10, 4, 26, 7]
     assert column_widths(columns, cells, 1000) == [10, 4, 50, 7]
+    # Not even the date and the amount fit: text at TEXT_MIN_WIDTH (or less, its content) (#21).
     assert column_widths(columns, cells, 20) == [10, 4, 8, 7]
+
+
+def test_column_widths_long_text_gives_way_first_then_labels() -> None:
+    columns = ["fecha", "cuenta", "tipo", "concepto", "importe"]
+    cells = [["2026-10-11", "Cartera Metal", "APERTURA", "Recibo domiciliado de la comunidad", "-1,00 €"]]
+    # chrome 16 + fixed 17: the text gets the rest, never more.
+    assert column_widths(columns, cells, 1000) == [10, 13, 8, 34, 7]
+    assert column_widths(columns, cells, 80) == [10, 13, 8, 26, 7]  # only the concept shrinks
+    assert column_widths(columns, cells, 60) == [10, 11, 8, 8, 7]  # concept at its minimum, then "cuenta"
+    # Labels at TEXT_MIN_WIDTH, then headers, then whatever is left: still exactly 50.
+    assert column_widths(columns, cells, 50) == [10, 6, 4, 7, 7]
+    assert column_widths(columns, cells, 30) == [10, 6, 6, 8, 7]  # not even fixed columns fit: #21
+
+
+@pytest.mark.parametrize("columns", [40, 20])
+def test_any_table_fits_and_wraps_by_words(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], columns: int
+) -> None:
+    monkeypatch.setenv("COLUMNS", str(columns))
+    row = {"isin": "IE0000000001", "estado": "EN CURSO", "nombre": "Fondo Indexado Supercalifragilístico Global"}
+    render([row], OutputFormat.table)
+    out = capsys.readouterr().out
+    assert max(map(len, out.splitlines())) <= columns
+    _assert_whole_words(out, [*row.values(), *row])
+    if columns == 40:  # the name gives way and the labels stay whole
+        assert {"IE0000000001", "EN", "CURSO", "Fondo", "Global"} <= set(_tokens(out))
 
 
 def test_wide_table_one_line_per_row(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

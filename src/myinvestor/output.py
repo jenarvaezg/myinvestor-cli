@@ -6,7 +6,7 @@ import csv
 import os
 import re
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
@@ -53,7 +53,15 @@ MAX_QUANTITY_DECIMALS = 6
 CURRENCY_COLUMN = "moneda"
 CENTS = Decimal("0.01")
 
-# Text columns may wrap down to this width (or their header's); dates and numbers never wrap nor shrink.
+# Long free text: these columns give up width first. Every other text column is a short label
+# (account alias, type, status, ISIN, ref…), which only gives up width after them. Text wraps at
+# spaces and never in the middle of a word: a word that does not fit ends in "…".
+FLEX_COLUMNS = frozenset(
+    {"concepto", "descripcion", "detalle", "titulo", "nombre", "name", "producto", "fondo", "gestora"}
+    | {"categoria", "beneficiario", "contraparte", "origen", "destino", "regla"}
+    | {"message", "mensaje", "error", "last_relogin_error"}
+)
+# Text shrinks to this width (or its header's) before cutting headers; dates and numbers never shrink.
 TEXT_MIN_WIDTH = 6
 # "No limit" for --wide and non-TTY output: tables only take the width their content needs.
 UNLIMITED_WIDTH = 10_000
@@ -175,26 +183,104 @@ def _is_fixed(column: str) -> bool:
     return column in NUMERIC_COLUMNS or column in DATE_COLUMNS
 
 
-def column_widths(columns: list[str], cells: list[list[str]], max_width: int) -> list[int]:
-    """Content width of each column so the table fits `max_width` when it can.
+def _word_width(text: str) -> int:
+    return max((cell_len(word) for word in text.split()), default=0)
 
-    Fixed columns get their full width. Text columns share what is left: narrow ones keep their
-    natural width and the widest wrap, never below TEXT_MIN_WIDTH (or their header's width).
-    """
-    naturals = [_text_width(name) for name in columns]
+
+def _soft_floor(column: str, longest_word: int) -> int:
+    return max(TEXT_MIN_WIDTH, cell_len(column))
+
+
+def _word_floor(column: str, longest_word: int) -> int:
+    return max(_soft_floor(column, longest_word), longest_word)
+
+
+def _header_floor(column: str, longest_word: int) -> int:
+    return cell_len(column)
+
+
+def _last_floor(column: str, longest_word: int) -> int:
+    return 1
+
+
+_LONG_TEXT, _LABELS = frozenset({True}), frozenset({False})
+# Who gives up width, in order, and down to what. Long text to TEXT_MIN_WIDTH; labels first to their
+# longest word (they only wrap at spaces), then to TEXT_MIN_WIDTH (a word that does not fit ends in
+# "…"); then headers start being cut, long text first; last, any text column down to one character.
+_SHRINK_STAGES = (
+    (_LONG_TEXT, _soft_floor),
+    (_LABELS, _word_floor),
+    (_LABELS, _soft_floor),
+    (_LONG_TEXT, _header_floor),
+    (_LABELS, _header_floor),
+    (_LONG_TEXT | _LABELS, _last_floor),
+)
+
+
+def _natural_widths(
+    columns: list[str], cells: list[list[str]], measure: Callable[[str], int] = _text_width
+) -> list[int]:
+    """Widest line (or, with `measure=_word_width`, widest word) of each column, header included."""
+    widths = [measure(name) for name in columns]
     for line in cells:
-        naturals = [max(width, _text_width(text)) for width, text in zip(naturals, line, strict=True)]
-    widths = [
-        natural if _is_fixed(name) else min(natural, max(TEXT_MIN_WIDTH, cell_len(name)))
-        for name, natural in zip(columns, naturals, strict=True)
-    ]
-    text = sorted((i for i, name in enumerate(columns) if not _is_fixed(name)), key=lambda i: naturals[i])
-    remaining = max_width - _table_chrome(len(columns)) - sum(widths)
-    for position, i in enumerate(text):
-        grow = max(0, min(naturals[i] - widths[i], remaining // (len(text) - position)))
-        widths[i] += grow
-        remaining -= grow
+        widths = [max(width, measure(text)) for width, text in zip(widths, line, strict=True)]
     return widths
+
+
+def _shrink(widths: list[int], floors: dict[int, int], excess: int) -> tuple[list[int], int]:
+    """Take up to `excess` characters from the widest of the `floors` columns, one at a time."""
+    widths = list(widths)
+    while excess > 0:
+        above = [i for i, floor in floors.items() if widths[i] > floor]
+        if not above:
+            break
+        widest = max(above, key=lambda i: widths[i])
+        widths[widest] -= 1
+        excess -= 1
+    return widths, excess
+
+
+def column_widths(columns: list[str], cells: list[list[str]], max_width: int) -> list[int]:
+    """Content width of each column so the table never exceeds `max_width` when it can.
+
+    Every column starts at its natural width and text columns give it up in `_SHRINK_STAGES` order,
+    widest first within each stage. Fixed columns (dates, numbers) never shrink: when even they do
+    not fit, the text keeps TEXT_MIN_WIDTH (or its header) and the table overflows (#21).
+    """
+    naturals = _natural_widths(columns, cells)
+    words = _natural_widths(columns, cells, _word_width)
+    text = [i for i, name in enumerate(columns) if not _is_fixed(name)]
+    fixed = sum(width for i, width in enumerate(naturals) if i not in text)
+    available = max_width - _table_chrome(len(columns)) - fixed
+    if available < len(text):
+        return [min(width, _soft_floor(columns[i], 0)) if i in text else width for i, width in enumerate(naturals)]
+    widths, excess = naturals, sum(naturals[i] for i in text) - available
+    for kinds, floor in _SHRINK_STAGES:
+        group = {
+            i: min(naturals[i], floor(columns[i], words[i])) for i in text if (columns[i] in FLEX_COLUMNS) in kinds
+        }
+        widths, excess = _shrink(widths, group, excess)
+    return widths
+
+
+def _console() -> Console:
+    return Console(
+        width=table_width(wide=_settings.wide, columns=os.environ.get("COLUMNS"), is_tty=sys.stdout.isatty())
+    )
+
+
+def _cells(rows: Sequence[dict[str, Any]], columns: list[str]) -> list[list[str]]:
+    """Formatted cells; money and prices in the row's `moneda` when it has one."""
+    return [[format_cell(c, row.get(c), row.get(CURRENCY_COLUMN)) for c in columns] for row in rows]
+
+
+def table_fits(rows: Sequence[dict[str, Any]]) -> bool:
+    """Whether `rows` fit the table width without wrapping nor shrinking any column."""
+    if not rows:
+        return True
+    columns = list(rows[0].keys())
+    cells = _cells(rows, columns)
+    return sum(_natural_widths(columns, cells)) + _table_chrome(len(columns)) <= _console().width
 
 
 def _table_chrome(count: int) -> int:
@@ -203,14 +289,12 @@ def _table_chrome(count: int) -> int:
 
 
 def _print_table(rows: Sequence[dict[str, Any]], columns: list[str], title: str | None) -> None:
-    cells = [[format_cell(c, row.get(c), row.get(CURRENCY_COLUMN)) for c in columns] for row in rows]
-    console = Console(
-        width=table_width(wide=_settings.wide, columns=os.environ.get("COLUMNS"), is_tty=sys.stdout.isatty())
-    )
+    cells = _cells(rows, columns)
+    console = _console()
     widths = column_widths(columns, cells, console.width)
     table = Table(
         *(
-            Column(name, justify="right" if name in NUMERIC_COLUMNS else "left", width=width, overflow="fold")
+            Column(name, justify="right" if name in NUMERIC_COLUMNS else "left", width=width, overflow="ellipsis")
             for name, width in zip(columns, widths, strict=True)
         ),
         title=title,

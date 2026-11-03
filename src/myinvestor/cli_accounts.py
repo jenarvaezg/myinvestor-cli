@@ -36,7 +36,7 @@ from myinvestor.models import (
     SecuritiesAccount,
     stable_ids,
 )
-from myinvestor.output import OutputFormat, normalize_row, print_json, render
+from myinvestor.output import OutputFormat, normalize_row, print_json, render, table_fits
 from myinvestor.portfolios import is_portfolio, own_cash, portfolio_title
 from myinvestor.psd2 import Span, free_start, split_range
 from myinvestor.sent_transfers import with_beneficiaries
@@ -420,8 +420,16 @@ def _movement_order(row: dict[str, Any]) -> tuple[str, str, str]:
 def _render_movements(rows: list[dict[str, Any]], title: str, *, oldest_first: bool, fmt: OutputFormat) -> None:
     rows = sorted(rows, key=_movement_order, reverse=not oldest_first)
     if fmt is OutputFormat.table:
-        rows = [{c: r[c] for c in MOVEMENT_TABLE_COLUMNS} for r in rows]
+        rows = _movement_table_rows(rows)
     render(rows, fmt, title=title)
+
+
+def _movement_table_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Table columns; `valor_fecha` goes when it repeats `fecha` in every row and the table does not fit."""
+    table = [{c: r[c] for c in MOVEMENT_TABLE_COLUMNS} for r in rows]
+    if all(r["valor_fecha"] == r["fecha"] for r in table) and not table_fits(table):
+        return [{c: v for c, v in r.items() if c != "valor_fecha"} for r in table]
+    return table
 
 
 def _since_range(since_date: str, date_to: str | None) -> tuple[date, date]:
