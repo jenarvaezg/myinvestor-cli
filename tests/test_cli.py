@@ -4,6 +4,7 @@ import csv
 import io
 import json
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -73,13 +74,74 @@ def test_position_json(mock_api: respx.MockRouter, store: MemorySessionStore) ->
 
     result = invoke("position", "-f", "json")
 
-    rows = json.loads(result.stdout)
+    rows = json.loads(result.stdout, parse_float=Decimal)
     assert [(r["producto"], r["valor"]) for r in rows] == [
-        ("efectivo", "1000.3"),
-        ("efectivo", "1000.3"),
-        ("valores", "1100.55"),
-        ("pensiones", "2000.0"),
+        ("efectivo", Decimal("1000.30")),
+        ("efectivo", Decimal("1000.30")),
+        ("valores", Decimal("1100.55")),
+        ("pensiones", Decimal("2000.00")),
     ]
+    assert '"valor": 1000.30' in result.stdout
+    assert all(r["invertido"] is None or isinstance(r["invertido"], Decimal) for r in rows)
+
+
+def json_rows(*args: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = json.loads(invoke(*args, "-f", "json").stdout, parse_float=Decimal)
+    return rows
+
+
+def test_accounts_json_amounts_are_numbers(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account(1)]))
+    [row] = json_rows("accounts")
+    amounts = (row["disponible"], row["retenido"], row["saldo"])
+    assert amounts == (Decimal("1000.10"), Decimal("0.20"), Decimal("1000.30"))
+
+
+def test_movements_json_amounts_are_numbers(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account(1)]))
+    mock_api.get(f"{API}/account/api/v3/account/{CASH_UUID}/flows").respond(
+        200, json=ok({"flowList": [flow(1, -50.0, totalBalance=0.0)]})
+    )
+    [row] = json_rows("movements", "--from", "2026-10-01", "--to", "2026-10-31")
+    assert (row["importe"], row["saldo"]) == (Decimal("-50.00"), Decimal("0.00"))
+    assert str(row["importe"]) == "-50.00"
+
+
+def test_holdings_json_keeps_unit_precision(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_portfolio(mock_api)
+    [row] = json_rows("holdings", "--kind", "fondos")
+    assert row["participaciones"] == Decimal("12.345678") and row["vl"] == Decimal("89.15")
+    amounts = (row["valor"], row["invertido"], row["ganancia"])
+    assert amounts == (Decimal("1100.55"), Decimal("1000.00"), Decimal("100.55"))
+    assert row["rentab"] == Decimal("10.06")
+
+
+def test_orders_json_amounts_are_numbers(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_api.get(f"{CPERF}/v2/securities-accounts/self-basic").respond(200, json=ok([{"accountId": "201"}]))
+    mock_api.get(f"{CPERF}/v3/securities-accounts/201/orders").respond(200, json=ok([order("a", "2026-10-01")]))
+    [row] = json_rows("orders")
+    assert (row["importe"], row["participaciones"]) == (Decimal("150.00"), Decimal("1.5"))
+
+
+@pytest.mark.parametrize("wide", [["--wide"], []])
+def test_wide_option_and_env(
+    mock_api: respx.MockRouter, store: MemorySessionStore, monkeypatch: pytest.MonkeyPatch, wide: list[str]
+) -> None:
+    long_concept = "Concepto larguísimo " * 6
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account(1)]))
+    mock_api.get(f"{API}/account/api/v3/account/{CASH_UUID}/flows").respond(
+        200, json=ok({"flowList": [flow(1, -12.5, concept=long_concept.strip())]})
+    )
+    monkeypatch.setenv("COLUMNS", "60")
+    if not wide:
+        monkeypatch.setenv("MYINVESTOR_WIDE", "1")
+
+    result = invoke(*wide, "movements", "--from", "2026-10-01", "--to", "2026-10-31")
+
+    assert long_concept.strip() in result.stdout
+    monkeypatch.delenv("MYINVESTOR_WIDE", raising=False)
+    narrow = invoke("movements", "--from", "2026-10-01", "--to", "2026-10-31").stdout
+    assert long_concept.strip() not in narrow and "2026-10-11" in narrow
 
 
 def test_position_table_has_total(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
@@ -103,7 +165,7 @@ def test_movements_csv_for_one_account(mock_api: respx.MockRouter, store: Memory
     result = invoke("movements", "-a", "Cuenta 1", "--from", "2026-10-01", "--to", "2026-10-31", "-f", "csv")
 
     rows = list(csv.DictReader(io.StringIO(result.stdout)))
-    assert [(r["fecha"], r["importe"]) for r in rows] == [("2026-10-12", "100.0"), ("2026-10-11", "-12.5")]
+    assert [(r["fecha"], r["importe"]) for r in rows] == [("2026-10-12", "100.00"), ("2026-10-11", "-12.50")]
     assert route.calls.last.request.url.params["dateFrom"] == "2026-10-01"
 
 
@@ -232,7 +294,7 @@ def test_fund_summary_adds_price(mock_api: respx.MockRouter, store: MemorySessio
     data = json.loads(invoke("fund", "ie0000000001").stdout)
 
     assert data["managementEntity"] == "Gest"
-    assert data["lastPrice"]["price"] == "10.5"
+    assert data["lastPrice"]["price"] == 10.5 and data["ter"] == 0.1
 
 
 def test_not_logged_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
