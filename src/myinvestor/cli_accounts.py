@@ -193,9 +193,8 @@ def _position_rows(cash: list[CashAccount], securities: list[SecuritiesAccount],
 
 
 def _table_columns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The table keeps the columns it always had, plus `efectivo` when a portfolio has its own cash."""
-    shown = {"efectivo"} if any(r.get("efectivo") is not None for r in rows) else set()
-    return [{k: v for k, v in r.items() if k not in PORTFOLIO_KEYS or k in shown} for r in rows]
+    """The table keeps the columns it always had: a portfolio's own cash is already in its `valor`."""
+    return [{k: v for k, v in r.items() if k not in PORTFOLIO_KEYS} for r in rows]
 
 
 def _pension_position(pen: PensionAccount, plans: list[PensionPlanPosition]) -> dict[str, Any]:

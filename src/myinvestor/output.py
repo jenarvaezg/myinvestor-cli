@@ -195,25 +195,14 @@ def _word_floor(column: str, longest_word: int) -> int:
     return max(_soft_floor(column, longest_word), longest_word)
 
 
-def _header_floor(column: str, longest_word: int) -> int:
-    return cell_len(column)
-
-
-def _last_floor(column: str, longest_word: int) -> int:
-    return 1
-
-
 _LONG_TEXT, _LABELS = frozenset({True}), frozenset({False})
-# Who gives up width, in order, and down to what. Long text to TEXT_MIN_WIDTH; labels first to their
-# longest word (they only wrap at spaces), then to TEXT_MIN_WIDTH (a word that does not fit ends in
-# "…"); then headers start being cut, long text first; last, any text column down to one character.
+# Who gives up width, in order, and down to what: long text to TEXT_MIN_WIDTH (or its header); labels
+# first to their longest word (they only wrap at spaces), then to TEXT_MIN_WIDTH (a word that does not
+# fit ends in "…"). Never narrower: a table of "…" says nothing, so rather overflow the terminal (#21).
 _SHRINK_STAGES = (
     (_LONG_TEXT, _soft_floor),
     (_LABELS, _word_floor),
     (_LABELS, _soft_floor),
-    (_LONG_TEXT, _header_floor),
-    (_LABELS, _header_floor),
-    (_LONG_TEXT | _LABELS, _last_floor),
 )
 
 

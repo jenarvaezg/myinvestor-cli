@@ -341,13 +341,14 @@ def assert_whole_words(lines: list[str]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("columns", "value_date", "fits"),
+    ("columns", "value_date", "width"),
     [
-        (80, "2026-10-11", True),  # `valor_fecha` repeats `fecha`: it goes, the text gets more room
-        (80, "2026-10-13", True),  # it stays: 8 columns, the text squeezed into what is left
-        (60, "2026-10-11", True),
-        # fecha + valor_fecha + 5-digit amounts + borders = 69 > 60: not even they fit (#21)
-        (60, "2026-10-13", False),
+        # With 5-digit amounts no case fits without text columns below TEXT_MIN_WIDTH: rather than
+        # columns of "…", the table overflows by what those minimums need, and stays readable.
+        (80, "2026-10-11", 81),  # `valor_fecha` repeats `fecha`: it goes
+        (80, "2026-10-13", 95),  # it stays: 8 columns
+        (60, "2026-10-11", 81),
+        (60, "2026-10-13", 95),
     ],
 )
 def test_movements_table_fits_columns_and_never_cuts_a_word(
@@ -356,13 +357,13 @@ def test_movements_table_fits_columns_and_never_cuts_a_word(
     monkeypatch: pytest.MonkeyPatch,
     columns: int,
     value_date: str,
-    fits: bool,
+    width: int,
 ) -> None:
     mock_metal_account(mock_api, monkeypatch, str(columns), value_date=value_date)
 
     lines = table_lines("-f", "table")
 
-    assert (max(map(len, lines)) <= columns) is fits, "\n".join(lines)
+    assert max(map(len, lines)) == width, "\n".join(lines)
     assert_whole_words(lines)
     tokens = set(table_tokens(lines))
     assert {"2026-10-11", "2026-10-12", "-12.345,67", "54.321,09", "23.456,78", "77.777,87"} <= tokens

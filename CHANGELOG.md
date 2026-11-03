@@ -54,6 +54,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 
 ### Corregido
 
+- `position`: la tabla ya no añade la columna `efectivo` con una cartera contratada (su saldo ya va en `valor`), y vuelve a caber en 80 columnas; JSON/CSV/TSV no cambian.
 - Una respuesta de MyInvestor con un formato inesperado ya no acaba en un traceback: sale un error claro con el modelo y las claves afectadas (sin sus valores), código 1 y, con `-f json`, `"error": "unexpected_response"` en stderr.
 - `--approval-timeout` también vale en el login y el re-login; `logout` borra la pausa del re-login (#46).
 - `movements --id -f json` redondea los importes a céntimos, como la lista (antes, `-50.0` en vez de `-50.00`) (#30).
@@ -61,7 +62,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - Las retenciones (`holds`, `pending.holds` de `snapshot`) salen siempre en negativo, como un cargo en `movements`, aunque una respuesta las traiga en positivo. Se ha corregido el ejemplo de docs/snapshot.md, que ahora se valida en los tests contra el contrato (#57).
 - README: en las transferencias recibidas de otros bancos la API no da el ordenante; `origen`, `destino` y `contraparte` van a `null` (#56).
 - Los tests ya no dependen de `FORCE_COLOR`, `NO_COLOR`, `TERM`, `COLUMNS` ni `CI` del entorno, y no pueden leer el llavero ni el fichero de sesión reales: `doctor` también usa el almacén del test (#53, #54).
-- Las tablas ya no parten palabras por la mitad (`Carter`/`a Metal`, `APERTU`/`RA` en 80 columnas) y nunca pasan de `COLUMNS` salvo que ni las fechas y los importes quepan: primero ceden ancho los textos largos (concepto, nombre, detalle…) y después las etiquetas (cuenta, tipo, estado, ISIN, ref…), que saltan de línea en los espacios y, si una palabra no cabe, la acortan con `…`. En `movements -f table`, `valor_fecha` se oculta cuando coincide con `fecha` en todas las filas y la tabla no cabe (#55).
+- Las tablas ya no parten palabras por la mitad (`Carter`/`a Metal`, `APERTU`/`RA` en 80 columnas) y se ajustan a `COLUMNS` sin bajar ninguna columna de texto de 6 caracteres (si ni así caben, se salen del ancho, legibles): primero ceden ancho los textos largos (concepto, nombre, detalle…) y después las etiquetas (cuenta, tipo, estado, ISIN, ref…), que saltan de línea en los espacios y, si una palabra no cabe, la acortan con `…`. En `movements -f table`, `valor_fecha` se oculta cuando coincide con `fecha` en todas las filas y la tabla no cabe (#55).
 
 ## [0.1.0]
 

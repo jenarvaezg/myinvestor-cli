@@ -242,14 +242,16 @@ def test_position_with_an_empty_portfolio(mock_api: respx.MockRouter, store: Mem
     assert portfolio["fecha_valor"] == date.today().isoformat()  # only live cash, no NAV yet
 
 
-def test_position_table_shows_cash_column_only_with_a_portfolio(
+def test_position_table_keeps_its_columns_with_a_portfolio(
     mock_api: respx.MockRouter, store: MemorySessionStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The portfolio's cash is already in its `valor`: no `efectivo` column that only that row would use."""
     monkeypatch.setenv("COLUMNS", "200")
     mock_api_with(mock_api, metal(held(FUND_RV, 100.0)))
     out = invoke("position").stdout
-    assert "Cartera METAL (muy agresiva)" in out and "efectivo_id" not in out and "perfil" not in out
-    assert "25,00 €" in out
+    assert "Cartera METAL (muy agresiva)" in out
+    header = next(line for line in out.splitlines() if "producto" in line)
+    assert "efectivo" not in header and "cartera" not in header and "perfil" not in header
 
 
 def test_position_table_of_plain_accounts_has_no_new_columns(

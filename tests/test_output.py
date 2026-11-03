@@ -166,8 +166,8 @@ def test_column_widths_long_text_gives_way_first_then_labels() -> None:
     assert column_widths(columns, cells, 1000) == [10, 13, 8, 34, 7]
     assert column_widths(columns, cells, 80) == [10, 13, 8, 26, 7]  # only the concept shrinks
     assert column_widths(columns, cells, 60) == [10, 11, 8, 8, 7]  # concept at its minimum, then "cuenta"
-    # Labels at TEXT_MIN_WIDTH, then headers, then whatever is left: still exactly 50.
-    assert column_widths(columns, cells, 50) == [10, 6, 4, 7, 7]
+    # Labels down to TEXT_MIN_WIDTH, never below it (nor below a header): 52 > 50, rather than columns of "…".
+    assert column_widths(columns, cells, 50) == [10, 6, 6, 8, 7]
     assert column_widths(columns, cells, 30) == [10, 6, 6, 8, 7]  # not even fixed columns fit: #21
 
 
@@ -179,7 +179,8 @@ def test_any_table_fits_and_wraps_by_words(
     row = {"isin": "IE0000000001", "estado": "EN CURSO", "nombre": "Fondo Indexado Supercalifragilístico Global"}
     render([row], OutputFormat.table)
     out = capsys.readouterr().out
-    assert max(map(len, out.splitlines())) <= columns
+    # At 20, three text columns at TEXT_MIN_WIDTH plus borders take 28: the table overflows, still readable.
+    assert max(map(len, out.splitlines())) == (columns if columns == 40 else 28)
     _assert_whole_words(out, [*row.values(), *row])
     if columns == 40:  # the name gives way and the labels stay whole
         assert {"IE0000000001", "EN", "CURSO", "Fondo", "Global"} <= set(_tokens(out))
