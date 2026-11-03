@@ -297,7 +297,7 @@ Salida: lista de objetos.
 
 ### `pension-plans` — `myinvestor.pension-plans/1`
 
-El catálogo de planes; las mismas claves con filtros, `--featured` y `--mine`.
+El catálogo de planes; las mismas claves con filtros y con `--mine`.
 
 Salida: lista de objetos.
 

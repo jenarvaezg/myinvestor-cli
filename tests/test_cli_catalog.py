@@ -6,7 +6,6 @@ import json
 from decimal import Decimal
 from typing import Any
 
-import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
@@ -276,7 +275,7 @@ def test_pension_plans_lists_the_catalog(mock_api: respx.MockRouter) -> None:
         "5a": None,
     }
     assert set(empty.values()) == {None}
-    assert dict(route.calls.last.request.url.params) == {"page": "1", "limit": "20", "sort": "ter,asc"}
+    assert dict(route.calls.last.request.url.params) == {"page": "0", "limit": "20", "sort": "ter,asc"}
 
 
 @pytest.mark.usefixtures("store")
@@ -306,7 +305,7 @@ def test_pension_plans_filters_become_query_parameters(mock_api: respx.MockRoute
     )
 
     assert dict(route.calls.last.request.url.params) == {
-        "page": "2",
+        "page": "1",
         "limit": "5",
         "sort": "name,asc",
         "mainInputFilter": "indexado",
@@ -337,123 +336,67 @@ def test_pension_plans_table_has_the_total(mock_api: respx.MockRouter) -> None:
     assert "1 en total" in result.stdout and "N0001" in result.stdout
 
 
-def numbered_plans(count: int, offset: int = 0) -> list[dict[str, Any]]:
-    return [{**PLAN_ROW, "dgsCode": f"N{offset + i:04d}"} for i in range(count)]
-
-
-def paged_plans(mock_api: respx.MockRouter, total: int) -> respx.Route:
-    """A catalog of `total` plans that, like the API, never returns more than 50 rows a page."""
-
-    def page(request: httpx.Request) -> httpx.Response:
-        number, limit = int(request.url.params["page"]), int(request.url.params["limit"])
-        assert limit <= 50
-        start = (number - 1) * limit
-        rows = numbered_plans(max(min(limit, total - start), 0), start)
-        return httpx.Response(200, json=ok(rows, pagination={"totalElements": total, "last": start + limit >= total}))
-
-    return mock_api.get(f"{CPERF}/v2/pension-plans").mock(side_effect=page)
-
-
 @pytest.mark.usefixtures("store")
-def test_pension_plans_more_than_50_are_several_requests_of_50(mock_api: respx.MockRouter) -> None:
-    route = paged_plans(mock_api, 200)
+def test_pension_plans_pages_from_zero_like_the_web(mock_api: respx.MockRouter) -> None:
+    """`--page 1` is the API's page 0: page 1 is the second one (seen with the API, #68)."""
+    route = plans(mock_api)
 
-    rows = json_rows("pension-plans", "-n", "120")
+    json_rows("pension-plans", "-n", "120")
+    json_rows("pension-plans", "Indexado", "--page", "3")
 
-    assert [r["dgs"] for r in rows] == [f"N{i:04d}" for i in range(120)]
-    assert [(c.request.url.params["page"], c.request.url.params["limit"]) for c in route.calls] == [
-        ("1", "50"),
-        ("2", "50"),
-        ("3", "50"),
-    ]
-
-
-@pytest.mark.usefixtures("store")
-def test_pension_plans_page_of_more_than_50_starts_where_it_should(mock_api: respx.MockRouter) -> None:
-    route = paged_plans(mock_api, 55)
-
-    rows = json_rows("pension-plans", "-n", "40", "--page", "2")
-    big = json_rows("pension-plans", "-n", "100")
-
-    assert [r["dgs"] for r in rows] == [f"N{i:04d}" for i in range(40, 55)]
-    assert [r["dgs"] for r in big] == [f"N{i:04d}" for i in range(55)]
-    assert route.call_count == 3  # -n 40 is one request; -n 100 stops at the last page
+    first, third = (dict(c.request.url.params) for c in route.calls)
+    assert first == {"page": "0", "limit": "120", "sort": "ter,asc"}
+    assert third == {"page": "2", "limit": "20", "sort": "ter,asc", "mainInputFilter": "Indexado"}
 
 
-@pytest.mark.usefixtures("store")
-def test_funds_more_than_50_pages_from_zero(mock_api: respx.MockRouter) -> None:
-    route = mock_api.get(f"{CPERF}/v2/funds").respond(
-        200, json=ok([FUND_ROW] * 50, pagination={"totalElements": 500, "last": False})
-    )
-
-    rows = json_rows("funds", "-n", "60", "--page", "1")
-
-    assert len(rows) == 60
-    assert [c.request.url.params["page"] for c in route.calls] == ["1", "2"]  # rows 60-119
-
-
-FEATURED_SHEET = {
+PLAN_SHEET = {
     "dgsCode": "N5396",
     "name": "MyInvestor Indexado Global, PP",
-    "managementEntity": "Gestora MyInvestor",
+    "managementEntity": "MyInvestor",
     "category": "RV Global PP",
-    "commissionList": [
-        {"name": "Comisión de gestión", "percentage": 0.25},
-        {"name": "Comisión de Depósito", "percentage": 0.05},
+    "ter": None,
+    "commissionList": [  # as the API sends it
+        {"name": "Distribución (cobrada por la gestora)", "percentage": "0.0"},
+        {"name": "Gestión", "percentage": "0.3"},
+        {"name": "Depósito", "percentage": "0.08"},
+        {"name": "Costes operativos/transaccionales", "percentage": "0.0"},
+        {"name": "Coste total (TER)", "percentage": "0.38"},
     ],
-    "annualizedProfitability": {"ytd": 9.0, "oneYear": 12.0, "threeYear": None, "fiveYear": None},
+    "annualizedProfitability": {"ytd": 15.67, "oneYear": 15.44, "threeYear": 19.68, "fiveYear": 10.04},
 }
 
 
-def sheets(mock_api: respx.MockRouter) -> respx.Route:
-    def sheet(request: httpx.Request) -> httpx.Response:
-        code = request.url.path.rsplit("/", 1)[-1]
-        name = FEATURED_SHEET["name"] if code == "N5396" else f"Plan {code}"
-        return httpx.Response(200, json=ok({**FEATURED_SHEET, "dgsCode": code, "name": name}))
-
-    return mock_api.get(url__regex=rf"{CPERF}/v2/pension-plans/N\d+$").mock(side_effect=sheet)
-
-
 @pytest.mark.usefixtures("store")
-def test_pension_plans_featured_reads_each_sheet_with_its_fees(mock_api: respx.MockRouter) -> None:
-    route = sheets(mock_api)
-
-    [row] = json_rows("pension-plans", "--featured", "indexado GLOBAL")
-
-    assert row == {
-        "dgs": "N5396",
-        "nombre": "MyInvestor Indexado Global, PP",
-        "gestora": "Gestora MyInvestor",
-        "categoria": "RV Global PP",
-        "ter": None,
-        "com_gestion": Decimal("0.25"),
-        "com_deposito": Decimal("0.05"),
-        "ytd": Decimal("9.0"),
-        "1a": Decimal("12.0"),
-        "3a": None,
-        "5a": None,
-    }
-    requested = [c.request.url.path.rsplit("/", 1)[-1] for c in route.calls]
-    assert {"N5394", "N5396"} <= set(requested) and len(requested) == len(set(requested)) == 7
-
-
-@pytest.mark.usefixtures("store")
-def test_pension_plans_mine_reads_the_plans_held(mock_api: respx.MockRouter) -> None:
+def test_pension_plans_mine_reads_each_sheet_with_its_fees(mock_api: respx.MockRouter) -> None:
     mock_api.get(f"{CPERF}/v2/pension-accounts/self").respond(200, json=ok([{"accountId": "301"}]))
     mock_api.get(f"{CPERF}/v2/pension-accounts/301").respond(
         200, json=ok([{"dgsCode": "n5396"}, {"dgsCode": "N5394"}, {"dgsCode": "N5396"}])
     )
-    route = sheets(mock_api)
+    route = mock_api.get(url__regex=rf"{CPERF}/v2/pension-plans/N\d+$").respond(200, json=ok(PLAN_SHEET))
 
     rows = json_rows("pension-plans", "--mine")
+    [only] = json_rows("pension-plans", "--mine", "indexado GLOBAL", "-n", "1")
 
-    assert [r["dgs"] for r in rows] == ["N5396", "N5394"]
-    assert route.call_count == 2
+    assert [r["dgs"] for r in rows] == ["N5396", "N5396"]  # the mock answers the same sheet for both codes
+    assert [c.request.url.path.rsplit("/", 1)[-1] for c in route.calls][:2] == ["N5396", "N5394"]
+    assert only == {
+        "dgs": "N5396",
+        "nombre": "MyInvestor Indexado Global, PP",
+        "gestora": "MyInvestor",
+        "categoria": "RV Global PP",
+        "ter": Decimal("0.38"),
+        "com_gestion": Decimal("0.3"),
+        "com_deposito": Decimal("0.08"),
+        "ytd": Decimal("15.67"),
+        "1a": Decimal("15.44"),
+        "3a": Decimal("19.68"),
+        "5a": Decimal("10.04"),
+    }
 
 
 @pytest.mark.usefixtures("store")
-def test_pension_plans_featured_takes_no_searcher_filters(mock_api: respx.MockRouter) -> None:
-    with pytest.raises(InputError, match="--featured y --mine"):
-        invoke("pension-plans", "--featured", "--max-ter", "0.5")
+def test_pension_plans_mine_takes_no_searcher_filters(mock_api: respx.MockRouter) -> None:
+    with pytest.raises(InputError, match="--mine"):
+        invoke("pension-plans", "--mine", "--max-ter", "0.5")
 
     assert mock_api.calls.call_count == 0
