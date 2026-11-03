@@ -142,10 +142,12 @@ def test_quiet_silences_notices(mock_api: respx.MockRouter, store: MemorySession
     mock_api.get(CASH).respond(200, json=ok([cash_account()]))
     mock_api.get(url__regex=r".*/flows").respond(200, json=ok({"flowList": []}))
 
-    loud = runner.invoke(app, ["movements", "--days", "120", "-f", "table"], catch_exceptions=False)
-    quiet = runner.invoke(app, ["-q", "movements", "--days", "120", "-f", "table"], catch_exceptions=False)
+    loud = runner.invoke(app, ["movements", "--free-only", "--days", "120", "-f", "table"], catch_exceptions=False)
+    quiet = runner.invoke(
+        app, ["-q", "movements", "--free-only", "--days", "120", "-f", "table"], catch_exceptions=False
+    )
 
-    assert "Rango de más de" in loud.stderr and "Sin resultados" in loud.stderr
+    assert "Recortado a --from" in loud.stderr and "Sin resultados" in loud.stderr
     assert quiet.exit_code == 0 and quiet.stderr == ""
 
 
@@ -190,7 +192,7 @@ def test_stderr_has_no_markup_or_colors_without_a_terminal(
     mock_api.get(CASH).respond(200, json=ok([cash_account()]))
     mock_api.get(url__regex=r".*/flows").respond(200, json=ok({"flowList": []}))
 
-    result = runner.invoke(app, ["movements", "--days", "120"], catch_exceptions=False)
+    result = runner.invoke(app, ["movements", "--free-only", "--days", "120"], catch_exceptions=False)
 
-    assert "Rango de más de" in result.stderr
-    assert "\x1b[" not in result.stderr and "[dim]" not in result.stderr
+    assert "Recortado a --from" in result.stderr
+    assert "\x1b[" not in result.stderr and "[yellow]" not in result.stderr

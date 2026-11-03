@@ -157,6 +157,10 @@ class SignatureRequired(SignatureError):
         )
 
 
+class PartialResultError(SignatureError):
+    """Part of the requested data needs a second factor that was not given; the rest was already printed."""
+
+
 def envelope_status(body: object) -> tuple[str | None, str | None]:
     if not isinstance(body, dict):
         return None, None

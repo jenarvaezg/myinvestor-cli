@@ -45,6 +45,7 @@ class _GlobalOptions:
     path: Path | None = None
     approval_timeout: float = DEFAULT_APPROVAL_TIMEOUT
     approve: bool = False
+    no_signature: bool = False
     min_interval: float = 0.0
     retry_blocked: int = 0
 
@@ -77,6 +78,15 @@ def _global_options(
             envvar="MYINVESTOR_APPROVE",
             help="Esperar la aprobación en la app del móvil aunque no haya terminal interactiva "
             "(p. ej. desde un script). Sin esto, fuera de una terminal falla en vez de mandarte una notificación.",
+        ),
+    ] = False,
+    no_signature: Annotated[
+        bool,
+        typer.Option(
+            "--no-signature",
+            envvar="MYINVESTOR_NO_SIGNATURE",
+            help="No iniciar nunca un segundo factor (SMS/app), ni siquiera en una terminal o con --approve: "
+            "lo que lo pida falla con el código 13.",
         ),
     ] = False,
     wide: Annotated[
@@ -119,6 +129,7 @@ def _global_options(
     options.path = store_path
     options.approval_timeout = approval_timeout
     options.approve = approve
+    options.no_signature = no_signature
 
 
 def get_store() -> SessionStore:
@@ -162,6 +173,8 @@ class AppOnlySignatureUI(TerminalSignatureUI):
 
 def signature_ui() -> SignatureUI | None:
     """Ask in an interactive terminal; elsewhere only with `--approve`, so cron/CI never pings the phone."""
+    if options.no_signature:
+        return None
     if stdin_is_tty():
         return TerminalSignatureUI()
     return AppOnlySignatureUI() if options.approve else None

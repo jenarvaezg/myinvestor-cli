@@ -33,4 +33,6 @@ TOKEN_EXPIRY_SKEW = 30
 
 # Without a second factor the cash-account flows endpoint only serves recent movements;
 # older ranges answer 202 with a signature request (PSD2 strong customer authentication).
+# Calendar days including today: `dateFrom` >= today - 89 is served directly (observed); from ~90
+# days back it asks for a signature. The exact threshold is not verified (see `psd2`).
 FREE_FLOWS_DAYS = 90
