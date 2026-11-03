@@ -553,6 +553,26 @@ GAIN = (
     Field("resultado", A, True, "`taxResult`; en los totales, la suma de los reembolsos"),
 )
 
+FUND_TRANSFER = (
+    Field("fecha", D, True, "`transferDate`"),
+    Field("cuenta", S, note="id de la cuenta de valores o, con `--pension`, de pensiones"),
+    Field("origen", S, True, "`isinOrigin` o, con `--pension`, `dgsCodeOrigin`"),
+    Field("origen_nombre", S, True, "`fundNameOrigin` (solo con `--pension`; `null` en los fondos)"),
+    Field("destino", S, True, "`isinDestination` o, con `--pension`, `dgsCodeDestination`"),
+    Field("destino_nombre", S, True, "`pensionPlanNameDestination` (solo con `--pension`; `null` en los fondos)"),
+    Field("participaciones", N, True, "`shares`"),
+    Field("importe", A, True, "`amount`, en `moneda`"),
+    Field("moneda", S, True, "`currency`"),
+    Field("estado", S, True, "`status`, sin interpretar"),
+    Field("cancelable", B, note="`isCancelable` (sin él, `false`, como la web)"),
+    Field("ref", S, note="`reference`"),
+)
+
+FUND_TRANSFER_PENDING = (
+    Field("cuenta", S, note="id de la cuenta de valores"),
+    Field("pendientes", INT, note="`pendingTransfers`: traspasos de fondos en curso"),
+)
+
 RAW_NOTE = "Respuesta de MyInvestor tal cual (claves en camelCase de la API): fuera del contrato de claves."
 
 
@@ -646,6 +666,12 @@ CONTRACTS: tuple[Contract, ...] = (
         (_rows(*GAIN),),
         "Una fila por ejecución de un reembolso o traspaso de salida y, al final, `plusvalias`, `minusvalias` y "
         "`total` (solo reembolsos).",
+    ),
+    Contract(
+        "fund-transfers",
+        1,
+        (_rows(*FUND_TRANSFER), _rows(*FUND_TRANSFER_PENDING, label="--pending")),
+        "Las mismas claves con `--pension`. Con `--pending`, una fila por cuenta de valores con el contador.",
     ),
     Contract("status", 1, (Variant("", Shape.object, STATUS),), "Nunca incluye tokens ni la contraseña."),
     Contract("doctor", 1, (Variant("", Shape.object, DOCTOR),)),

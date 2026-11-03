@@ -38,12 +38,15 @@ from myinvestor.models import (
     FundLots,
     FundSheet,
     FundSummary,
+    FundTransfer,
     Hold,
     Order,
     OrderDetail,
+    PendingTransfers,
     PensionAccount,
     PensionPlanPosition,
     PensionPlanSheet,
+    PensionTransfer,
     PositionPoint,
     Remuneration,
     SecuritiesAccount,
@@ -406,6 +409,19 @@ class MyInvestorClient:
         path = f"{CPERF}/v2/securities-accounts/{seg(account_id)}/investment-summary/funds/{seg(isin)}/added-values"
         return FundLots.model_validate(self.get_data(path))
 
+    def fund_transfers(self, account_id: str, date_from: date, date_to: date) -> list[FundTransfer]:
+        """Fund transfers of a securities account (in, out and between funds) in a range of days.
+
+        Both days are required (without them, 400); the web asks for the last 60 days.
+        """
+        rows = self._list(f"{CPERF}/v2/securities-accounts/{seg(account_id)}/transfers", _days(date_from, date_to))
+        return [FundTransfer.model_validate(r) for r in rows]
+
+    def pending_fund_transfers(self, account_id: str) -> int:
+        """How many fund transfers of a securities account are still in progress."""
+        data = self.get_data(f"{CPERF}/v2/securities-accounts/{seg(account_id)}/transfers/pending")
+        return PendingTransfers.model_validate(data).pending_transfers
+
     # ---- pension plans -----------------------------------------------------
 
     def pension_accounts(self) -> list[PensionAccount]:
@@ -418,6 +434,11 @@ class MyInvestorClient:
     def pension_orders(self, account_id: str) -> list[Order]:
         rows = self._list(f"{CPERF}/v2/pension-accounts/{seg(account_id)}/orders", {"order": "DATE"})
         return sorted((Order.model_validate(r) for r in rows), key=lambda o: o.order_date, reverse=True)
+
+    def pension_transfers(self, account_id: str, date_from: date, date_to: date) -> list[PensionTransfer]:
+        """Pension-plan transfers of a pension account in a range of days (required, as `fund_transfers`)."""
+        rows = self._list(f"{CPERF}/v2/pension-accounts/{seg(account_id)}/transfers", _days(date_from, date_to))
+        return [PensionTransfer.model_validate(r) for r in rows]
 
     def pension_plan(self, dgs_code: str) -> dict[str, Any]:
         data = self.get_data(f"{CPERF}/v2/pension-plans/{seg(dgs_code)}")
@@ -487,6 +508,13 @@ class MyInvestorClient:
         data = self.get_data("/feed/api/feed/self")
         items = data.get("feed") if isinstance(data, dict) else None
         return [FeedItem.model_validate(i) for i in items or []]
+
+
+def _days(date_from: date, date_to: date) -> dict[str, str]:
+    """`initDate`/`endDate` of the transfer lists, `AAAA-MM-DD`."""
+    if date_from > date_to:
+        raise ValueError("date_from > date_to")
+    return {"initDate": date_from.isoformat(), "endDate": date_to.isoformat()}
 
 
 def ensure_session(session: Session | None, *, can_relogin: bool = False) -> Session:

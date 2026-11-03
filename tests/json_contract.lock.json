@@ -663,5 +663,25 @@
       "neto": "amount|null",
       "resultado": "amount|null"
     }
+  },
+  "myinvestor.fund-transfers/1": {
+    "por defecto": {
+      "fecha": "date|null",
+      "cuenta": "string",
+      "origen": "string|null",
+      "origen_nombre": "string|null",
+      "destino": "string|null",
+      "destino_nombre": "string|null",
+      "participaciones": "number|null",
+      "importe": "amount|null",
+      "moneda": "string|null",
+      "estado": "string|null",
+      "cancelable": "boolean",
+      "ref": "string"
+    },
+    "--pending": {
+      "cuenta": "string",
+      "pendientes": "integer"
+    }
   }
 }

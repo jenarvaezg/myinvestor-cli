@@ -46,6 +46,7 @@ from myinvestor.output import AMOUNT_COLUMNS
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
 from tests.conftest import API, CASH_UUID, CPERF, cash_account, flow, investment, ok, order, securities_account
+from tests.test_cli_fund_transfers import fund_transfer, pension_transfer
 from tests.test_cli_gains import (
     added_values,
     execution,
@@ -301,6 +302,18 @@ def order_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> N
     mock_api.get(f"{CPERF}/v2/securities-accounts/201/orders/R1").respond(200, json=ok(detail))
 
 
+def fund_transfers_api(mock_api: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`full_api` plus a fund transfer, a pension-plan transfer and the pending counter."""
+    full_api(mock_api, monkeypatch)
+    mock_api.get(f"{CPERF}/v2/securities-accounts/201/transfers").respond(
+        200, json=ok([fund_transfer("T1", TODAY.isoformat())])
+    )
+    mock_api.get(f"{CPERF}/v2/securities-accounts/201/transfers/pending").respond(200, json=ok({"pendingTransfers": 1}))
+    mock_api.get(f"{CPERF}/v2/pension-accounts/301/transfers").respond(
+        200, json=ok([pension_transfer("P1", TODAY.isoformat())])
+    )
+
+
 def lots_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> None:
     mock_holdings(mock_api)
     for isin in ("IE0000000001", "IE0000000002"):
@@ -387,6 +400,9 @@ CASES = (
         target={"Cartera": 100},
     ),
     Case("order", "", ("order", "R1", "-a", "201"), setup=order_api),
+    # `--pension` fills `origen_nombre`/`destino_nombre` (always `null` in fund transfers)
+    Case("fund-transfers", "", ("fund-transfers",), setup=fund_transfers_api, options=("--pension",)),
+    Case("fund-transfers", "--pending", ("fund-transfers", "--pending"), setup=fund_transfers_api),
     Case("lots", "", ("lots",), setup=lots_api),
     Case("gains", "", ("gains", "--year", "2025"), setup=gains_contract_api),
     Case(
