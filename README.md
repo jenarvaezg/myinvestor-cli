@@ -52,6 +52,7 @@ myinvestor orders [--all | --from 2025-01-01 --to …] [--status EXECUTED] [--pe
 myinvestor pensions                               # planes de pensiones
 myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year]
 myinvestor contributions [--all]                  # aportaciones periódicas
+myinvestor upcoming [--days 14] [--owner me|junior|other]   # lo que viene: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre
 myinvestor fund IE0032126645 [--full]             # ficha del fondo (o del plan: `fund N1234`)
 myinvestor funds "s&p 500" [--sort ter,asc] [-n 20] [--page 0]
 myinvestor feed [-n 20]                           # «Actividad» de la web
@@ -63,7 +64,7 @@ myinvestor raw /cperf-server/api/v2/cash-accounts/self [-p clave=valor]   # GET 
 Todas las órdenes de listado aceptan `-f table|json|csv|tsv`:
 
 - **`table`** (por defecto): importes en formato español (`-12,50 €`). Las fechas y los importes nunca se cortan ni se parten; los textos largos (conceptos, nombres) se parten en varias líneas para caber en la terminal. Si ni así cabe, la tabla se sale del ancho antes que recortar un dato. Se respeta `COLUMNS`, y si la salida no es una terminal (cron, una tubería, el `!` de Claude Code, un agente) la tabla ocupa lo que necesite en vez de limitarse a 80 columnas. Con `--wide` (o `MYINVESTOR_WIDE=1`) cada fila va en una sola línea: `myinvestor --wide movements | less -S`.
-- **`json`**: los importes son **números** JSON, no texto (`"importe": -12.50`), escritos con el valor exacto del `Decimal`, sin pasar por coma flotante. Importes y saldos (`importe`, `saldo`, `disponible`, `retenido`, `valor`, `invertido`, `ganancia`, `total` y las columnas de `income`) van redondeados a 2 decimales; participaciones, VL, coste medio y porcentajes conservan la precisión de la API. `raw` y `fund` también devuelven números. En Python, `json.loads(texto, parse_float=Decimal)` los recupera sin pérdida.
+- **`json`**: los importes son **números** JSON, no texto (`"importe": -12.50`), escritos con el valor exacto del `Decimal`, sin pasar por coma flotante. Importes y saldos (`importe`, `saldo`, `disponible`, `retenido`, `valor`, `invertido`, `ganancia`, `total`, las columnas de `income` y `disponible_tras`/`falta` de `upcoming`) van redondeados a 2 decimales; participaciones, VL, coste medio y porcentajes conservan la precisión de la API. `raw` y `fund` también devuelven números. En Python, `json.loads(texto, parse_float=Decimal)` los recupera sin pérdida.
 - **`csv`**: los mismos valores sin formatear (`-12.50`).
 - **`tsv`**: como CSV pero separado por tabuladores, sin comillas y una línea por fila (tabuladores y saltos de línea dentro de un valor se cambian por espacios); cómodo para logs, `cut` o `awk`.
 
@@ -108,6 +109,22 @@ Las órdenes (`orders`) usan como `ref` el `reference` de MyInvestor, que según
 | `pensiones` | el `liquidationValueDate` más reciente de sus planes (una petición más por cuenta de pensiones) |
 
 Los fondos suelen ir con el VL de uno o dos días hábiles antes, así que comparar el valor de un lunes con el del viernes puede no reflejar ningún cambio real: mira `fecha_valor` antes de calcular la variación. La última fila es el total, también en JSON/CSV/TSV, con `producto: "total"` (`TOTAL` en la tabla), `valor` = suma de los productos y `fecha_valor: null`. La salida sigue siendo una lista de filas, compatible con lo que había. En `holdings`, la fecha del VL de cada posición ya iba en `fecha_vl`.
+
+### Lo que viene: `upcoming`
+
+`upcoming` junta en una tabla, ordenada por fecha, lo que va a mover el efectivo en los próximos `--days` días (14 por defecto, contando hoy):
+
+| `tipo` | De dónde sale | `fecha` |
+|---|---|---|
+| `aportacion` | aportaciones periódicas activas (`contributions`; se descartan `PAUSED`, `FINISHED` y `CANCELED`) | `nextExecutionDate` y, si cabe más de una en el plazo, las siguientes según la frecuencia (estimadas: no se tienen en cuenta festivos) |
+| `orden` | órdenes en curso de las cuentas de valores y de pensiones: estados `INITIAL`, `PENDING` e `IN_PROGRESS`, los mismos que la web da por «en curso» (el resto: `COMPLETE`, `CANCEL`, `REJECTED`, `EXECUTED`) | fecha valor de la orden, o la de la orden si no la trae |
+| `retencion` | `holds` de cada cuenta de efectivo | hoy |
+
+Cada fila lleva `{fecha, tipo, producto, importe, cuenta_cargo, disponible, disponible_tras, falta}`. `importe` va con signo, como en `movements`: lo que sale de la cuenta es negativo (una venta en curso, positiva). La cuenta de cargo de una aportación se busca por su `fromAccountId` y, si no casa, por el alias; la de una orden es la cuenta de efectivo asociada a su cuenta de valores o de pensiones. Si no se encuentra, `cuenta_cargo` muestra el alias que da MyInvestor y las columnas de saldo van vacías.
+
+**Regla del disponible.** `disponible` es el disponible actual de la cuenta de cargo, que MyInvestor ya da descontando lo retenido; y el dinero de una orden en curso queda retenido (o cargado) al darla. Por eso las retenciones y las órdenes se listan pero **no** se restan otra vez: `disponible_tras` solo acumula, por cuenta y en orden de fecha, lo que aún no se ha cargado (las aportaciones). Si baja de cero, `falta` dice cuánto no cubre la cuenta y se avisa en stderr (`-q` lo silencia; el código de salida sigue siendo 0). Con `--owner` solo se ven las filas cargadas a cuentas de ese tipo.
+
+Las transferencias programadas aún no se leen (#4); cuando existan entrarán como `tipo: transferencia` y sí restarán del disponible.
 
 ### Ingresos: intereses, dividendos, retenciones y comisiones
 
@@ -311,6 +328,7 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | `holdings` | 1 + V (también con `-a`: se leen todas para resolverla) |
 | `orders` | 1 + V; con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
 | `pensions` | 1 + P |
+| `upcoming` | 4 + C + 2·V + P (C: con `--owner`, solo las de ese tipo) |
 | `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V |
 | `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
 | `login` | `--direct` o `--refresh-token-stdin`: 1 |

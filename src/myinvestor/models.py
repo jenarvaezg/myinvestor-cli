@@ -352,6 +352,7 @@ class Contribution(_Model):
     contribution_type: str | None = None
     subscription_type: str | None = None
     to_account_type: str | None = None
+    from_account_id: str | None = None  # `accountId` of the cash account it is charged to
     from_account_alias: str | None = None
     contribution_time_frame: ContributionTimeFrame | None = None
 

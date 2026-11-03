@@ -24,6 +24,7 @@ from myinvestor.json_output import decimal_literal, dumps
 MONEY_COLUMNS = frozenset(
     {"importe", "saldo", "retenido", "disponible", "valor", "invertido", "ganancia", "vl", "coste_medio", "total"}
     | {"intereses", "dividendos", "bruto", "retenciones", "neto", "comisiones"}
+    | {"disponible_tras", "falta"}
 )
 PRICE_COLUMNS = frozenset({"vl", "coste_medio"})
 AMOUNT_COLUMNS = MONEY_COLUMNS - PRICE_COLUMNS
