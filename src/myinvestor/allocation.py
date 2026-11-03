@@ -26,7 +26,7 @@ from myinvestor.models import (
     PensionPlanSheet,
     SecuritiesAccount,
 )
-from myinvestor.regions import NOT_APPLICABLE, REGIONLESS, isin_region, region
+from myinvestor.regions import NOT_APPLICABLE, REGIONLESS, isin_region, ranked_region, zone_label
 
 UNCLASSIFIED = AssetClass.sin_clasificar.value  # the one "unknown" marker, in every grouping
 CASH = AssetClass.efectivo.value
@@ -134,21 +134,23 @@ def is_share(inv: Investment) -> bool:
 
 
 def geo_of(asset: str, *sources: tuple[str, str | None]) -> tuple[str, str | None]:
-    """Region and what decided it: `no_aplica` for regionless classes, else the first `(source, text)` naming one."""
+    """Region (the web's label) and what decided it: `no_aplica` for regionless classes, else the most
+    specific zone any `(source, text)` names, the first source on a tie. «MyInvestor Indexado S&P500»
+    with category «RV Global PP» is Estados Unidos, not Global."""
     if asset in REGIONLESS:
         return NOT_APPLICABLE, str(asset)
-    for source, text in sources:
-        hit = region(text)
-        if hit:
-            return hit[0], f"{source}: {hit[1]}"
-    return UNCLASSIFIED, None
+    hits = [(hit, i, source) for i, (source, text) in enumerate(sources) if (hit := ranked_region(text))]
+    if not hits:
+        return UNCLASSIFIED, None
+    (_, zone, words), _, source = min(hits, key=lambda h: (h[0][0], h[1]))
+    return zone_label(zone), f"{source}: {words}"
 
 
 def fund_geo(asset: str, sheet: FundSheet, inv: Investment) -> tuple[str, str | None]:
-    """A fund's `geoZone`; failing that, the region its name says."""
+    """A fund's `geoZone` (its label, as the web shows it); failing that, the region its name says."""
     zone = known(sheet.geo_zone)
     if zone and asset not in REGIONLESS:
-        return zone, GEO_ZONE
+        return zone_label(zone), GEO_ZONE
     return geo_of(asset, ("nombre", sheet.name or inv.investment_name))
 
 
@@ -156,7 +158,7 @@ def broker_geo(asset: str, inv: Investment) -> tuple[str, str | None]:
     """A share's issuer country (from its ISIN); an ETF's region, from its name and category."""
     if is_share(inv):
         zone = isin_region(inv.isin)
-        return (zone, f"ISIN: {(inv.isin or '')[:2].upper()}") if zone else (UNCLASSIFIED, None)
+        return (zone_label(zone), f"ISIN: {(inv.isin or '')[:2].upper()}") if zone else (UNCLASSIFIED, None)
     return geo_of(asset, ("nombre", inv.investment_name), ("categoría", known(inv.my_investor_category)))
 
 

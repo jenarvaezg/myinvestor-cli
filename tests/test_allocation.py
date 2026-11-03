@@ -34,7 +34,7 @@ from myinvestor.models import (
     PensionPlanSheet,
     SecuritiesAccount,
 )
-from myinvestor.regions import NOT_APPLICABLE
+from myinvestor.regions import NOT_APPLICABLE, zone_label
 from tests.conftest import cash_account, investment, securities_account
 
 
@@ -151,7 +151,7 @@ def test_fund_is_classified_with_its_sheet() -> None:
     assert (h.asset, h.asset_label, h.geo, h.category, h.ter) == (
         "renta_variable",
         "VARIABLE_INCOME",
-        "GLOBAL",
+        "Global",
         "RV Global",
         Decimal("0.12"),
     )
@@ -187,10 +187,10 @@ def test_broker_asset_comes_from_its_product_type_or_underlying(
 @pytest.mark.parametrize(
     ("isin", "broker_type", "name", "geo", "label"),
     [
-        ("US0000000001", "RV", "ACME MOTORS", "UNITED_STATES", "ISIN: US"),  # a share: its issuer country
+        ("US0000000001", "RV", "ACME MOTORS", "Estados Unidos", "ISIN: US"),  # a share: its issuer country
         ("NL0000000001", "RV", "ACME GLOBAL NV", UNCLASSIFIED, None),  # no zone of its own; never the name
-        ("IE0000000001", "ETF", "CORE MSCI WORLD UCITS ETF", "GLOBAL", "nombre: WORLD"),
-        ("IE0000000002", "ETF", "CORE S&P 500 UCITS ETF", "UNITED_STATES", "nombre: S&P 500"),
+        ("IE0000000001", "ETF", "CORE MSCI WORLD UCITS ETF", "Global", "nombre: WORLD"),
+        ("IE0000000002", "ETF", "CORE S&P 500 UCITS ETF", "Estados Unidos", "nombre: S&P 500"),
         ("IE0000000003", "ETF", "PHYSICAL GOLD ETC", NOT_APPLICABLE, "materias_primas"),
         ("IE0000000004", "ETF", "THEMATIC UCITS ETF", UNCLASSIFIED, None),
     ],
@@ -204,8 +204,8 @@ def test_broker_region(isin: str, broker_type: str, name: str, geo: str, label: 
 @pytest.mark.parametrize(
     ("sheet", "geo", "label"),
     [
-        ({"assetType": "VARIABLE_INCOME", "geoZone": "GLOBAL"}, "GLOBAL", "geoZone"),
-        ({"assetType": "VARIABLE_INCOME", "geoZone": "OTHERS", "name": "Fondo Japón"}, "JAPAN", "nombre: JAPON"),
+        ({"assetType": "VARIABLE_INCOME", "geoZone": "GLOBAL"}, "Global", "geoZone"),
+        ({"assetType": "VARIABLE_INCOME", "geoZone": "OTHERS", "name": "Fondo Japón"}, "Japón", "nombre: JAPON"),
         ({"assetType": "COMMODITIES", "geoZone": "GLOBAL"}, NOT_APPLICABLE, "materias_primas"),
         ({"assetType": "FIXED_INCOME"}, UNCLASSIFIED, None),
     ],
@@ -371,15 +371,31 @@ def test_pension_plans_get_a_region_from_their_category_or_name() -> None:
     gold = holding("ETC", "1000", asset="materias_primas", geo=NOT_APPLICABLE, geo_label="materias_primas")
 
     assert [(h.geo, h.geo_label) for h in (world, usa, by_category, without_sheet)] == [
-        ("GLOBAL", "nombre: GLOBAL"),
-        ("UNITED_STATES", "nombre: S&P 500"),
-        ("GLOBAL", "categoría: GLOBAL"),
-        ("UNITED_STATES", "nombre: S&P 500"),
+        ("Global", "nombre: GLOBAL"),
+        ("Estados Unidos", "nombre: S&P 500"),
+        ("Global", "categoría: GLOBAL"),
+        ("Estados Unidos", "nombre: S&P 500"),
     ]
     rows = group([world, usa, by_category, gold], Grouping.geo)
     assert [(r["clave"], r["origen"], r["peso_pct"]) for r in rows] == [
-        ("GLOBAL", "categoría: GLOBAL, nombre: GLOBAL", Decimal("70.00")),
-        ("UNITED_STATES", "nombre: S&P 500", Decimal("20.00")),
+        ("Global", "categoría: GLOBAL, nombre: GLOBAL", Decimal("70.00")),
+        ("Estados Unidos", "nombre: S&P 500", Decimal("20.00")),
         (NOT_APPLICABLE, "materias_primas", Decimal("10.00")),
     ]
     assert list(total_row([world], Grouping.geo))[:2] == ["clave", "origen"]
+
+
+def test_the_most_specific_region_wins_over_a_generic_category() -> None:
+    """The real sheet of N5394 (S&P 500) says «RV Global PP»: the name decides (seen with the API)."""
+    usa = pension(
+        "N5394", "MyInvestor Indexado S&P500, PP", 2000.0, {"activeType": "Renta Variable", "category": "RV Global PP"}
+    )
+
+    assert (usa.geo, usa.geo_label) == ("Estados Unidos", "nombre: S&P500")
+
+
+@pytest.mark.parametrize("zone", ["Europa", "EUROPE", " europe "])
+def test_a_geo_zone_code_and_its_label_are_one_key(zone: str) -> None:
+    """Fund sheets send the label («Europa»), the searcher the code: both group under the web's label."""
+    assert zone_label(zone) == "Europa"
+    assert zone_label("Zona rara") == "Zona rara"

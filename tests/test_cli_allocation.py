@@ -119,7 +119,7 @@ def test_allocation_by_asset(mock_api: respx.MockRouter, store: MemorySessionSto
 @pytest.mark.parametrize(
     ("by", "keys"),
     [
-        ("geo", ["GLOBAL", "sin_clasificar", "EUROPE", "UNITED_STATES", "no_aplica"]),
+        ("geo", ["Global", "sin_clasificar", "Europa", "Estados Unidos", "no_aplica"]),
         ("category", ["RV Global", "RV MIXTA", "RF Euro", "sin_clasificar"]),
     ],
 )
@@ -158,9 +158,9 @@ def test_allocation_by_geo_classifies_plans_etfs_and_shares(
     rows = json.loads(result.stdout, parse_float=Decimal)
     assert [(r["clave"], r["origen"], r["valor"]) for r in rows] == [
         ("no_aplica", "efectivo, materias_primas", Decimal("2100.60")),  # the cash accounts and the gold ETC
-        ("GLOBAL", "categoría: GLOBAL, geoZone", Decimal("1400.00")),  # fund A and the global plan
-        ("UNITED_STATES", "ISIN: US, nombre: S&P 500", Decimal("500.00")),  # the share and the S&P 500 plan
-        ("EUROPE", "geoZone", Decimal("300.00")),
+        ("Global", "categoría: GLOBAL, geoZone", Decimal("1400.00")),  # fund A and the global plan
+        ("Estados Unidos", "ISIN: US, nombre: S&P 500", Decimal("500.00")),  # the share and the S&P 500 plan
+        ("Europa", "geoZone", Decimal("300.00")),
         ("total", None, Decimal("4300.60")),
     ]
     assert "sin_clasificar" not in [r["clave"] for r in rows] and "Sin zona" not in result.stderr

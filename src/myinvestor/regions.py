@@ -67,6 +67,45 @@ ISIN_COUNTRIES: dict[str, str] = {
     "MX": "MEXICO",
 }
 
+# What the web shows for each `geoZone` code (bundle, 2026-11). Fund sheets send the label ("Europa"),
+# the searcher filter the code ("EUROPE"): `allocation` always shows the label, as it did for funds.
+ZONE_LABELS: dict[str, str] = {
+    "AFRICA": "África",
+    "ASIA": "Asia",
+    "ASIA_EX_JAPAN": "Asia ex-Japón",
+    "AUSTRALIA_NEW_ZELAND": "Australia y Nueva Zelanda",
+    "BRAZIL": "Brasil",
+    "CHINA": "China",
+    "EMERGENT_MARKETS": "Mercados Emergentes",
+    "EUROPE": "Europa",
+    "EUROPE_EMERGENT_MARKETS": "Europa - Mercados Emergentes",
+    "FRANCE": "Francia",
+    "GERMANY": "Alemania",
+    "GLOBAL": "Global",
+    "INDIA": "India",
+    "INDONESIA": "Indonesia",
+    "ITALY": "Italia",
+    "JAPAN": "Japón",
+    "KOREA": "Korea",
+    "LATIN_AMERICA": "América Latina",
+    "MEXICO": "México",
+    "NORWAY": "Noruega",
+    "RUSIA": "Rusia",
+    "SPAIN": "España",
+    "SWEDEN": "Suecia",
+    "SWITZERLAND": "Suiza",
+    "THAILAND": "Tailandia",
+    "TURKEY": "Turquía",
+    "UNITED_KINGDOM": "Reino Unido",
+    "UNITED_STATES": "Estados Unidos",
+}
+
+
+def zone_label(zone: str) -> str:
+    """The web's label of a `geoZone` code; a label (or an unknown code) is returned as it is."""
+    return ZONE_LABELS.get(zone.strip().upper(), zone.strip())
+
+
 _EXCLUSION = re.compile(r"\bEX[ -]+(\w)")  # «ex USA» → «EX_USA», which no rule matches as a region
 
 
@@ -77,13 +116,19 @@ def _plain(text: str) -> str:
 
 def region(text: str | None) -> tuple[str, str] | None:
     """Zone named by `text` (a name or category) and the words that gave it away; None if it names none."""
+    hit = ranked_region(text)
+    return (hit[1], hit[2]) if hit else None
+
+
+def ranked_region(text: str | None) -> tuple[int, str, str] | None:
+    """Like `region`, with the rule's position first: the lower, the more specific (S&P 500 before Global)."""
     if not text:
         return None
     plain = _plain(text)
-    for pattern, zone in REGION_RULES:
+    for rank, (pattern, zone) in enumerate(REGION_RULES):
         match = pattern.search(plain)
         if match:
-            return zone, match.group(0)
+            return rank, zone, match.group(0)
     return None
 
 
