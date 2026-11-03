@@ -27,7 +27,7 @@ from typing import Any
 import httpx
 
 from myinvestor import envelope
-from myinvestor.config import API_BASE
+from myinvestor.config import API_BASE, LOGIN_PATH, REFRESH_PATH
 from myinvestor.errors import (
     ApiError,
     AuthError,
@@ -45,9 +45,6 @@ from myinvestor.signature import SIGNATURE_HEADER, SignatureUI, Signer, parse_si
 from myinvestor.stores import ReloginBlock, SessionStore
 
 Relogin = Callable[[Session], Session]
-
-LOGIN_PATH = "/login/api/v2/auth/token"
-REFRESH_PATH = "/login/api/v1/auth/token/refresh"
 
 CREDENTIALS_ERR_CODES = frozenset({"UNAUTHORIZED"})
 PASSWORD_CHANGE_ERR_CODES = frozenset({"UPDATE_PASSWORD_REQUIRED"})

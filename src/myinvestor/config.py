@@ -4,6 +4,10 @@ API_BASE = "https://api.myinvestor.es"
 WEB_ORIGIN = "https://newapp.myinvestor.es"
 SIGNIN_URL = f"{WEB_ORIGIN}/auth/signin"
 
+# Keycloak endpoints (see `myinvestor.auth`); the request log tags them by path.
+LOGIN_PATH = "/login/api/v2/auth/token"
+REFRESH_PATH = "/login/api/v1/auth/token/refresh"
+
 # Version of the web bundle the requests were observed with (`x-myinvestor-app`).
 APP_VERSION = "3.134.0"
 APP_PLATFORM = "web"

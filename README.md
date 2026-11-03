@@ -132,6 +132,35 @@ Con `-f json` el error también sale en JSON, en una sola línea de stderr: `{"e
 
 La consulta de movimientos solo sale directa para los últimos ~90 días (PSD2). Para rangos más antiguos MyInvestor responde `202` con una petición de firma y pide **aprobarla en la app del móvil**. En una terminal interactiva el CLI lo avisa y espera (`--approval-timeout`, 300 s por defecto) y después repite la consulta firmada. Sin terminal (cron, CI, el `!` de Claude Code) falla con un mensaje claro y **no** te manda la notificación, salvo que pases `--approve` (o `MYINVESTOR_APPROVE=1`): `myinvestor --approve movements --from 2025-01-01`. Lo mismo ocurre con el SMS del login `--direct` en un dispositivo nuevo.
 
+### Silencio, depuración y ritmo de peticiones
+
+Opciones globales (van antes de la orden: `myinvestor -q position -f json`):
+
+- `-q`/`--quiet` (o `MYINVESTOR_QUIET=1`): en stderr solo los errores; se silencian los avisos («Rango de más de 90 días…», «Sin resultados», «Sesión iniciada…»). El código de salida sigue indicando si ha ido bien. Pensado para cron: el log diario se queda con el JSON y los fallos.
+- `-v`/`--verbose`: una línea por petición en stderr, `GET /ruta 200 (123 ms)`, marcando `[refresh]`, `[login]`, `[firma]` (endpoints de segundo factor) o `[firmada]` (consulta repetida tras aprobarla), y cuándo se renueva la sesión o se hace re-login. **Nunca** se escriben la query, las cabeceras (`authorization`, `x-signature-id`…), los cuerpos de login/refresh, tokens, contraseñas ni códigos; los ids de firma se enmascaran (`/signature/api/v3/signature/*`). Las rutas sí llevan ids de cuenta: revísalo antes de pegarlo en un issue.
+- `--min-interval SEG` (o `MYINVESTOR_MIN_INTERVAL`, por defecto 0): espera mínima entre peticiones del mismo proceso, para no despertar al WAF con muchas cuentas.
+- `--retry-blocked N` (o `MYINVESTOR_RETRY_BLOCKED`, por defecto 0): si Imperva bloquea una consulta `GET`, espera 30 s, 2 min, 5 min (y 5 min las siguientes) y la repite hasta N veces. Login, refresh, firmas y cualquier `POST` no se repiten nunca.
+
+stdout solo lleva el resultado: con `-f json` y sin datos sale `[]`, con `-f csv` o `-f tsv` sale vacío, y en ninguno se escribe «Sin resultados». Sin terminal en stderr o con `NO_COLOR` no hay colores ni marcado (lo hace rich).
+
+Dentro de una misma orden, las consultas `GET` idénticas (misma ruta y parámetros) se responden de memoria; las firmadas y las `202` no se guardan, y nada se guarda en disco.
+
+Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de pensiones, C = cuentas de efectivo elegidas, por defecto todas):
+
+| Orden | Peticiones |
+|---|---|
+| `accounts`, `balance-history`, `contributions`, `funds`, `feed`, `raw`, `status` | 1 |
+| `position` | 3 + V |
+| `movements`, `holds` | 1 + C |
+| `holdings` | 1 + V (también con `-a`: se leen todas para resolverla) |
+| `orders` | 1 + V; con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
+| `pensions` | 1 + P |
+| `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V |
+| `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
+| `login` | `--direct` o `--refresh-token-stdin`: 1 |
+
+Además: +1 `POST` de refresh si el token (15 min) ha caducado o MyInvestor responde 401, y +1 `POST` de login si hay que hacer re-login con la contraseña guardada. Cada segundo factor suma 1 `POST` para iniciarlo, la validación del código o una consulta de estado cada 3 s mientras esperas en la app, y la repetición firmada. Los reintentos ante `429/5xx` (hasta 4) y los de `--retry-blocked` van aparte.
+
 ## Como librería
 
 ```python
@@ -149,7 +178,9 @@ with MyInvestorClient(store.load(), store=store) as client:
 ## Diseño
 
 - **Importes en `Decimal`**: la API devuelve euros como números JSON en coma flotante; se parsean directamente a `Decimal` (`json.loads(parse_float=Decimal)`), sin redondeos binarios. Los movimientos ya vienen con signo (cargos < 0) y `startBalance + Σ importes = endBalance`.
-- **Reintentos**: `GET` se reintenta 4 veces con backoff exponencial y jitter ante `429/5xx`, timeouts y errores de red, respetando `Retry-After`. Login, refresh y firmas (`POST`) **nunca** se reintentan.
+- **Reintentos**: `GET` se reintenta 4 veces con backoff exponencial y jitter ante `429/5xx`, timeouts y errores de red, respetando `Retry-After`. Login, refresh y firmas (`POST`) **nunca** se reintentan. El bloqueo de Imperva no se reintenta salvo con `--retry-blocked` (en la librería, `MyInvestorClient(..., retry_blocked=N)`), y solo en consultas `GET`.
+- **Caché y ritmo**: `MyInvestorClient(..., cache=True)` (lo que usa el CLI) memoriza las respuestas `GET` mientras vive el cliente; por defecto está desactivada para que un cliente de larga duración no sirva datos viejos. `build_http_client(min_interval=SEG)` espacia las peticiones.
+- **Log**: cada petición se registra en `DEBUG` en el logger `myinvestor.http` (método, ruta, status, ms), nunca con query, cabeceras ni cuerpos.
 - **Cabeceras como la web**: `authorization: Bearer`, `x-device-id`, `x-myinvestor-app: version=3.134.0,platform=web`, y `origin`/`referer`/`user-agent` de Chrome, porque Imperva está delante.
 - **Fechas**: la API manda medianoches ISO (`2026-11-02T00:00:00.000+0000`); se usan como día natural.
 

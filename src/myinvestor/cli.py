@@ -10,7 +10,7 @@ from rich.markup import escape
 
 # Importing the command modules registers their commands on `app`.
 from myinvestor import cli_accounts, cli_auth, cli_invest  # noqa: F401
-from myinvestor.cli_common import app, err
+from myinvestor.cli_common import app, fatal
 from myinvestor.cli_errors import exit_code, json_error, requested
 from myinvestor.errors import MyInvestorError
 
@@ -20,7 +20,7 @@ def _fail(exc: Exception, label: str, message: str) -> NoReturn:
     if requested.json:
         sys.stderr.write(json_error(exc, message) + "\n")
     else:
-        err.print(f"[red]{label}:[/red] {escape(message)}")
+        fatal.print(f"[red]{label}:[/red] {escape(message)}")
     raise SystemExit(exit_code(exc)) from exc
 
 
