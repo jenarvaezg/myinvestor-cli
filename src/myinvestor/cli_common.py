@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -48,6 +48,18 @@ FormatOpt = Annotated[
     OutputFormat,
     typer.Option("--format", "-f", help="Formato de salida (con json, los errores también).", callback=record_format),
 ]
+JsonOnlyFormatOpt = Annotated[
+    OutputFormat,
+    typer.Option(
+        "--format",
+        "-f",
+        help="Siempre JSON: se acepta `-f json` como en las demás órdenes (con json, los errores también).",
+        callback=record_format,
+    ),
+]
+FromOpt = Annotated[str | None, typer.Option("--from", help="Desde (AAAA-MM-DD).")]
+ToOpt = Annotated[str | None, typer.Option("--to", help="Hasta (AAAA-MM-DD), por defecto hoy.")]
+DaysOpt = Annotated[int | None, typer.Option(min=1, help="Últimos N días (hasta hoy o --to).")]
 
 
 @dataclass
@@ -308,3 +320,20 @@ def parse_day(value: str | None, option: str) -> date | None:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise InputError(f"{option}: fecha no válida {value!r} (usa AAAA-MM-DD).") from exc
+
+
+def only_json(fmt: OutputFormat, command: str) -> None:
+    """For the commands whose output is always JSON: any other `-f` is a usage error."""
+    if fmt is not OutputFormat.json:
+        raise InputError(f"`{command}` solo sale en JSON: usa -f json o quita -f.")
+
+
+def optional_range(date_from: str | None, date_to: str | None, days: int | None) -> tuple[date | None, date | None]:
+    """`--from`/`--to`/`--days` as (start, end); None where the user gave no bound (`--days` ends today or `--to`)."""
+    if date_from and days:
+        raise InputError("Usa --from o --days, no ambos.")
+    end = parse_day(date_to, "--to")
+    start = parse_day(date_from, "--from") or ((end or date.today()) - timedelta(days=days) if days else None)
+    if start and end and start > end:
+        raise InputError("--from es posterior a --to.")
+    return start, end

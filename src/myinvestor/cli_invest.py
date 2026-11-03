@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
@@ -30,7 +31,21 @@ from myinvestor.cli_catalog import (
     resolve_filter,
     risk_or_none,
 )
-from myinvestor.cli_common import FormatOpt, app, build_client, iso_moment, now_local, parse_day
+from myinvestor.cli_common import (
+    DaysOpt,
+    FormatOpt,
+    FromOpt,
+    JsonOnlyFormatOpt,
+    ToOpt,
+    app,
+    build_client,
+    iso_moment,
+    now_local,
+    only_json,
+    optional_range,
+    parse_day,
+)
+from myinvestor.cli_errors import record_format
 from myinvestor.cli_state import MarkOpt, StateOpt, record, state_file
 from myinvestor.client import MyInvestorClient, Period
 from myinvestor.errors import InputError
@@ -279,21 +294,34 @@ def history(
     product: Annotated[str | None, typer.Argument(help="ISIN o código de plan (N1234). Sin él: todos.")] = None,
     account: Annotated[str | None, typer.Option("--account", "-a", help="Cuenta de valores o de pensiones.")] = None,
     period: Annotated[
-        str, typer.Option(help=f"Rango: {', '.join(PERIODS)} (la API no da más de un año).")
-    ] = Period.six_months.name,
+        str | None,
+        typer.Option(help=f"Rango: {', '.join(PERIODS)} (la API no da más de un año). Por defecto, six_months."),
+    ] = None,
+    date_from: FromOpt = None,
+    date_to: ToOpt = None,
+    days: DaysOpt = None,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
-    """Evolución diaria de cada posición: valor, invertido, rentabilidad y participaciones."""
-    if period not in PERIODS:
+    """Evolución diaria de cada posición: valor, invertido, rentabilidad y participaciones.
+
+    Con --from/--to/--days se pide el --period más corto que cubre el rango (la API solo da
+    un mes, tres, seis o un año hasta hoy) y se recortan las filas a esas fechas.
+    """
+    start, end = optional_range(date_from, date_to, days)
+    if period is not None and (start or end):
+        raise InputError("Usa --period o --from/--to/--days, no ambos.")
+    if period is not None and period not in PERIODS:
         raise InputError(f"--period {period!r} no válido: {', '.join(PERIODS)}.")
+    chosen = PERIODS[period] if period else covering_period(start, date.today())
     rows: list[dict[str, Any]] = []
     with build_client() as client:
         targets = _history_targets(client, product, account)
         for account_id, is_pension in targets:
-            series = client.position_history(account_id, PERIODS[period], pension=is_pension)
+            series = client.position_history(account_id, chosen, pension=is_pension)
             for code, points in series.items():
                 if product and code.upper() != product.upper():
                     continue
+                points = [p for p in points if (not start or p.date >= start) and (not end or p.date <= end)]
                 rows.extend(
                     {
                         "fecha": p.date.isoformat(),
@@ -308,7 +336,22 @@ def history(
                     for p in points
                 )
     rows.sort(key=lambda r: (r["producto"], r["fecha"]))
-    render(rows, fmt, title=f"Evolución ({period})")
+    span = f"{start or '…'} a {end or date.today()}" if start or end else chosen.name
+    render(rows, fmt, title=f"Evolución ({span})")
+
+
+# Days back from today that each `groupType` covers, shortest first.
+PERIOD_DAYS = ((Period.month, 31), (Period.three_months, 92), (Period.six_months, 183), (Period.year, 366))
+
+
+def covering_period(start: date | None, today: date) -> Period:
+    """The shortest period that reaches back to `start` (six months without it)."""
+    if start is None:
+        return Period.six_months
+    for period, days in PERIOD_DAYS:
+        if (today - start).days <= days:
+            return period
+    raise InputError("La API no da más de un año de evolución: --from o --days hasta 366 días atrás.")
 
 
 def contribution_row(c: Contribution) -> dict[str, Any]:
@@ -387,6 +430,15 @@ FUND_FIELDS = (
 def fund(
     code: Annotated[str, typer.Argument(help="ISIN del fondo/ETF, o código de plan de pensiones (N1234).")],
     full: Annotated[bool, typer.Option(help="Respuesta completa en JSON (composición, comisiones…).")] = False,
+    fmt: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--format",
+            "-f",
+            help="json (por defecto: la respuesta de la API) o table/csv/tsv: una fila `campo, dato` por cada uno.",
+            callback=record_format,
+        ),
+    ] = OutputFormat.json,
 ) -> None:
     """Ficha de un fondo o plan del catálogo de MyInvestor."""
     with build_client() as client:
@@ -399,7 +451,22 @@ def fund(
             data["managementEntity"] = fund_data["managingEntity"]
         if price:
             data["lastPrice"] = {k: price.get(k) for k in ("date", "price", "currency", "dayProfitPercentage")}
-    print_json(data)
+    if fmt is OutputFormat.json:
+        print_json(data)
+        return
+    render([{"campo": key, "dato": value} for key, value in flat_fields(data)], fmt, title=f"Ficha de {code.upper()}")
+
+
+def flat_fields(data: Any, prefix: str = "") -> Iterator[tuple[str, Any]]:
+    """`(campo, valor)` of a JSON value: objects as `a.b`, lists of objects as `a[0].b`; empty values skipped."""
+    if isinstance(data, dict):
+        for key, value in data.items():
+            yield from flat_fields(value, f"{prefix}.{key}" if prefix else str(key))
+    elif isinstance(data, list):
+        for i, value in enumerate(data):
+            yield from flat_fields(value, f"{prefix}[{i}]")
+    elif data not in (None, ""):
+        yield prefix, data
 
 
 @app.command()
@@ -493,8 +560,10 @@ def raw(
         str, typer.Argument(help="Ruta bajo api.myinvestor.es, p. ej. /cperf-server/api/v2/cash-accounts/self")
     ],
     param: Annotated[list[str] | None, typer.Option("--param", "-p", help="Parámetro clave=valor (repetible).")] = None,
+    fmt: JsonOnlyFormatOpt = OutputFormat.json,
 ) -> None:
     """GET arbitrario a la API (exploración). Solo lectura: no hay POST."""
+    only_json(fmt, "raw")
     if any(part == ".." for part in path.split("/")) or "?" in path or "#" in path:
         raise InputError("La ruta no puede llevar `..`, `?` ni `#`: pasa la query con --param.")
     params: list[tuple[str, str]] = []

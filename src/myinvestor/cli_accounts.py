@@ -13,13 +13,17 @@ import typer
 from rich.markup import escape
 
 from myinvestor.cli_common import (
+    DaysOpt,
     FormatOpt,
+    FromOpt,
     TerminalSignatureUI,
+    ToOpt,
     app,
     build_client,
     err,
     iso_moment,
     now_local,
+    optional_range,
     parse_day,
 )
 from myinvestor.cli_state import MarkOpt, NewOpt, StateOpt, record, state_file
@@ -704,12 +708,16 @@ def hold_row(acc: CashAccount, h: Hold) -> dict[str, Any]:
 
 @app.command("balance-history")
 def balance_history(
-    date_from: Annotated[str | None, typer.Option("--from", help="Desde (AAAA-MM-DD).")] = None,
+    date_from: FromOpt = None,
+    date_to: ToOpt = None,
+    days: DaysOpt = None,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
-    """Saldo total diario del efectivo (todas las cuentas)."""
-    start = parse_day(date_from, "--from")
+    """Saldo total diario del efectivo (todas las cuentas). Sin fechas, todo lo que da la API."""
+    start, end = optional_range(date_from, date_to, days)
     with build_client() as client:
         points = client.balance_history()
-    rows = [{"fecha": d.isoformat(), "saldo": b} for d, b in points if start is None or d >= start]
+    rows = [
+        {"fecha": d.isoformat(), "saldo": b} for d, b in points if (not start or d >= start) and (not end or d <= end)
+    ]
     render(rows, fmt, title="Evolución del saldo")

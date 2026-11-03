@@ -8,6 +8,7 @@ from typing import NoReturn
 import httpx
 from pydantic import ValidationError
 from rich.markup import escape
+from typer.exceptions import Abort, TyperException
 
 # Importing the command modules registers their commands on `app`.
 from myinvestor import (  # noqa: F401
@@ -32,7 +33,7 @@ from myinvestor import (  # noqa: F401
     cli_upcoming,
 )
 from myinvestor.cli_common import app, fatal
-from myinvestor.cli_errors import exit_code, json_error, requested
+from myinvestor.cli_errors import exit_code, json_error, requested, wants_json
 from myinvestor.errors import MyInvestorError, UnexpectedResponseError
 
 MAX_REPORTED_FIELDS = 5
@@ -53,10 +54,25 @@ def unexpected_response(exc: ValidationError) -> UnexpectedResponseError:
     return UnexpectedResponseError(exc.title, fields[:MAX_REPORTED_FIELDS])
 
 
+def _run() -> None:
+    """The app; with `-f json`, usage errors (bad option, missing argument…) also become a JSON line (#75)."""
+    if not wants_json(sys.argv[1:]):
+        app()
+        return
+    requested.json = True
+    try:
+        code = app(standalone_mode=False)
+    except TyperException as exc:  # usage errors (2) and the rest of click's errors
+        _fail(exc, "Error", exc.format_message())
+    except Abort as exc:
+        _fail(exc, "Error", "Cancelado.")
+    raise SystemExit(code if isinstance(code, int) else 0)
+
+
 def main() -> None:
     requested.json = False
     try:
-        app()
+        _run()
     except MyInvestorError as exc:
         _fail(exc, "Error", str(exc))
     except httpx.HTTPError as exc:

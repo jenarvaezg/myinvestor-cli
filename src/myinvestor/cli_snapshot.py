@@ -29,7 +29,17 @@ from myinvestor.cli_accounts import (
     _securities_position,
     hold_row,
 )
-from myinvestor.cli_common import app, build_client, err, fatal, iso_moment, now_local, package_version
+from myinvestor.cli_common import (
+    JsonOnlyFormatOpt,
+    app,
+    build_client,
+    err,
+    fatal,
+    iso_moment,
+    now_local,
+    only_json,
+    package_version,
+)
 from myinvestor.cli_errors import error_kind, exit_code, requested
 from myinvestor.cli_invest import _holding_row, _order_row, _with_weights, pension_row
 from myinvestor.cli_state import MarkOpt, StateOpt, state_file
@@ -120,6 +130,7 @@ def snapshot(
     ] = True,
     state_path: StateOpt = None,
     mark: MarkOpt = True,
+    fmt: JsonOnlyFormatOpt = OutputFormat.json,
 ) -> None:
     """Un único JSON con la posición, la cartera, lo pendiente, lo que viene, lo nuevo y el delta.
 
@@ -128,6 +139,7 @@ def snapshot(
     bien). Esquema completo y fórmula del delta: docs/snapshot.md.
     """
     requested.json = True  # errors on stderr as one JSON line, like any `-f json`
+    only_json(fmt, "snapshot")
     doc, errors, commit = _take(_Request(save, previous, new, state_path, mark))
     print_json(doc)  # never wrapped by --json-envelope: it carries its own `schema`
     commit()

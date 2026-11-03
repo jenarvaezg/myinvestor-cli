@@ -58,7 +58,7 @@ Con `-f json`, un error sale en **una sola línea JSON en stderr** (stdout queda
 {"error": "signature_required", "exit_code": 13, "message": "…"}
 ```
 
-`error` es el nombre de la excepción en snake_case sin `Error` (`network` para los errores de red), estable; `message` es texto para personas. Su esquema es `myinvestor.error/1` (`myinvestor schema error`), pero nunca va envuelto.
+`error` es el nombre de la excepción en snake_case sin `Error` (`network` para los errores de red; `usage` para los errores de uso, como una opción que no existe, con `exit_code` 2), estable; `message` es texto para personas. Su esquema es `myinvestor.error/1` (`myinvestor schema error`), pero nunca va envuelto.
 
 ## Fuera del contrato
 
