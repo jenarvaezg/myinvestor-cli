@@ -231,7 +231,7 @@ def full_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> No
     mock_api.get(f"{CPERF}/v2/automatic-contributions/self").respond(200, json=ok([CONTRIBUTION]))
     mock_api.get(f"{CPERF}/v2/funds").respond(200, json=ok([CATALOG_ROW], pagination={"totalElements": 1}))
     mock_api.get(f"{CPERF}/v2/funds/{FUND}").respond(200, json=ok(SHEET))
-    for path in ("categories", "managers", "currencies", "assets-type", "regions", "types"):
+    for path in ("categories", "managers", "currencies", "assets-type", "regions"):
         mock_api.get(f"{CPERF}/v2/masters/funds/searcher/filters/{path}").respond(200, json=ok(["\t Valor", None]))
     mock_api.get(f"{CPERF}/v2/pension-plans").respond(200, json=ok([PLAN_CATALOG_ROW], pagination={"totalElements": 1}))
     mock_api.get(f"{CPERF}/v2/funds/{FUND}/prices/last").respond(

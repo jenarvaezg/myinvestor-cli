@@ -226,7 +226,7 @@ FUND_ROW = (
 )
 
 FUND_FILTER = (
-    Field("filtro", S, note="`categories`, `managers`, `currencies`, `asset-types`, `regions` o `types`"),
+    Field("filtro", S, note="`categories`, `managers`, `currencies`, `asset-types` o `regions`"),
     Field("opcion", S, note="la opción de `funds` (o `pension-plans`) que lo usa: `--category`…"),
     Field("nombre", S, note="el valor que se pasa a la opción, sin espacios ni tabuladores alrededor"),
 )

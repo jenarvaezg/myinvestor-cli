@@ -4,6 +4,9 @@ The web builds the query of `/cperf-server/api/v2/funds` in `IAe` and that of `/
 `sMe` (same keys, fewer filters). The valid values come from
 `/cperf-server/api/v2/masters/{funds|pension-plans}/searcher/filters/{kind}`; some arrive with leading
 blanks or tabs (`"\\t Japan Equity"`): they are shown stripped, but the query must carry them as sent.
+
+Not a filter: `type` (`IAe` sends it, but `/v2/funds` answers 400 to any value, `FONDOS_INDEXADOS`
+included) and so neither is `masters/funds/searcher/filters/types`, which only feeds a form.
 """
 
 from __future__ import annotations
@@ -19,7 +22,6 @@ from myinvestor.errors import InputError
 
 RISK_LEVELS = range(1, 8)  # SRI, 1 (lowest) to 7
 RISK_RANGE = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$")
-FUND_TYPES = {"indexados": "FONDOS_INDEXADOS", "activos": "FONDOS_INVERSION"}
 
 
 class Domain(StrEnum):
@@ -35,7 +37,6 @@ class FilterKind(StrEnum):
     currencies = "currencies"
     asset_types = "asset-types"
     regions = "regions"
-    types = "types"  # only funds: FONDOS_INDEXADOS | FONDOS_INVERSION
 
     @property
     def path(self) -> str:
@@ -53,7 +54,6 @@ FILTER_OPTIONS = {
     FilterKind.currencies: "--currency",
     FilterKind.asset_types: "--asset-type",
     FilterKind.regions: "--region",
-    FilterKind.types: "--type",
 }
 PENSION_FILTERS = (FilterKind.managers, FilterKind.asset_types)  # what the pension-plan searcher filters by
 
@@ -67,7 +67,6 @@ class CatalogFilters:
     manager: str | None = None
     asset_type: str | None = None
     currency: str | None = None
-    fund_type: str | None = None  # FONDOS_INDEXADOS | FONDOS_INVERSION
     min_ter: float | None = None
     max_ter: float | None = None
     risk: tuple[int, int] | None = None
@@ -86,7 +85,6 @@ class CatalogFilters:
             "mstarRating": self.rating,
             "currencyHedging": "true" if self.hedged else None,
             "responsibleFund": "true" if self.esg else None,
-            "type": self.fund_type,
             "terMinValue": self.min_ter,
             "terTopValue": self.max_ter,
             "riskMinValue": low,
@@ -102,15 +100,6 @@ def parse_risk(text: str) -> tuple[int, int]:
     if low not in RISK_LEVELS or high not in RISK_LEVELS or low > high:
         raise InputError(f"--risk {text!r} no válido: un nivel de 1 a 7 (`5`) o un rango (`3-6`).")
     return low, high
-
-
-def fund_type(text: str) -> str:
-    """`indexados`/`activos`, or the API value (`FONDOS_INDEXADOS`/`FONDOS_INVERSION`)."""
-    value = text.strip()
-    found = FUND_TYPES.get(value.lower()) or next((v for v in FUND_TYPES.values() if v == value.upper()), None)
-    if found is None:
-        raise InputError(f"--type {text!r} no válido: indexados o activos.")
-    return found
 
 
 def api_code(text: str) -> str:

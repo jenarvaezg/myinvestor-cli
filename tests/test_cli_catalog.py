@@ -11,6 +11,7 @@ import respx
 from typer.testing import CliRunner
 
 from myinvestor import cli_common
+from myinvestor.catalog import CatalogFilters
 from myinvestor.cli import app
 from myinvestor.errors import InputError
 from myinvestor.session import Session
@@ -100,8 +101,6 @@ def test_funds_filters_become_query_parameters(mock_api: respx.MockRouter) -> No
         "variable_income",
         "--region",
         "united_states",
-        "--type",
-        "indexados",
         "--min-ter",
         "0.1",
         "--max-ter",
@@ -127,7 +126,6 @@ def test_funds_filters_become_query_parameters(mock_api: respx.MockRouter) -> No
         "mstarRating": "4",
         "currencyHedging": "true",
         "responsibleFund": "true",
-        "type": "FONDOS_INDEXADOS",
         "terMinValue": "0.1",
         "terTopValue": "0.3",
         "riskMinValue": "5",
@@ -139,10 +137,20 @@ def test_funds_filters_become_query_parameters(mock_api: respx.MockRouter) -> No
 def test_funds_single_risk_level_is_both_bounds(mock_api: respx.MockRouter) -> None:
     route = catalog(mock_api)
 
-    json_rows("funds", "--risk", "4", "--type", "activos")
+    json_rows("funds", "--risk", "4")
 
     params = route.calls.last.request.url.params
-    assert (params["riskMinValue"], params["riskTopValue"], params["type"]) == ("4", "4", "FONDOS_INVERSION")
+    assert (params["riskMinValue"], params["riskTopValue"]) == ("4", "4")
+
+
+@pytest.mark.usefixtures("store")
+def test_funds_has_no_type_filter(mock_api: respx.MockRouter) -> None:
+    """`/v2/funds` answers 400 to `type=` with any value (FONDOS_INDEXADOS included): never sent."""
+    result = runner.invoke(app, ["funds", "--type", "indexados"])
+
+    assert result.exit_code == 2
+    assert mock_api.calls.call_count == 0
+    assert "type" not in CatalogFilters().params()
 
 
 @pytest.mark.usefixtures("store")
@@ -188,7 +196,6 @@ def test_fund_filters_without_kind_lists_every_filter(mock_api: respx.MockRouter
         "currencies": ["EUR", "USD"],
         "assets-type": ["VARIABLE_INCOME"],
         "regions": ["GLOBAL", None],
-        "types": ["FONDOS_INDEXADOS", "FONDOS_INVERSION"],
     }
     for path, values in paths.items():
         mock_api.get(f"{FILTERS}/{path}").respond(200, json=ok(values))
@@ -202,8 +209,6 @@ def test_fund_filters_without_kind_lists_every_filter(mock_api: respx.MockRouter
         ("--currency", "USD"),
         ("--asset-type", "VARIABLE_INCOME"),
         ("--region", "GLOBAL"),
-        ("--type", "FONDOS_INDEXADOS"),
-        ("--type", "FONDOS_INVERSION"),
     ]
 
 
@@ -214,6 +219,13 @@ def test_fund_filters_of_pension_plans(mock_api: respx.MockRouter) -> None:
 
     assert [r["nombre"] for r in json_rows("fund-filters", "managers", "--pension")] == ["Gestora Pensiones"]
     assert [r["filtro"] for r in json_rows("fund-filters", "--pension")] == ["managers", "asset-types"]
+
+
+@pytest.mark.usefixtures("store")
+def test_fund_filters_has_no_types(mock_api: respx.MockRouter) -> None:
+    """`filters/types` exists, but `type` is not a filter that `/v2/funds` accepts."""
+    assert runner.invoke(app, ["fund-filters", "types"]).exit_code == 2
+    assert mock_api.calls.call_count == 0
 
 
 @pytest.mark.usefixtures("store")

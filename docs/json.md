@@ -284,7 +284,7 @@ Salida: lista de objetos.
 
 | Clave | Tipo | `null` | Estable | Notas |
 |---|---|---|---|---|
-| `filtro` | string | no | sí | `categories`, `managers`, `currencies`, `asset-types`, `regions` o `types` |
+| `filtro` | string | no | sí | `categories`, `managers`, `currencies`, `asset-types` o `regions` |
 | `opcion` | string | no | sí | la opción de `funds` (o `pension-plans`) que lo usa: `--category`… |
 | `nombre` | string | no | sí | el valor que se pasa a la opción, sin espacios ni tabuladores alrededor |
 

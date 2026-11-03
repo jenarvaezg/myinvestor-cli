@@ -42,7 +42,6 @@ AssetTypeOpt = Annotated[
     str | None, typer.Option("--asset-type", help="Tipo de activo: variable_income, fixed_income, mixed…")
 ]
 RegionOpt = Annotated[str | None, typer.Option(help="Zona geográfica: global, europe, united_states…")]
-FundTypeOpt = Annotated[str | None, typer.Option("--type", help="indexados o activos.")]
 MinTerOpt = Annotated[float | None, typer.Option("--min-ter", min=0, help="TER mínimo, en %.")]
 MaxTerOpt = Annotated[float | None, typer.Option("--max-ter", min=0, help="TER máximo, en % (0.3 = 0,30 %).")]
 RiskOpt = Annotated[str | None, typer.Option(help="Indicador de riesgo de 1 a 7: un nivel (`5`) o un rango (`3-6`).")]

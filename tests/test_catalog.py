@@ -9,7 +9,6 @@ from myinvestor.catalog import (
     FilterKind,
     api_code,
     clean_values,
-    fund_type,
     match_value,
     parse_risk,
     ter_range,
@@ -26,24 +25,6 @@ def test_risk_is_a_level_or_a_range(text: str, expected: tuple[int, int]) -> Non
 def test_risk_outside_1_to_7_or_reversed_is_rejected(text: str) -> None:
     with pytest.raises(InputError, match="--risk"):
         parse_risk(text)
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("indexados", "FONDOS_INDEXADOS"),
-        ("Activos", "FONDOS_INVERSION"),
-        ("FONDOS_INDEXADOS", "FONDOS_INDEXADOS"),
-        ("fondos_inversion", "FONDOS_INVERSION"),
-    ],
-)
-def test_fund_type_takes_the_short_name_or_the_api_value(text: str, expected: str) -> None:
-    assert fund_type(text) == expected
-
-
-def test_unknown_fund_type_is_rejected() -> None:
-    with pytest.raises(InputError, match="indexados"):
-        fund_type("etf")
 
 
 @pytest.mark.parametrize(
@@ -93,7 +74,6 @@ def test_every_filter_maps_to_its_query_parameter() -> None:
         manager="Gestora Uno",
         asset_type="VARIABLE_INCOME",
         currency="USD",
-        fund_type="FONDOS_INDEXADOS",
         min_ter=0.1,
         max_ter=0.3,
         risk=(5, 6),
@@ -111,7 +91,6 @@ def test_every_filter_maps_to_its_query_parameter() -> None:
         "mstarRating": 4,
         "currencyHedging": "true",
         "responsibleFund": "true",
-        "type": "FONDOS_INDEXADOS",
         "terMinValue": 0.1,
         "terTopValue": 0.3,
         "riskMinValue": 5,

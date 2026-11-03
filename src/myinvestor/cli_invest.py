@@ -12,12 +12,11 @@ from typing import Annotated, Any
 import typer
 
 from myinvestor.allocation import is_fund, share
-from myinvestor.catalog import CatalogFilters, Domain, FilterKind, fund_type, ter_range
+from myinvestor.catalog import CatalogFilters, Domain, FilterKind, ter_range
 from myinvestor.cli_catalog import (
     AssetTypeOpt,
     CategoryOpt,
     CurrencyOpt,
-    FundTypeOpt,
     LimitOpt,
     ManagerOpt,
     MaxTerOpt,
@@ -388,7 +387,6 @@ def funds(
     currency: CurrencyOpt = None,
     asset_type: AssetTypeOpt = None,
     region: RegionOpt = None,
-    kind: FundTypeOpt = None,
     min_ter: MinTerOpt = None,
     max_ter: MaxTerOpt = None,
     risk: RiskOpt = None,
@@ -399,7 +397,7 @@ def funds(
 ) -> None:
     """Busca en el catálogo de fondos de MyInvestor.
 
-    Los valores de `--category`, `--manager`, `--currency`, `--asset-type`, `--region` y `--type`
+    Los valores de `--category`, `--manager`, `--currency`, `--asset-type` y `--region`
     los lista `myinvestor fund-filters`; `--category` y `--manager` piden la lista para enviarlos tal
     como los escribe MyInvestor (una petición más cada una).
     """
@@ -408,7 +406,6 @@ def funds(
         region=code_or_none(region),
         asset_type=code_or_none(asset_type),
         currency=code_or_none(currency),
-        fund_type=fund_type(kind) if kind is not None else None,
         min_ter=low_ter,
         max_ter=high_ter,
         risk=risk_or_none(risk),

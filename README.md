@@ -412,7 +412,6 @@ Las fechas que la API manda como texto vacío (`""`) salen como `null`. La tabla
 | `--currency` | `currency` | `EUR`, `USD`, `GBP`… |
 | `--asset-type` | `assetsType` | `variable_income`, `fixed_income`, `mixed`, `money_market`, `alternatives`, `others` |
 | `--region` | `region` | `global`, `europe`, `united_states`, `emergent_markets`… (`fund-filters regions`) |
-| `--type indexados\|activos` | `type` | `FONDOS_INDEXADOS` o `FONDOS_INVERSION` (también valen tal cual) |
 | `--min-ter`, `--max-ter` | `terMinValue`, `terTopValue` | TER en % (`0.3` es un 0,30 %) |
 | `--risk 5` o `--risk 3-6` | `riskMinValue`, `riskTopValue` | indicador de riesgo de 1 a 7; un nivel solo es el mínimo y el máximo |
 | `--rating` | `mstarRating` | estrellas Morningstar, de 1 a 5 |
@@ -425,7 +424,7 @@ Los códigos (`--currency`, `--asset-type`, `--region`) se pueden escribir en mi
 myinvestor funds --asset-type variable_income --currency usd --max-ter 0.3 --risk 5-6
 ```
 
-`fund-filters [FILTRO]` lista los valores válidos de cada filtro (`GET /cperf-server/api/v2/masters/funds/searcher/filters/{categories,managers,currencies,assets-type,regions,types}`), sin espacios alrededor y sin los `null` que manda la API, con la opción de `funds` que los usa (`filtro`, `opcion`, `nombre`). Sin `FILTRO`, todos (seis peticiones). Con `--pension`, los del buscador de planes (`masters/pension-plans/…`), que solo filtra por gestora y tipo de activo.
+`fund-filters [FILTRO]` lista los valores válidos de cada filtro (`GET /cperf-server/api/v2/masters/funds/searcher/filters/{categories,managers,currencies,assets-type,regions}`), sin espacios alrededor y sin los `null` que manda la API, con la opción de `funds` que los usa (`filtro`, `opcion`, `nombre`). Sin `FILTRO`, todos (cinco peticiones). Con `--pension`, los del buscador de planes (`masters/pension-plans/…`), que solo filtra por gestora y tipo de activo.
 
 No es `funds filters` porque `funds` recibe un texto libre: un grupo leería `myinvestor funds filters` (o cualquier búsqueda que coincidiera con una suborden) como suborden en vez de como búsqueda.
 
@@ -663,7 +662,7 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 |---|---|
 | `balance-history`, `contributions`, `funds`, `feed`, `raw`, `status` | 1 |
 | `funds` con `--category` o `--manager` | 1 + 1 por cada una (la lista de valores) |
-| `fund-filters` | 1 por filtro: 6 sin argumento, 2 con `--pension` |
+| `fund-filters` | 1 por filtro: 5 sin argumento, 2 con `--pension` |
 | `pension-plans` | 1 (+ 1 con `--manager`) |
 | `position` | 3 + V |
 | `movements`, `holds` | 1 + C (`movements --new`: igual; `--since-id`: 1 + 1; `--details`: + 1 por cuenta con algún cargo de transferencia emitida) |
@@ -757,9 +756,9 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/customers/self/documents/signedes/{documentUuid}` | el PDF tal cual (`application/pdf`, no JSON) |
 | GET | `/cperf-server/api/v2/cash-accounts/{accountId}/documents/summary` | extracto: `{id, fileName}`; el PDF, en `/cperf-server/api/v2/documents/temporary/{id}` |
 | GET | `/cperf-server/api/v2/documents/{securities,pension-plans}/{accountId}/x-ray` · `/documents/funds/{isin}/x-ray` | radiografía en PDF generada al momento; la web también conoce `/documents/broker/{accountId}/x-ray`, sin uso en la interfaz |
-| GET | `/cperf-server/api/v2/funds?page&limit&sort&mainInputFilter&…` | catálogo paginado desde 0; filtros `category`, `region`, `manager`, `assetsType`, `currency`, `type`, `mstarRating`, `currencyHedging`, `responsibleFund`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue`… |
+| GET | `/cperf-server/api/v2/funds?page&limit&sort&mainInputFilter&…` | catálogo paginado desde 0; filtros `category`, `region`, `manager`, `assetsType`, `currency`, `mstarRating`, `currencyHedging`, `responsibleFund`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue`… `type` (lo manda `IAe` en el bundle) responde **400** con cualquier valor (`FONDOS_INDEXADOS`, `FONDOS_INVERSION`, `INDEXED_FUND`…) y `managementType` se ignora: no hay forma conocida de filtrar indexados frente a activos |
 | GET | `/cperf-server/api/v2/funds/{isin}` · `/prices/last` · `/compositions` · `/graphs/{type}` | ficha, último VL |
-| GET | `/cperf-server/api/v2/masters/{funds,pension-plans}/searcher/filters/{categories,managers,currencies,assets-type,regions}` · `/masters/funds/searcher/filters/types` | valores de los filtros del buscador: lista de textos (algunas categorías con espacios o tabuladores delante; `regions` incluye un `null`) |
+| GET | `/cperf-server/api/v2/masters/{funds,pension-plans}/searcher/filters/{categories,managers,currencies,assets-type,regions}` · `/masters/funds/searcher/filters/types` | valores de los filtros del buscador: lista de textos (algunas categorías con espacios o tabuladores delante; `regions` incluye un `null`). `/masters/funds/searcher/filters/types` da `["FONDOS_INDEXADOS","FONDOS_INVERSION"]`, pero no sirve como filtro: son las opciones `fundsType` de un formulario de la web |
 | GET | `/cperf-server/api/v2/pension-plans?page&limit&sort&mainInputFilter&…` | catálogo de planes, paginado **desde 1**: `{dgsCode, name, managingEntity, morningstarRating, currency, ter, category, annualizedProfitability, cumulativeProfitability, passedProfitability}`; filtros `manager`, `assetsType`, `mstarRating`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue` |
 | GET | `/feed/api/feed/self` | `text/event-stream` con un evento `data:{…}` |
 
