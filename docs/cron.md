@@ -188,7 +188,7 @@ Un re-login que pide código y falla con 13 no toca la contraseña ni pausa nada
 
 ## Script de ejemplo
 
-`~/bin/myinvestor-diario.sh` (`chmod 700`): guarda la posición y los movimientos de la última semana en JSON, reintenta los errores de red y avisa según el código de salida. Solo usa lo que ya existe: `status --offline`, `position`, `movements --free-only` y `doctor`.
+`~/bin/myinvestor-diario.sh` (`chmod 700`): guarda en JSON la posición, los movimientos de la última semana y lo que viene en los próximos 14 días (`upcoming`: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre); reintenta los errores de red y avisa según el código de salida. Solo usa lo que ya existe: `status --offline`, `position`, `movements --free-only`, `upcoming` y `doctor`. Ninguna de esas órdenes pide segundo factor (`movements` con `--free-only` no sale de la ventana de 90 días).
 
 ```bash
 #!/usr/bin/env bash
@@ -265,6 +265,9 @@ case $first_error in 10 | 11 | 13 | 14) exit "$first_error" ;; esac
 fetch movements "$DATA/movimientos-$day.json" movements --free-only --days 7 -f json
 react movements $?
 
+fetch upcoming "$DATA/proximo-$day.json" upcoming --days 14 -f json   # sale con 0 aunque falte saldo
+react upcoming $?
+
 # 3. Un error sin clasificar: deja el diagnóstico en el log.
 [[ $first_error -ne 1 ]] || mi doctor >&2
 
@@ -272,7 +275,7 @@ log "fin: código $first_error"
 exit "$first_error"
 ```
 
-Los movimientos de varios días se solapan a propósito: su `id` es estable entre ejecuciones y rangos, así que se pueden juntar sin duplicados (ver [Movimientos: campos e id](../README.md#movimientos-campos-e-id)). Próximamente habrá órdenes pensadas para esto (una foto que se guarda sola, solo los movimientos nuevos, exportación); este script se podrá simplificar entonces.
+Los movimientos de varios días se solapan a propósito: su `id` es estable entre ejecuciones y rangos, así que se pueden juntar sin duplicados (ver [Movimientos: campos e id](../README.md#movimientos-campos-e-id)). En `proximo-*.json`, una fila con `falta` distinto de `null` es una aportación que la cuenta de cargo no cubre: el script puede avisar con ella. Próximamente habrá órdenes pensadas para esto (una foto que se guarda sola, solo los movimientos nuevos, exportación); este script se podrá simplificar entonces.
 
 ## Logs sin secretos y rotación
 
