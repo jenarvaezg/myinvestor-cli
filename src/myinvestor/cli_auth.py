@@ -45,8 +45,12 @@ def login(
         bool,
         typer.Option(
             "--direct",
-            help="Login por terminal con DNI/NIE y contraseña, sin navegador ni reCAPTCHA. "
-            "Un dispositivo nuevo pide además SMS o aprobación en la app.",
+            help="Login por terminal con DNI/NIE y contraseña, sin navegador ni reCAPTCHA: MyInvestor lo "
+            "acepta desde un dispositivo conocido (verificado el 2026-11-03); si algún día lo rechaza, usa "
+            "`myinvestor login` (navegador). Si MyInvestor pide un segundo factor: el código SMS por la "
+            "terminal, --code-stdin, --code-fd, MYINVESTOR_OTP o --start/--code; la aprobación en la app, en "
+            "una terminal o con --approve (que no sirve para el SMS). Para cron: --direct --remember con "
+            "--store file.",
         ),
     ] = False,
     refresh_token_stdin: Annotated[
@@ -63,8 +67,9 @@ def login(
     remember: Annotated[
         bool,
         typer.Option(
-            help="--direct: guardar la contraseña (Keychain, o el fichero 0600 con --store file) para volver a "
-            "entrar solo cuando caduque la sesión. Se borra con `logout` o si MyInvestor la rechaza."
+            help="--direct: guardar la contraseña (llavero del sistema, o el fichero 0600 con --store file) para "
+            "volver a entrar solo cuando caduque la sesión. Se borra con `logout` o si MyInvestor dice que es "
+            "incorrecta o que hay que cambiarla; otros rechazos solo pausan el re-login 24 h."
         ),
     ] = False,
     password_stdin: Annotated[

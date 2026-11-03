@@ -101,7 +101,8 @@ def _global_options(
             "--approve",
             envvar="MYINVESTOR_APPROVE",
             help="Esperar la aprobación en la app del móvil aunque no haya terminal interactiva "
-            "(p. ej. desde un script). Sin esto, fuera de una terminal falla en vez de mandarte una notificación.",
+            "(p. ej. desde un script). Sin esto, fuera de una terminal falla en vez de mandarte una notificación. "
+            "Solo vale para aprobar en la app, no para códigos SMS (MYINVESTOR_OTP, --code-stdin, --start/--code).",
         ),
     ] = False,
     no_signature: Annotated[

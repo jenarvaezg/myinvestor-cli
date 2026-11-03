@@ -2,8 +2,8 @@
 
 The password is stored only after `login --direct --remember`, keyed by customer id, so an expired
 session can log in again unattended (cron). It is deleted on logout and when MyInvestor says it is
-wrong. Any other rejection keeps it but pauses the re-login (`ReloginBlock`) so cron does not retry it
-on every run.
+wrong or must be changed (`UNAUTHORIZED`, `UPDATE_PASSWORD_REQUIRED`). Any other rejection keeps it
+but pauses the re-login (`ReloginBlock`) so cron does not retry it on every run.
 
 `login --direct --start` leaves a `PendingLogin` (the SMS already sent) that `login --direct --code`
 completes in another process. It holds the password only with `--remember`.
@@ -187,7 +187,11 @@ class KeyringSessionStore:
 
 
 class FileSessionStore:
-    """JSON file readable only by the owner (dir 0700, file 0600), for headless Linux/CI."""
+    """JSON file readable only by the owner (dir 0700, file 0600), for headless Linux/CI.
+
+    Plain JSON: a password saved with `--remember` is in clear text, protected only by the permissions.
+    Writes go through a temporary file and `os.replace`, under `flock` on `<name>.lock` (0600).
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = path

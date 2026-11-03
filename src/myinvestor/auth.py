@@ -1,9 +1,12 @@
 """Keycloak login and token refresh against `api.myinvestor.es/login`.
 
 - `POST /login/api/v2/auth/token` `{customerId, password}`: the web adds a reCAPTCHA Enterprise
-  token (`x-recaptcha-token`, `x-recaptcha-action: LOGIN_V2`) that a CLI cannot produce, so
-  `login_direct` is a best-effort path; the default login runs in a real browser
-  (`myinvestor.browser_login`). An unknown device answers with a signature request (SMS/app)
+  token (`x-recaptcha-token`, `x-recaptcha-action: LOGIN_V2`) that a CLI cannot produce. The server
+  also accepts the login without it from a known device (verified 2026-11-03), so `login_direct`
+  works and is the path for unattended use (`--direct --remember`); it depends on MyInvestor not
+  starting to require the token. If it does, the rejection carries no `UNAUTHORIZED` and surfaces as
+  `LoginRejectedError`; the fallback is the login in a real browser (`myinvestor.browser_login`).
+  A device MyInvestor does not trust answers with a signature request (SMS/app)
   and the call is repeated with `x-signature-id`. `start_login`/`finish_login` split that in two
   processes (send the SMS, exit; validate the code and repeat the login later), for agents without a terminal.
 - `POST /login/api/v1/auth/token/refresh` `{refreshToken}` (no Authorization header) returns a
@@ -94,7 +97,11 @@ class Authenticator:
         return session.with_tokens(access, refresh)
 
     def login_direct(self, customer_id: str, password: str, session: Session, ui: SignatureUI | None) -> Session:
-        """Login without reCAPTCHA. MyInvestor may reject it; then use the browser login."""
+        """Login without reCAPTCHA: accepted from a known device (verified 2026-11-03).
+
+        Should MyInvestor start requiring reCAPTCHA, it raises `LoginRejectedError` (not
+        `InvalidCredentialsError`, so a saved password is kept); then the browser login is the way in.
+        """
         payload, request = self._first_login(customer_id, password, session.device_id)
         if request is not None:
             Signer(self._public_call(session.device_id), public=True).complete(request, ui)
