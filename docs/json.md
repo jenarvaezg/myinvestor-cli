@@ -66,6 +66,36 @@ Con `-f json`, un error sale en **una sola línea JSON en stderr** (stdout queda
 - **`export`** escribe ficheros, no stdout: sus filas tienen las mismas claves que `movements`, `orders`, `contributions`, `holdings` (sin `ter`) y `accounts` (sin `titulares` y con `consultado_en`), y `manifest.json` lleva su propio campo `version`.
 - Los formatos `table`, `csv` y `tsv` no forman parte de este contrato (CSV y TSV tienen las mismas columnas que el JSON, salvo listas como `titulares`).
 
+## `invertido` y `coste_fiscal`
+
+Tras un traspaso entre fondos o una movilización entre planes de pensiones, el mismo producto tiene dos «costes», y cada clave es uno:
+
+- **`invertido`** (y `ganancia`, `rentab`) es **lo que muestra MyInvestor**, tal cual. En el destino de un traspaso es el valor traspasado (su valor de mercado de ese día), mientras el origen solo pierde el *coste* de lo que sale: la suma de los `invertido` sube sin que entre un euro y la `ganancia` de la cartera baja de golpe.
+- **`coste_fiscal`** es el **coste de adquisición heredado a través de los traspasos**, el que usa Hacienda: un traspaso lo pasa del origen al destino sin cambiarlo. **`ganancia_real`** = `valor` - `coste_fiscal` y **`rentab_real`** = `ganancia_real` / `coste_fiscal`, en % a 2 decimales. Las tres son `null` cuando no se sabe (y `rentab_real` también con coste 0).
+
+De dónde sale `coste_fiscal`:
+
+| Producto | Fuente | Peticiones |
+|---|---|---|
+| Fondo | la suma de `coste` de sus lotes vivos (lo mismo que `lots`, `…/investment-summary/funds/{isin}/added-values`), que conserva el coste heredado; `null` si la API no da lotes | una por fondo |
+| Acción o ETF | `invertido`: no se traspasan | ninguna |
+| Plan de pensiones | reconstruido con el histórico del último año de su cuenta (`…/pension-accounts/{id}/positions?groupType=ONE_YEAR`), ver abajo | una por cuenta de pensiones |
+| Efectivo | en `allocation --include-cash`, su saldo (como `invertido`); en `position`, `null` | ninguna |
+
+Un total o un grupo (`position`, `allocation`, las cuentas de `snapshot`) solo tiene `coste_fiscal` si lo tienen todas sus posiciones; si falta uno, `null`, para no sumar costes a medias.
+
+**Planes de pensiones.** La API no da el coste heredado de un plan, así que se reconstruye recorriendo día a día los planes de cada cuenta de pensiones: unas participaciones que entran son una aportación (suman lo que sube `invertido`); las que salen se llevan su parte proporcional del coste del plan (participaciones que salen × coste medio fiscal); y si en la misma cuenta un plan pierde participaciones y ese día, o hasta 7 días después, otro gana participaciones por el mismo dinero (±2 %, mínimo 1 €), es una **movilización**: el destino suma el coste que sale del origen en vez del dinero recibido. Si la serie de un plan se corta cuando aún tenía participaciones, se toma como que salieron todas el siguiente día de la serie de la cuenta. El `coste_fiscal` de hoy es el `invertido` de hoy más el ajuste (coste fiscal - `invertido`) del último día del histórico.
+
+Límites, documentados porque el resultado no es fiable en estos casos:
+
+- El histórico llega a **un año** como mucho: un plan que ya existía el primer día empieza con el `invertido` de MyInvestor, así que una movilización de hace más de un año no se ve (su `coste_fiscal` es `invertido`).
+- Una movilización **desde otra entidad** no tiene origen en la cuenta: cuenta como aportación del dinero recibido. Una movilización que coincide el mismo día con una aportación al destino tampoco cuadra por importe y cuenta como aportación.
+- Un plan sin histórico (recién contratado hoy) o con un día sin participaciones o sin `invertido` tiene `coste_fiscal` `null` desde ese día.
+
+**`history`** usa el mismo criterio en todos los productos: su `invertido` es el de la API (en fondos ya es el coste heredado; en el plan destino de una movilización, el dinero recibido) y su `coste_fiscal` es, en fondos, acciones y ETF, ese `invertido`, y en planes, el reconstruido con la serie de la cuenta (con un `--period` menor que `year` se pide además el año entero, para empezar con los ajustes que ya se ven en él).
+
+**`snapshot`** lleva siempre las tres claves y su `delta` usa `coste_fiscal` para el `aportado` de las cuentas de valores y de pensiones cuando las dos fotos lo tienen (un traspaso no aporta dinero); si no, `invertido`, como antes. En `holdings`, `pensions`, `position` y `allocation` van con `--fiscal`, porque cuestan una petición por fondo.
+
 ## Referencia por orden
 
 Columnas: **Clave** (`a[].b`: clave `b` de cada objeto de la lista `a`), **Tipo**, **`null`** (si puede valer `null`), **Estable** y **Notas** (de dónde sale en la API, unidades, valores posibles).
@@ -92,6 +122,9 @@ Salida: lista de objetos.
 | `perfil` | string | sí | sí | `portfolioProfileType` de la cartera (`VERY_AGGRESSIVE`…); `null` en el resto |
 | `efectivo` | number (€, 2 decimales) | sí | sí | saldo de la cuenta de efectivo propia de la cartera, ya sumado en `valor` |
 | `efectivo_id` | string | sí | sí | id de esa cuenta de efectivo, que ya no sale como fila aparte |
+| `coste_fiscal` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe; `null` en efectivo; en el total, la suma de los productos |
+| `ganancia_real` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; `valor` - `coste_fiscal` (en una cartera, sin su efectivo); en el total, la suma de los productos |
+| `rentab_real` | number (exacto) | sí | sí | solo con `--fiscal`; `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
 | `consultado_en` | datetime ISO 8601 con zona | no | sí | fecha y hora de la consulta (la misma en todas las filas) |
 
 ### `accounts` — `myinvestor.accounts/1`
@@ -188,14 +221,17 @@ Salida: lista de objetos.
 | `coste_medio` | number (exacto) | sí | sí |  |
 | `vl` | number (exacto) | sí | sí | valor liquidativo / precio |
 | `fecha_vl` | date `AAAA-MM-DD` | sí | sí |  |
-| `invertido` | number (€, 2 decimales) | sí | sí |  |
+| `invertido` | number (€, 2 decimales) | sí | sí | el que muestra MyInvestor: en el destino de un traspaso, lo traspasado |
 | `valor` | number (€, 2 decimales) | sí | sí |  |
-| `ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `ganancia` | number (€, 2 decimales) | sí | sí | `valor` - `invertido`, según MyInvestor |
 | `rentab` | number (exacto) | sí | sí | rentabilidad total, en % |
 | `cartera` | string | sí | sí | `portfolioName` si la cuenta es una cartera del roboadvisor (`METAL`); si no, `null` |
 | `perfil` | string | sí | sí | `portfolioProfileType` de esa cartera (`VERY_AGGRESSIVE`…); si no, `null` |
 | `peso` | number (exacto) | sí | sí | % sobre el valor de las posiciones listadas, a 2 decimales |
 | `ter` | number (exacto) | sí | sí | solo con `--ter`; TER de la ficha del fondo, en %; `null` en acciones y ETF |
+| `coste_fiscal` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; suma del coste de los lotes vivos del fondo; en acciones y ETF, `invertido`; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe |
+| `ganancia_real` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; `valor` - `coste_fiscal` |
+| `rentab_real` | number (exacto) | sí | sí | solo con `--fiscal`; `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
 | `consultado_en` | datetime ISO 8601 con zona | no | sí | fecha y hora de la consulta (la misma en todas las filas) |
 
 ### `orders` — `myinvestor.orders/1`
@@ -229,10 +265,13 @@ Salida: lista de objetos.
 | `coste_medio` | number (exacto) | sí | sí |  |
 | `vl` | number (exacto) | sí | sí |  |
 | `fecha_vl` | date `AAAA-MM-DD` | sí | sí |  |
-| `invertido` | number (€, 2 decimales) | sí | sí |  |
+| `invertido` | number (€, 2 decimales) | sí | sí | el que muestra MyInvestor: en el destino de un traspaso, lo traspasado |
 | `valor` | number (€, 2 decimales) | sí | sí |  |
-| `ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `ganancia` | number (€, 2 decimales) | sí | sí | `valor` - `invertido`, según MyInvestor |
 | `rentab` | number (exacto) | sí | sí | rentabilidad total, en % |
+| `coste_fiscal` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; reconstruido con el histórico del último año de la cuenta; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe |
+| `ganancia_real` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; `valor` - `coste_fiscal` |
+| `rentab_real` | number (exacto) | sí | sí | solo con `--fiscal`; `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
 
 ### `history` — `myinvestor.history/1`
 
@@ -248,6 +287,9 @@ Salida: lista de objetos.
 | `rentab` | number (exacto) | sí | sí | en % |
 | `participaciones` | number (exacto) | sí | sí |  |
 | `coste_medio` | number (exacto) | sí | sí |  |
+| `coste_fiscal` | number (€, 2 decimales) | sí | sí | en fondos, acciones y ETF, `invertido`; en planes, el heredado en las movilizaciones, reconstruido con la serie de la cuenta; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe |
+| `ganancia_real` | number (€, 2 decimales) | sí | sí | `valor` - `coste_fiscal` |
+| `rentab_real` | number (exacto) | sí | sí | `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
 
 ### `contributions` — `myinvestor.contributions/1`
 
@@ -568,6 +610,9 @@ Con `--by asset`: lista de objetos.
 | `peso_pct` | number (exacto) | sí | sí | % del total, a 2 decimales |
 | `invertido` | number (€, 2 decimales) | sí | sí |  |
 | `ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `coste_fiscal` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe en alguna de sus posiciones; en el efectivo, su saldo |
+| `ganancia_real` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; `valor` - `coste_fiscal` |
+| `rentab_real` | number (exacto) | sí | sí | solo con `--fiscal`; `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
 | `ter` | number (exacto) | sí | sí | TER medio ponderado por valor de lo que lo tiene, en % |
 | `objetivo_pct` | number (exacto) | sí | sí | solo con `--target`; peso objetivo en % |
 | `desviacion_pct` | number (exacto) | sí | sí | solo con `--target`; peso actual - objetivo, en puntos |
@@ -584,6 +629,9 @@ Con `--by geo | --by category`: lista de objetos.
 | `peso_pct` | number (exacto) | sí | sí | % del total, a 2 decimales |
 | `invertido` | number (€, 2 decimales) | sí | sí |  |
 | `ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `coste_fiscal` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe en alguna de sus posiciones; en el efectivo, su saldo |
+| `ganancia_real` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; `valor` - `coste_fiscal` |
+| `rentab_real` | number (exacto) | sí | sí | solo con `--fiscal`; `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
 | `ter` | number (exacto) | sí | sí | TER medio ponderado por valor de lo que lo tiene, en % |
 | `objetivo_pct` | number (exacto) | sí | sí | solo con `--target`; peso objetivo en % |
 | `desviacion_pct` | number (exacto) | sí | sí | solo con `--target`; peso actual - objetivo, en puntos |
@@ -600,6 +648,9 @@ Con `--by product`: lista de objetos.
 | `peso_pct` | number (exacto) | sí | sí | % del total, a 2 decimales |
 | `invertido` | number (€, 2 decimales) | sí | sí |  |
 | `ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `coste_fiscal` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe en alguna de sus posiciones; en el efectivo, su saldo |
+| `ganancia_real` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; `valor` - `coste_fiscal` |
+| `rentab_real` | number (exacto) | sí | sí | solo con `--fiscal`; `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
 | `ter` | number (exacto) | sí | sí | TER medio ponderado por valor de lo que lo tiene, en % |
 | `objetivo_pct` | number (exacto) | sí | sí | solo con `--target`; peso objetivo en % |
 | `desviacion_pct` | number (exacto) | sí | sí | solo con `--target`; peso actual - objetivo, en puntos |
@@ -617,6 +668,9 @@ Con `--by account`: lista de objetos.
 | `peso_pct` | number (exacto) | sí | sí | % del total, a 2 decimales |
 | `invertido` | number (€, 2 decimales) | sí | sí |  |
 | `ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `coste_fiscal` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe en alguna de sus posiciones; en el efectivo, su saldo |
+| `ganancia_real` | number (€, 2 decimales) | sí | sí | solo con `--fiscal`; `valor` - `coste_fiscal` |
+| `rentab_real` | number (exacto) | sí | sí | solo con `--fiscal`; `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
 | `ter` | number (exacto) | sí | sí | TER medio ponderado por valor de lo que lo tiene, en % |
 | `objetivo_pct` | number (exacto) | sí | sí | solo con `--target`; peso objetivo en % |
 | `desviacion_pct` | number (exacto) | sí | sí | solo con `--target`; peso actual - objetivo, en puntos |
@@ -820,7 +874,10 @@ Salida: un objeto.
 | `securities[].ganancia` | number (€, 2 decimales) | sí | sí |  |
 | `securities[].rentab` | number (exacto) | sí | sí | en % |
 | `securities[].fecha_valor` | date `AAAA-MM-DD` | sí | sí | VL más reciente de sus posiciones |
-| `securities[].posiciones` | array de objetos | no | sí | como `holdings`; `peso` sobre toda la cartera |
+| `securities[].coste_fiscal` | number (€, 2 decimales) | sí | sí | suma del de sus posiciones o planes; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe |
+| `securities[].ganancia_real` | number (€, 2 decimales) | sí | sí | `valor` - `coste_fiscal` |
+| `securities[].rentab_real` | number (exacto) | sí | sí | `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
+| `securities[].posiciones` | array de objetos | no | sí | como `holdings --fiscal`; `peso` sobre toda la cartera |
 | `securities[].posiciones[].cuenta` | string | no | sí | id de la cuenta de valores |
 | `securities[].posiciones[].tipo` | string | sí | sí | `investmentProductType`: `INDEXED_FUND`, `BROKER`… |
 | `securities[].posiciones[].isin` | string | sí | sí |  |
@@ -829,11 +886,14 @@ Salida: un objeto.
 | `securities[].posiciones[].coste_medio` | number (exacto) | sí | sí |  |
 | `securities[].posiciones[].vl` | number (exacto) | sí | sí | valor liquidativo / precio |
 | `securities[].posiciones[].fecha_vl` | date `AAAA-MM-DD` | sí | sí |  |
-| `securities[].posiciones[].invertido` | number (€, 2 decimales) | sí | sí |  |
+| `securities[].posiciones[].invertido` | number (€, 2 decimales) | sí | sí | el que muestra MyInvestor: en el destino de un traspaso, lo traspasado |
 | `securities[].posiciones[].valor` | number (€, 2 decimales) | sí | sí |  |
-| `securities[].posiciones[].ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `securities[].posiciones[].ganancia` | number (€, 2 decimales) | sí | sí | `valor` - `invertido`, según MyInvestor |
 | `securities[].posiciones[].rentab` | number (exacto) | sí | sí | rentabilidad total, en % |
 | `securities[].posiciones[].peso` | number (exacto) | sí | sí | % sobre el valor de las posiciones listadas, a 2 decimales |
+| `securities[].posiciones[].coste_fiscal` | number (€, 2 decimales) | sí | sí | suma del coste de los lotes vivos del fondo; en acciones y ETF, `invertido`; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe |
+| `securities[].posiciones[].ganancia_real` | number (€, 2 decimales) | sí | sí | `valor` - `coste_fiscal` |
+| `securities[].posiciones[].rentab_real` | number (exacto) | sí | sí | `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
 | `pensions` | array de objetos | sí | sí | `null` si la sección ha fallado (ver `errors`) |
 | `pensions[].producto` | string | no | sí | `valores` o `pensiones` |
 | `pensions[].id` | string | no | sí | id de la cuenta |
@@ -843,7 +903,10 @@ Salida: un objeto.
 | `pensions[].ganancia` | number (€, 2 decimales) | sí | sí |  |
 | `pensions[].rentab` | number (exacto) | sí | sí | en % |
 | `pensions[].fecha_valor` | date `AAAA-MM-DD` | sí | sí | VL más reciente de sus posiciones |
-| `pensions[].planes` | array de objetos | no | sí | como `pensions` |
+| `pensions[].coste_fiscal` | number (€, 2 decimales) | sí | sí | suma del de sus posiciones o planes; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe |
+| `pensions[].ganancia_real` | number (€, 2 decimales) | sí | sí | `valor` - `coste_fiscal` |
+| `pensions[].rentab_real` | number (exacto) | sí | sí | `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
+| `pensions[].planes` | array de objetos | no | sí | como `pensions --fiscal` |
 | `pensions[].planes[].cuenta` | string | no | sí |  |
 | `pensions[].planes[].codigo` | string | no | sí | código DGS del plan (`N1234`) |
 | `pensions[].planes[].nombre` | string | sí | sí |  |
@@ -851,10 +914,13 @@ Salida: un objeto.
 | `pensions[].planes[].coste_medio` | number (exacto) | sí | sí |  |
 | `pensions[].planes[].vl` | number (exacto) | sí | sí |  |
 | `pensions[].planes[].fecha_vl` | date `AAAA-MM-DD` | sí | sí |  |
-| `pensions[].planes[].invertido` | number (€, 2 decimales) | sí | sí |  |
+| `pensions[].planes[].invertido` | number (€, 2 decimales) | sí | sí | el que muestra MyInvestor: en el destino de un traspaso, lo traspasado |
 | `pensions[].planes[].valor` | number (€, 2 decimales) | sí | sí |  |
-| `pensions[].planes[].ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `pensions[].planes[].ganancia` | number (€, 2 decimales) | sí | sí | `valor` - `invertido`, según MyInvestor |
 | `pensions[].planes[].rentab` | number (exacto) | sí | sí | rentabilidad total, en % |
+| `pensions[].planes[].coste_fiscal` | number (€, 2 decimales) | sí | sí | reconstruido con el histórico del último año de la cuenta; coste de adquisición heredado en los traspasos (ver «`invertido` y `coste_fiscal`»); `null` si no se sabe |
+| `pensions[].planes[].ganancia_real` | number (€, 2 decimales) | sí | sí | `valor` - `coste_fiscal` |
+| `pensions[].planes[].rentab_real` | number (exacto) | sí | sí | `ganancia_real` / `coste_fiscal`, en %, a 2 decimales |
 | `pending` | object | sí | sí | `null` si la sección ha fallado (ver `errors`) |
 | `pending.orders` | array de objetos | no | sí | órdenes de valores y de planes en curso |
 | `pending.orders[].fecha` | date `AAAA-MM-DD` | no | sí |  |
@@ -966,10 +1032,10 @@ Salida: un objeto.
 | `delta.por_producto[].id` | string | no | sí | id de la cuenta |
 | `delta.por_producto[].nombre` | string | sí | sí |  |
 | `delta.por_producto[].valor` | number (€, 2 decimales) | no | sí | valor ahora - valor antes (en efectivo, el saldo) |
-| `delta.por_producto[].aportado` | number (€, 2 decimales) | sí | sí | dinero neto que ha entrado en el producto; `null` si no se puede saber |
+| `delta.por_producto[].aportado` | number (€, 2 decimales) | sí | sí | dinero neto que ha entrado en el producto (con `coste_fiscal` si las dos fotos lo tienen; si no, con `invertido`); `null` si no se puede saber |
 | `delta.por_producto[].mercado` | number (€, 2 decimales) | sí | sí | valor - aportado |
 | `errors` | array de objetos | no | sí | secciones que han fallado |
-| `errors[].section` | string | no | sí | `cash`, `pensions`, `movements`, `new.orders`… |
+| `errors[].section` | string | no | sí | `cash`, `pensions`, `pensions.fiscal`, `movements`, `new.orders`… |
 | `errors[].error` | string | no | sí | como `error` de la línea de error |
 | `errors[].exit_code` | integer | no | sí |  |
 | `errors[].message` | string | no | no (informativo) | texto para personas |

@@ -29,8 +29,10 @@ from myinvestor.allocation import (
     untranslated_labels,
 )
 from myinvestor.cli_common import FormatOpt, app, build_client, err, iso_moment, now_local
+from myinvestor.cli_fiscal import FiscalOpt, fund_costs, investment_cost, plan_cost, plan_costs
 from myinvestor.client import MyInvestorClient
 from myinvestor.errors import InputError
+from myinvestor.fiscal import FISCAL_KEYS
 from myinvestor.models import FundSheet, SecuritiesAccount
 from myinvestor.output import OutputFormat, render
 
@@ -52,20 +54,31 @@ def fund_sheets(client: MyInvestorClient, securities: list[SecuritiesAccount]) -
     return {isin: client.fund_sheet(isin) for isin in isins if isin}
 
 
-def _pension_holdings(client: MyInvestorClient, by: Grouping) -> list[Holding]:
+def _pension_holdings(client: MyInvestorClient, by: Grouping, *, fiscal: bool) -> list[Holding]:
     classify = by in PLAN_SHEET_GROUPINGS
+    accounts = client.pension_accounts()
+    plans = [(account, plan) for account in accounts for plan in client.pension_plans(account.account_id)]
+    sheets = [client.pension_plan_sheet(plan.dgs_code) if classify else None for _, plan in plans]
+    costs = plan_costs(client, accounts) if fiscal else {}
     return [
-        from_pension(account, plan, client.pension_plan_sheet(plan.dgs_code) if classify else None)
-        for account in client.pension_accounts()
-        for plan in client.pension_plans(account.account_id)
+        from_pension(account, plan, sheet, plan_cost(account.account_id, plan, costs) if fiscal else None)
+        for (account, plan), sheet in zip(plans, sheets, strict=True)
     ]
 
 
-def collect(client: MyInvestorClient, by: Grouping, *, include_cash: bool) -> list[Holding]:
+def collect(client: MyInvestorClient, by: Grouping, *, include_cash: bool, fiscal: bool = False) -> list[Holding]:
+    """Every position, classified; with `fiscal`, with its tax cost (each fund's lots, the plans' history)."""
     securities = client.securities_accounts()
     sheets = fund_sheets(client, securities)
-    holdings = [from_investment(sec, inv, sheets.get(inv.isin or "")) for sec in securities for inv in sec.investments]
-    holdings += _pension_holdings(client, by)
+    positions = [(sec, inv) for sec in securities for inv in sec.investments]
+    costs = fund_costs(client, ((sec.account_id, inv) for sec, inv in positions)) if fiscal else {}
+    holdings = [
+        from_investment(
+            sec, inv, sheets.get(inv.isin or ""), investment_cost(sec.account_id, inv, costs) if fiscal else None
+        )
+        for sec, inv in positions
+    ]
+    holdings += _pension_holdings(client, by, fiscal=fiscal)
     if include_cash:
         portfolios = portfolios_by_cash_account(securities)
         holdings += [from_cash(acc, portfolios.get(acc.account_id)) for acc in client.cash_accounts()]
@@ -118,6 +131,7 @@ def allocation(
             help='JSON con los pesos objetivo por clave, en %, que sumen 100: {"renta_variable": 80, …}.',
         ),
     ] = None,
+    fiscal: FiscalOpt = False,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
     """Reparto de la cartera (fondos, ETF, acciones y planes) con el peso de cada clave y el TER medio.
@@ -130,11 +144,13 @@ def allocation(
     tiene clasificación va a `sin_clasificar`. Con
     `--target`, `objetivo_pct`, `desviacion_pct` y `aportar`: cuánto aportar a cada clave para llegar
     al objetivo sin vender. En JSON/CSV/TSV cada fila lleva además `consultado_en`.
+    Con `--fiscal`, `coste_fiscal` (el coste heredado en los traspasos; en el efectivo, su saldo),
+    `ganancia_real` y `rentab_real` de cada clave; `null` si falta el de alguna de sus posiciones.
     """
     targets = load_target(target) if target else None
     consulted = now_local()
     with build_client() as client:
-        holdings = collect(client, by, include_cash=include_cash)
+        holdings = collect(client, by, include_cash=include_cash, fiscal=fiscal)
     if by is Grouping.asset:
         _report_untranslated(untranslated_labels(holdings))
     if by is Grouping.geo:
@@ -146,6 +162,8 @@ def allocation(
         rows = rebalance(rows, targets, by)
         total = target_total(rows, total)
     rows = [*rows, total]
+    if not fiscal:
+        rows = [{k: v for k, v in r.items() if k not in FISCAL_KEYS} for r in rows]
     if fmt is OutputFormat.table:
         render(rows, fmt, title=f"Reparto por {TITLES[by]} a {consulted:%Y-%m-%d %H:%M}")
         return

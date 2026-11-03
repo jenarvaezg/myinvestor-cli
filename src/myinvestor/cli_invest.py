@@ -46,11 +46,22 @@ from myinvestor.cli_common import (
     parse_day,
 )
 from myinvestor.cli_errors import record_format
+from myinvestor.cli_fiscal import FiscalOpt, fund_costs, investment_cost, plan_cost, plan_costs
 from myinvestor.cli_state import MarkOpt, StateOpt, record, state_file
 from myinvestor.client import MyInvestorClient, Period
 from myinvestor.errors import InputError
-from myinvestor.models import Contribution, Investment, Order, PensionAccount, PensionPlanPosition, SecuritiesAccount
+from myinvestor.fiscal import columns
+from myinvestor.models import (
+    Contribution,
+    Investment,
+    Order,
+    PensionAccount,
+    PensionPlanPosition,
+    PositionPoint,
+    SecuritiesAccount,
+)
 from myinvestor.output import OutputFormat, print_json, render
+from myinvestor.plan_costs import PlanCosts, rebuild
 from myinvestor.portfolios import is_portfolio, with_profile
 from myinvestor.state import StateKind, changed, snapshot_marks
 
@@ -139,12 +150,16 @@ def holdings(
     ter: Annotated[
         bool, typer.Option("--ter", help="Añadir el TER de cada fondo (una petición más por fondo distinto).")
     ] = False,
+    fiscal: FiscalOpt = False,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
     """Fondos, ETF y acciones de las cuentas de valores, con coste, valor, rentabilidad y peso.
 
     `peso` es el % de cada posición sobre el valor de las listadas (tras `-a` y `--kind`). Con
     `--ter`, el TER de la ficha de cada fondo (vacío en acciones y ETF).
+    `invertido` es el que muestra MyInvestor: en el destino de un traspaso, el valor traspasado. Con
+    `--fiscal`, `coste_fiscal` (la suma del coste de los lotes vivos del fondo, el heredado en los
+    traspasos; en acciones y ETF, `invertido`), `ganancia_real` (valor - coste_fiscal) y `rentab_real`.
     En JSON/CSV/TSV cada fila lleva además `consultado_en` (fecha y hora de la consulta, con zona).
 
     Las posiciones de una cartera del roboadvisor llevan su nombre y perfil (`cartera`, `perfil`); en la
@@ -159,10 +174,16 @@ def holdings(
             ]
         isins = dict.fromkeys(i.isin for _, i in positions if is_fund(i)) if ter else {}
         ters = {isin: client.fund_sheet(isin).ter for isin in isins if isin}
+        costs = fund_costs(client, ((s.account_id, i) for s, i in positions)) if fiscal else {}
     positions.sort(key=lambda p: p[1].market_value or 0, reverse=True)
     rows = _with_weights([{**_holding_row(sec, inv), **_portfolio_columns(sec)} for sec, inv in positions])
     if ter:
         rows = [{**r, "ter": ters.get(inv.isin or "")} for r, (_, inv) in zip(rows, positions, strict=True)]
+    if fiscal:
+        rows = [
+            {**r, **columns(inv.market_value, investment_cost(sec.account_id, inv, costs))}
+            for r, (sec, inv) in zip(rows, positions, strict=True)
+        ]
     if fmt is OutputFormat.table:
         render(_holdings_table(rows), fmt, title=f"Cartera a {consulted:%Y-%m-%d %H:%M}")
         return
@@ -239,10 +260,23 @@ def orders(
 
 
 @app.command()
-def pensions(fmt: FormatOpt = OutputFormat.table) -> None:
-    """Planes de pensiones: participaciones, coste, valor y rentabilidad."""
+def pensions(fiscal: FiscalOpt = False, fmt: FormatOpt = OutputFormat.table) -> None:
+    """Planes de pensiones: participaciones, coste, valor y rentabilidad.
+
+    `invertido` es el que muestra MyInvestor: en el plan destino de una movilización, el dinero recibido.
+    Con `--fiscal`, `coste_fiscal` (el coste heredado en las movilizaciones, reconstruido con el histórico
+    del último año de cada cuenta; ver docs/json.md), `ganancia_real` y `rentab_real`.
+    """
     with build_client() as client:
-        rows = [pension_row(acc, p) for acc in client.pension_accounts() for p in client.pension_plans(acc.account_id)]
+        accounts = client.pension_accounts()
+        plans = [(acc, p) for acc in accounts for p in client.pension_plans(acc.account_id)]
+        costs = plan_costs(client, accounts) if fiscal else {}
+    rows = [pension_row(acc, p) for acc, p in plans]
+    if fiscal:
+        rows = [
+            {**r, **columns(p.market_value, plan_cost(acc.account_id, p, costs))}
+            for r, (acc, p) in zip(rows, plans, strict=True)
+        ]
     render(rows, fmt, title="Planes de pensiones")
 
 
@@ -309,6 +343,12 @@ def history(
 
     Con --from/--to/--days se pide el --period más corto que cubre el rango (la API solo da
     un mes, tres, seis o un año hasta hoy) y se recortan las filas a esas fechas.
+
+    `invertido` es el de MyInvestor: en los fondos ya es el coste heredado en los traspasos, pero en el
+    plan destino de una movilización es el dinero recibido. `coste_fiscal` usa el mismo criterio en
+    todo: en fondos, acciones y ETF es `invertido`; en planes, el coste heredado en las movilizaciones,
+    reconstruido con la serie de la cuenta (con un --period menor que `year`, una petición más por
+    cuenta de pensiones para ver el último año). `ganancia_real` = valor - coste_fiscal.
     """
     start, end = optional_range(date_from, date_to, days)
     if period is not None and (start or end):
@@ -321,23 +361,12 @@ def history(
         targets = _history_targets(client, product, account)
         for account_id, is_pension in targets:
             series = client.position_history(account_id, chosen, pension=is_pension)
+            costs = _plan_history_costs(client, account_id, series, chosen) if is_pension else None
             for code, points in series.items():
                 if product and code.upper() != product.upper():
                     continue
                 points = [p for p in points if (not start or p.date >= start) and (not end or p.date <= end)]
-                rows.extend(
-                    {
-                        "fecha": p.date.isoformat(),
-                        "cuenta": account_id,
-                        "producto": code,
-                        "valor": p.market_value,
-                        "invertido": p.investment_added_value,
-                        "rentab": p.return_value,
-                        "participaciones": p.total_shares,
-                        "coste_medio": p.avg_position_cost,
-                    }
-                    for p in points
-                )
+                rows.extend(_history_row(account_id, code, p, costs) for p in points)
     rows.sort(key=lambda r: (r["producto"], r["fecha"]))
     span = f"{start or '…'} a {end or date.today()}" if start or end else chosen.name
     render(rows, fmt, title=f"Evolución ({span})")
@@ -355,6 +384,35 @@ def covering_period(start: date | None, today: date) -> Period:
         if (today - start).days <= days:
             return period
     raise InputError("La API no da más de un año de evolución: --from o --days hasta 366 días atrás.")
+
+
+def _plan_history_costs(
+    client: MyInvestorClient, account_id: str, series: dict[str, list[PositionPoint]], period: Period
+) -> PlanCosts:
+    """Tax costs over `series`; a shorter period starts from the adjustments the last year already shows."""
+    if period is Period.year or not series:
+        return rebuild(series)
+    yearly = rebuild(client.position_history(account_id, Period.year, pension=True))
+    first = min(p.date for points in series.values() for p in points)
+    opening = {code: adj for code in series if (adj := yearly.adjustment(code, first)) is not None}
+    return rebuild(series, opening)
+
+
+def _history_row(account_id: str, code: str, p: PositionPoint, costs: PlanCosts | None) -> dict[str, Any]:
+    """`coste_fiscal`: a securities account's `invertido` already is; a plan's comes from `costs`."""
+    found = costs.at(code, p.date) if costs else None
+    cost = p.investment_added_value if costs is None else found.cost if found else None
+    return {
+        "fecha": p.date.isoformat(),
+        "cuenta": account_id,
+        "producto": code,
+        "valor": p.market_value,
+        "invertido": p.investment_added_value,
+        "rentab": p.return_value,
+        "participaciones": p.total_shares,
+        "coste_medio": p.avg_position_cost,
+        **columns(p.market_value, cost),
+    }
 
 
 def contribution_row(c: Contribution) -> dict[str, Any]:

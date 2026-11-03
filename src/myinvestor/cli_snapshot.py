@@ -41,11 +41,21 @@ from myinvestor.cli_common import (
     package_version,
 )
 from myinvestor.cli_errors import error_kind, exit_code, requested
+from myinvestor.cli_fiscal import (
+    FundCosts,
+    account_cost,
+    fund_costs,
+    investment_cost,
+    pension_cost,
+    plan_cost,
+    plan_costs,
+)
 from myinvestor.cli_invest import _holding_row, _order_row, _with_weights, pension_row
 from myinvestor.cli_state import MarkOpt, StateOpt, state_file
 from myinvestor.cli_upcoming import DEFAULT_UPCOMING_DAYS, _warn
 from myinvestor.client import MyInvestorClient
 from myinvestor.errors import AuthError, CorruptKeyringError, CorruptStoreError, InputError, PartialResultError
+from myinvestor.fiscal import columns
 from myinvestor.models import (
     CashAccount,
     Contribution,
@@ -57,6 +67,7 @@ from myinvestor.models import (
     SentTransfer,
 )
 from myinvestor.output import OutputFormat, print_json, render
+from myinvestor.plan_costs import PlanCosts
 from myinvestor.psd2 import free_start
 from myinvestor.sent_transfers import transfer_items
 from myinvestor.snapshot import (
@@ -285,6 +296,17 @@ class _Sources:
             "pension_plans", lambda: [(p, self.client.pension_plans(p.account_id)) for p in self.pension_accounts()]
         )
 
+    def fund_costs(self) -> FundCosts:
+        """Tax cost of each fund held, from its open lots (one request per fund)."""
+        return self.once(
+            "fund_costs",
+            lambda: fund_costs(self.client, ((s.account_id, i) for s in self.securities() for i in s.investments)),
+        )
+
+    def plan_costs(self) -> dict[str, PlanCosts]:
+        """Rebuilt tax cost of the plans, from each pension account's last year (one request per account)."""
+        return self.once("plan_costs", lambda: plan_costs(self.client, self.pension_accounts()))
+
     def securities_orders(self) -> list[tuple[Order, str | None]]:
         """Recent and in-progress orders (no dates, like `orders`), with the cash account each one charges."""
         return self.once(
@@ -369,19 +391,38 @@ class _Builder:
 
     def securities(self) -> list[Row]:
         accounts = self.sources.securities()
+        costs = self.section(Section.securities_fiscal, self.sources.fund_costs) or {}  # failed: funds' unknown
         positions = sorted(
             ((s, i) for s in accounts for i in s.investments), key=lambda p: p[1].market_value or 0, reverse=True
         )
-        weighted = _with_weights([_holding_row(s, i) for s, i in positions])  # `peso` over the whole portfolio
+        weighted = _with_weights(  # `peso` over the whole portfolio
+            [
+                {**_holding_row(s, i), **columns(i.market_value, investment_cost(s.account_id, i, costs))}
+                for s, i in positions
+            ]
+        )
         return [
-            {**_securities_position(s), "posiciones": [r for r in weighted if r["cuenta"] == s.account_id]}
+            {
+                **_securities_position(s),
+                **columns(s.market_value, account_cost(s, costs)),
+                "posiciones": [r for r in weighted if r["cuenta"] == s.account_id],
+            }
             for s in accounts
         ]
 
     def pensions(self) -> list[Row]:
+        held = self.sources.pension_plans()
+        costs = self.section(Section.pensions_fiscal, self.sources.plan_costs) or {}
         return [
-            {**_pension_position(p, plans), "planes": [pension_row(p, plan) for plan in plans]}
-            for p, plans in self.sources.pension_plans()
+            {
+                **_pension_position(p, plans),
+                **columns(p.market_value, pension_cost(p.account_id, plans, costs)),
+                "planes": [
+                    {**pension_row(p, plan), **columns(plan.market_value, plan_cost(p.account_id, plan, costs))}
+                    for plan in plans
+                ],
+            }
+            for p, plans in held
         ]
 
     def pending(self) -> dict[str, list[Row]]:

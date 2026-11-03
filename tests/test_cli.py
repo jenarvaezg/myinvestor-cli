@@ -387,7 +387,7 @@ def test_history_days_asks_for_the_shortest_period_and_trims(
     rows = json.loads(invoke("history", "N0001", "--days", days, "-f", "json").stdout)
 
     assert [r["fecha"] for r in rows] == [inside.isoformat()]
-    assert route.calls.last.request.url.params["groupType"] == group
+    assert route.calls[0].request.url.params["groupType"] == group  # then ONE_YEAR for the fiscal cost (#73)
 
 
 def test_history_from_to_trims_and_rejects_period_or_more_than_a_year(

@@ -21,6 +21,9 @@
       "perfil": "string|null",
       "efectivo": "amount|null",
       "efectivo_id": "string|null",
+      "coste_fiscal": "amount|null (solo con --fiscal)",
+      "ganancia_real": "amount|null (solo con --fiscal)",
+      "rentab_real": "number|null (solo con --fiscal)",
       "consultado_en": "datetime"
     }
   },
@@ -129,6 +132,9 @@
       "perfil": "string|null",
       "peso": "number|null",
       "ter": "number|null (solo con --ter)",
+      "coste_fiscal": "amount|null (solo con --fiscal)",
+      "ganancia_real": "amount|null (solo con --fiscal)",
+      "rentab_real": "number|null (solo con --fiscal)",
       "consultado_en": "datetime"
     }
   },
@@ -157,7 +163,10 @@
       "invertido": "amount|null",
       "valor": "amount|null",
       "ganancia": "amount|null",
-      "rentab": "number|null"
+      "rentab": "number|null",
+      "coste_fiscal": "amount|null (solo con --fiscal)",
+      "ganancia_real": "amount|null (solo con --fiscal)",
+      "rentab_real": "number|null (solo con --fiscal)"
     }
   },
   "myinvestor.history/1": {
@@ -169,7 +178,10 @@
       "invertido": "amount|null",
       "rentab": "number|null",
       "participaciones": "number|null",
-      "coste_medio": "number|null"
+      "coste_medio": "number|null",
+      "coste_fiscal": "amount|null",
+      "ganancia_real": "amount|null",
+      "rentab_real": "number|null"
     }
   },
   "myinvestor.contributions/1": {
@@ -273,6 +285,9 @@
       "peso_pct": "number|null",
       "invertido": "amount|null",
       "ganancia": "amount|null",
+      "coste_fiscal": "amount|null (solo con --fiscal)",
+      "ganancia_real": "amount|null (solo con --fiscal)",
+      "rentab_real": "number|null (solo con --fiscal)",
       "ter": "number|null",
       "objetivo_pct": "number|null (solo con --target)",
       "desviacion_pct": "number|null (solo con --target)",
@@ -286,6 +301,9 @@
       "peso_pct": "number|null",
       "invertido": "amount|null",
       "ganancia": "amount|null",
+      "coste_fiscal": "amount|null (solo con --fiscal)",
+      "ganancia_real": "amount|null (solo con --fiscal)",
+      "rentab_real": "number|null (solo con --fiscal)",
       "ter": "number|null",
       "objetivo_pct": "number|null (solo con --target)",
       "desviacion_pct": "number|null (solo con --target)",
@@ -299,6 +317,9 @@
       "peso_pct": "number|null",
       "invertido": "amount|null",
       "ganancia": "amount|null",
+      "coste_fiscal": "amount|null (solo con --fiscal)",
+      "ganancia_real": "amount|null (solo con --fiscal)",
+      "rentab_real": "number|null (solo con --fiscal)",
       "ter": "number|null",
       "objetivo_pct": "number|null (solo con --target)",
       "desviacion_pct": "number|null (solo con --target)",
@@ -313,6 +334,9 @@
       "peso_pct": "number|null",
       "invertido": "amount|null",
       "ganancia": "amount|null",
+      "coste_fiscal": "amount|null (solo con --fiscal)",
+      "ganancia_real": "amount|null (solo con --fiscal)",
+      "rentab_real": "number|null (solo con --fiscal)",
       "ter": "number|null",
       "objetivo_pct": "number|null (solo con --target)",
       "desviacion_pct": "number|null (solo con --target)",
@@ -404,6 +428,9 @@
       "securities[].ganancia": "amount|null",
       "securities[].rentab": "number|null",
       "securities[].fecha_valor": "date|null",
+      "securities[].coste_fiscal": "amount|null",
+      "securities[].ganancia_real": "amount|null",
+      "securities[].rentab_real": "number|null",
       "securities[].posiciones": "array",
       "securities[].posiciones[].cuenta": "string",
       "securities[].posiciones[].tipo": "string|null",
@@ -418,6 +445,9 @@
       "securities[].posiciones[].ganancia": "amount|null",
       "securities[].posiciones[].rentab": "number|null",
       "securities[].posiciones[].peso": "number|null",
+      "securities[].posiciones[].coste_fiscal": "amount|null",
+      "securities[].posiciones[].ganancia_real": "amount|null",
+      "securities[].posiciones[].rentab_real": "number|null",
       "pensions": "array|null",
       "pensions[].producto": "string",
       "pensions[].id": "string",
@@ -427,6 +457,9 @@
       "pensions[].ganancia": "amount|null",
       "pensions[].rentab": "number|null",
       "pensions[].fecha_valor": "date|null",
+      "pensions[].coste_fiscal": "amount|null",
+      "pensions[].ganancia_real": "amount|null",
+      "pensions[].rentab_real": "number|null",
       "pensions[].planes": "array",
       "pensions[].planes[].cuenta": "string",
       "pensions[].planes[].codigo": "string",
@@ -439,6 +472,9 @@
       "pensions[].planes[].valor": "amount|null",
       "pensions[].planes[].ganancia": "amount|null",
       "pensions[].planes[].rentab": "number|null",
+      "pensions[].planes[].coste_fiscal": "amount|null",
+      "pensions[].planes[].ganancia_real": "amount|null",
+      "pensions[].planes[].rentab_real": "number|null",
       "pending": "object|null",
       "pending.orders": "array",
       "pending.orders[].fecha": "date",

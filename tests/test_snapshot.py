@@ -146,6 +146,13 @@ def mock_everything(mock_api: respx.MockRouter, flows: Flows | None = None) -> F
             ]
         ),
     )
+    lots = {"plusMinusList": [{"securities": 12.345678, "investment": 920.0, "marketValue": 1100.55}]}
+    mock_api.get(f"{CPERF}/v2/securities-accounts/201/investment-summary/funds/IE0000000001/added-values").respond(
+        200,
+        json=ok(lots),  # the fund came from a transfer: its tax cost is 920, not the 1000 of `invertido`
+    )
+    point = {"date": "2026-10-30", "totalShares": 100, "marketValue": 2000.0, "investmentAddedValue": 1800.0}
+    mock_api.get(f"{CPERF}/v2/pension-accounts/301/positions").respond(200, json=ok({"positions": {"N0001": [point]}}))
     mock_api.get(f"{CPERF}/v2/pension-accounts/301/orders").respond(
         200,
         json=ok(
@@ -251,7 +258,7 @@ def test_snapshot_has_every_section_from_one_client(mock_api: respx.MockRouter, 
     assert '"total": 4100.85' in result.stdout  # exact amounts, as numbers
     assert {c.request.method for c in mock_api.calls} == {"GET"}
     assert sum(c.request.url.path.endswith("/cash-accounts/self") for c in mock_api.calls) == 1
-    assert len(mock_api.calls) == 4 + 3 * 1 + 2 * 1 + 2 * 1  # 4 + 3·C + 2·V + 2·P, as in the README
+    assert len(mock_api.calls) == 4 + 3 * 1 + 2 * 1 + 3 * 1 + 1  # 4 + 3·C + 2·V + 3·P + F, as in the README
 
 
 def test_new_is_marked_unless_no_mark(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
@@ -370,6 +377,60 @@ def test_delta_separates_contributions_from_market(
         Decimal("500.00"),
         Decimal("61.50"),
     )
+
+
+def test_securities_and_pensions_carry_the_tax_cost(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_everything(mock_api)
+
+    doc = snapshot_of(run("snapshot", "--no-new"))
+
+    [account] = doc["securities"]
+    [fund] = account["posiciones"]
+    assert (fund["invertido"], fund["coste_fiscal"], fund["ganancia_real"], fund["rentab_real"]) == (
+        Decimal("1000.00"),
+        Decimal("920.00"),
+        Decimal("180.55"),
+        Decimal("19.63"),
+    )
+    assert (account["coste_fiscal"], account["ganancia_real"]) == (Decimal("920.00"), Decimal("180.55"))
+    [pension] = doc["pensions"]
+    assert (pension["coste_fiscal"], pension["planes"][0]["coste_fiscal"]) == (Decimal("1800.00"), Decimal("1800.00"))
+    assert doc["errors"] == []
+
+
+def test_a_failed_tax_cost_only_empties_those_keys(
+    mock_api: respx.MockRouter, store: MemorySessionStore, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    mock_everything(mock_api)
+    mock_api.get(f"{CPERF}/v2/securities-accounts/201/investment-summary/funds/IE0000000001/added-values").respond(
+        503, json={"status": {"code": "ERROR"}}
+    )
+
+    status, out, _ = run_main(monkeypatch, capsys, "snapshot", "--no-new")
+
+    assert status == EXIT_NETWORK
+    doc = json.loads(out, parse_float=Decimal)
+    [account] = doc["securities"]
+    assert account["valor"] == Decimal("1100.55") and account["posiciones"]
+    assert account["coste_fiscal"] is None and account["posiciones"][0]["ganancia_real"] is None
+    assert doc["pensions"][0]["coste_fiscal"] == Decimal("1800.00")
+    assert [e["section"] for e in doc["errors"]] == ["securities.fiscal"]
+
+
+def test_delta_counts_the_tax_cost_when_both_snapshots_know_it() -> None:
+    """A transfer between funds raises `invertido` (to the value moved) but not the tax cost: no money came in."""
+    day = date(2026, 11, 4)
+    before = {"id": "201", "nombre": "S201", "valor": Decimal(1000), "invertido": Decimal(920)}
+    after = {"id": "201", "nombre": "S201", "valor": Decimal(1010), "invertido": Decimal(1000)}
+    previous = delta_doc(day - DAY, [], securities=[{**before, "coste_fiscal": Decimal(920)}])
+    current = delta_doc(day, [], securities=[{**after, "coste_fiscal": Decimal(920)}])
+    old = delta_doc(day - DAY, [], securities=[before])  # saved before `coste_fiscal` existed
+
+    [fiscal] = [r for r in compute_delta(current, previous)["por_producto"] if r["producto"] == "valores"]
+    [mixed] = [r for r in compute_delta(current, old)["por_producto"] if r["producto"] == "valores"]
+
+    assert (fiscal["aportado"], fiscal["mercado"]) == (0, 10)
+    assert (mixed["aportado"], mixed["mercado"]) == (80, -70)  # `invertido` on both sides, as before
 
 
 def delta_doc(day: date, movements: list[dict[str, Any]], **overrides: Any) -> dict[str, Any]:
