@@ -14,9 +14,9 @@ lists it with its `operationType` and the table can grow. Types and keywords are
 accents and in upper case. To extend: add an observed type to `EXACT_TYPES`; add a keyword only
 when it can't be mistaken for something else (card payments are not purchases of securities).
 
-Transfers are classified by type only: they are all `aportacion_externa` (money entering or, with
-a negative amount, leaving MyInvestor). Telling apart a transfer between two of the user's own
-accounts (`traspaso_interno`) needs pairing both legs of the movement (TODO: issue #22).
+Transfers are `aportacion_externa` by type (money entering or, with a negative amount, leaving
+MyInvestor), unless the caller paired both legs of a transfer between two of the user's own accounts
+(`transfers_match`): then `classify(..., internal_transfer=True)` makes it `traspaso_interno`.
 """
 
 from __future__ import annotations
@@ -69,6 +69,7 @@ class Classification:
 
 EXACT_TYPE_RULE = "tipo exacto"
 EXACT_CLASS_RULE = "clase exacta"
+PAIRED_RULE = "traspaso emparejado"  # both legs found in the user's accounts (`transfers_match`)
 
 # `operationType` values seen on real accounts.
 EXACT_TYPES: Mapping[str, Category] = MappingProxyType(
@@ -119,8 +120,15 @@ def normalize(text: str | None) -> str:
     return " ".join(plain.upper().split())
 
 
-def classify(operation_type: str | None, operation_class: str | None = None) -> Classification:
-    """Category of a movement from its `operationType` and, failing that, its `operationClass`."""
+def classify(
+    operation_type: str | None, operation_class: str | None = None, *, internal_transfer: bool = False
+) -> Classification:
+    """Category of a movement from its `operationType` and, failing that, its `operationClass`.
+
+    `internal_transfer`: the movement is one leg of a paired transfer between the user's own accounts.
+    """
+    if internal_transfer:
+        return Classification(Category.traspaso_interno, PAIRED_RULE)
     kind = normalize(operation_type)
     if kind in EXACT_TYPES:
         return Classification(EXACT_TYPES[kind], EXACT_TYPE_RULE)
