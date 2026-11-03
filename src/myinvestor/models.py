@@ -1,0 +1,271 @@
+"""Typed views over MyInvestor responses.
+
+Amounts are euros (already `Decimal`, see `envelope.decode`). Dates come as ISO datetimes at
+midnight (`2026-11-02T00:00:00.000+0000`); only the calendar day matters, so they become `datetime.date`.
+Unknown fields are ignored: the API adds fields often and the CLI only needs a stable subset.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from decimal import Decimal
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic.alias_generators import to_camel
+
+
+def _day(value: Any) -> Any:
+    if isinstance(value, str) and len(value) >= 10:
+        return value[:10]
+    return value
+
+
+class _Model(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="ignore", frozen=True)
+
+
+class Holder(_Model):
+    me: bool = False
+    participant_type: str | None = None
+
+
+class CashAccount(_Model):
+    account_id: str
+    account_uuid: str
+    alias: str | None = None
+    iban: str | None = None
+    account_type: str | None = None
+    status: str | None = None
+    currency: str = "EUR"
+    enabled_balance: Decimal = Decimal(0)
+    withheld_balance: Decimal = Decimal(0)
+    holders: list[Holder] = Field(default_factory=list)
+
+    @property
+    def balance(self) -> Decimal:
+        return self.enabled_balance + self.withheld_balance
+
+
+class Flow(_Model):
+    """A cash-account movement. `amount` is signed: charges are negative."""
+
+    reference: str | None = None
+    operation_date: dt.date
+    value_date: dt.date | None = None
+    amount: Decimal
+    currency: str = "EUR"
+    flow_type: str | None = None  # IN | OUT
+    concept: str | None = None
+    operation_type: str | None = None
+    total_balance: Decimal | None = None
+    operation_origin_label: str | None = None
+    operation_target_label: str | None = None
+    operation_ref: str | None = None
+
+    _days = field_validator("operation_date", "value_date", mode="before")(_day)
+
+
+class Hold(_Model):
+    """Money withheld on a cash account (e.g. for a pending fund order)."""
+
+    id: str
+    account_id: str | None = None
+    type: str | None = None
+    amount: Decimal
+    currency: str = "EUR"
+
+
+class Investment(_Model):
+    """A fund, ETF or stock held in a securities account."""
+
+    account_id: str | None = None
+    investment_product_type: str | None = None  # INDEXED_FUND | BROKER | …
+    isin: str | None = None
+    ticker: str | None = None
+    investment_name: str | None = None
+    shares: Decimal | None = None
+    available_shares: Decimal | None = None
+    average_cost: Decimal | None = None
+    initial_investment: Decimal | None = None
+    market_value: Decimal | None = None
+    profit: Decimal | None = None
+    total_return: Decimal | None = None  # percent
+    ytd_total_return: Decimal | None = None
+    liquidation_value: Decimal | None = None
+    liquidation_value_date: dt.date | None = None
+    liquidation_value_currency: str | None = None
+    my_investor_category: str | None = None
+    status: str | None = None
+
+    _days = field_validator("liquidation_value_date", mode="before")(_day)
+
+
+class InvestmentGroup(_Model):
+    product_num: int = 0
+    total_amount: Decimal = Decimal(0)
+    investment_list: list[Investment] = Field(default_factory=list)
+
+
+class SecuritiesAccount(_Model):
+    account_id: str
+    cod_account: str | None = None
+    external_cod_account: str | None = None
+    cash_account_id: str | None = None
+    account_type: str | None = None
+    status: str | None = None
+    portfolio_name: str | None = None
+    amount: Decimal | None = None
+    market_value: Decimal | None = None
+    total_invested: Decimal | None = None
+    profit: Decimal | None = None
+    total_return: Decimal | None = None
+    securities_account_investments: dict[str, InvestmentGroup] = Field(default_factory=dict)
+
+    @property
+    def investments(self) -> list[Investment]:
+        return [inv for group in self.securities_account_investments.values() for inv in group.investment_list]
+
+
+class PensionAccount(_Model):
+    account_id: str
+    external_account_code: str | None = None
+    cash_account_id: str | None = None
+    active: bool = True
+    plans_number: int | None = None
+    amount_account: Decimal | None = None
+    market_value: Decimal | None = None
+    total_invested: Decimal | None = None
+    profit: Decimal | None = None
+    total_return: Decimal | None = None
+
+
+class PensionPlanPosition(_Model):
+    account_pension_id: int | str | None = None
+    dgs_code: str
+    name: str | None = None
+    shares: Decimal | None = None
+    average_cost: Decimal | None = None
+    total_invested: Decimal | None = None
+    market_value: Decimal | None = None
+    profit: Decimal | None = None
+    total_return: Decimal | None = None
+    liquidation_value: Decimal | None = None
+    liquidation_value_date: dt.date | None = None
+    currency: str = "EUR"
+    status: str | None = None
+
+    _days = field_validator("liquidation_value_date", mode="before")(_day)
+
+
+class Order(_Model):
+    """A fund/stock order (securities account) or a contribution order (pension account)."""
+
+    reference: str
+    order_date: dt.date
+    securities_account_id: str | None = None
+    pension_account_id: str | None = None
+    cod_account: str | None = None
+    isin: str | None = None
+    dgs_code: str | None = None
+    ticker: str | None = None
+    fund_name: str | None = None
+    operation_type: str | None = None
+    order_type: str | None = None
+    status: str | None = None
+    cash: Decimal | None = None
+    shares: Decimal | None = None
+    currency: str = "EUR"
+    product_type: str | None = None
+    market: str | None = None
+    effective_date: dt.date | None = None
+    expiration_date: dt.date | None = None
+    is_cancelable: bool | None = None
+
+    _days = field_validator("order_date", "effective_date", "expiration_date", mode="before")(_day)
+
+    @property
+    def account_id(self) -> str | None:
+        return self.securities_account_id or self.pension_account_id
+
+    @property
+    def product(self) -> str | None:
+        return self.isin or self.dgs_code or self.ticker
+
+
+class PositionPoint(_Model):
+    """One day of a position's history (`…/positions?groupType=…`)."""
+
+    date: dt.date
+    market_value: Decimal | None = None
+    investment_added_value: Decimal | None = None
+    return_value: Decimal | None = None
+    total_shares: Decimal | None = None
+    avg_position_cost: Decimal | None = None
+
+    _days = field_validator("date", mode="before")(_day)
+
+
+class ContributionTimeFrame(_Model):
+    recurrence: str | None = None
+    start_date: dt.date | None = None
+    end_date: dt.date | None = None
+    next_execution_date: dt.date | None = None
+
+    _days = field_validator("start_date", "end_date", "next_execution_date", mode="before")(_day)
+
+
+class Contribution(_Model):
+    """A periodic contribution ("aportación automática") to a fund or pension plan."""
+
+    contribution_id: str
+    alias: str | None = None
+    amount: Decimal
+    currency: str = "EUR"
+    status: str | None = None
+    isin: str | None = None
+    fund_name: str | None = None
+    contribution_type: str | None = None
+    subscription_type: str | None = None
+    to_account_type: str | None = None
+    from_account_alias: str | None = None
+    contribution_time_frame: ContributionTimeFrame | None = None
+
+
+class Profitability(_Model):
+    ytd: Decimal | None = None
+    one_year: Decimal | None = None
+    three_year: Decimal | None = None
+    five_year: Decimal | None = None
+    from_beginning: Decimal | None = None
+
+
+class FundSummary(_Model):
+    """A row of the fund catalog (`/cperf-server/api/v2/funds`)."""
+
+    isin: str
+    name: str | None = None
+    managing_entity: str | None = None
+    category: str | None = None
+    currency: str | None = None
+    ter: Decimal | None = None
+    risk_rating: int | None = None
+    asset_type: str | None = None
+    geographical_area: str | None = None
+    management_type: str | None = None
+    dividend_type: str | None = None
+    liquidation_value: Decimal | None = None
+    liquidation_value_date: dt.date | None = None
+    annualized_profitability: Profitability | None = None
+
+    _days = field_validator("liquidation_value_date", mode="before")(_day)
+
+
+class FeedItem(_Model):
+    type: str | None = None
+    date: dt.date | None = None
+    product: str | None = None
+    title: str | None = None
+    body: str | None = None
+
+    _days = field_validator("date", mode="before")(_day)

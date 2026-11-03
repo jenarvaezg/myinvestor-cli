@@ -1,0 +1,330 @@
+"""High-level, read-only MyInvestor API client."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+from enum import StrEnum
+from typing import Any, Self
+from urllib.parse import quote
+
+import httpx
+
+from myinvestor import envelope
+from myinvestor.auth import Authenticator, Relogin
+from myinvestor.config import API_BASE
+from myinvestor.errors import (
+    ApiError,
+    MyInvestorError,
+    NotLoggedInError,
+    SessionExpiredError,
+    SignatureError,
+    raise_for_response,
+)
+from myinvestor.http import build_http_client
+from myinvestor.models import (
+    CashAccount,
+    Contribution,
+    FeedItem,
+    Flow,
+    FundSummary,
+    Hold,
+    Order,
+    PensionAccount,
+    PensionPlanPosition,
+    PositionPoint,
+    SecuritiesAccount,
+)
+from myinvestor.session import Session
+from myinvestor.signature import SIGNATURE_HEADER, SignatureUI, Signer, parse_signature_request
+from myinvestor.stores import SessionStore
+
+CPERF = "/cperf-server/api"
+FUND_PAGE_SIZE = 50
+SIGNATURE_PREFIX = "/signature/api/"
+SIGNER_METHODS = frozenset({"GET", "POST"})
+
+logger = logging.getLogger(__name__)
+
+
+def seg(value: str) -> str:
+    """Escape a value used as a path segment (ids, ISINs), so it cannot change the route."""
+    return quote(str(value), safe="")
+
+
+class Period(StrEnum):
+    """`groupType` of the position-history endpoints. Others (ONE_WEEK, MAX…) answer 400."""
+
+    month = "ONE_MONTH"
+    three_months = "THREE_MONTHS"
+    six_months = "SIX_MONTHS"
+    year = "ONE_YEAR"
+
+
+@dataclass(frozen=True)
+class Statement:
+    """Cash-account movements for a date range, with the balances that bracket them."""
+
+    iban: str | None
+    start_balance: Decimal | None
+    end_balance: Decimal | None
+    flows: list[Flow]
+
+
+@dataclass(frozen=True)
+class FundPage:
+    funds: list[FundSummary]
+    total: int | None
+    last: bool
+
+
+class MyInvestorClient:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        http: httpx.Client | None = None,
+        store: SessionStore | None = None,
+        signature_ui: SignatureUI | None = None,
+        signer_factory: Callable[..., Signer] = Signer,
+        relogin: Relogin | None = None,
+    ) -> None:
+        if not session.access_token:
+            raise NotLoggedInError()
+        self._relogin = relogin
+        self._session = session
+        self._http = http or build_http_client()
+        self._owns_http = http is None
+        self._store = store
+        self._auth = Authenticator(self._http)
+        self._ui = signature_ui
+        self._signer_factory = signer_factory
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    @property
+    def signature_ui(self) -> SignatureUI | None:
+        return self._ui
+
+    def close(self) -> None:
+        if self._owns_http:
+            self._http.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    # ---- transport ---------------------------------------------------------
+
+    def get(self, path: str, params: Any = None) -> Any:
+        """GET returning the decoded body (whole envelope). Second factors are handled transparently."""
+        return self._call("GET", path, params=params)
+
+    def get_data(self, path: str, params: Any = None) -> Any:
+        return envelope.data(self.get(path, params))
+
+    def refresh(self) -> Session:
+        """New tokens: refresh, else adopt another process's, else log in again with a saved password."""
+        try:
+            self._session = self._refreshed_tokens()
+        except SessionExpiredError:
+            if self._relogin is None:
+                raise
+            self._session = self._relogin(self._session)
+        if self._store:
+            try:
+                self._store.save(self._session)
+            except Exception as exc:  # the old refresh token is already dead: keep working in memory
+                logger.warning("No se ha podido guardar la sesión renovada: %s", exc)
+        return self._session
+
+    def _refreshed_tokens(self) -> Session:
+        try:
+            return self._auth.refresh(self._session)
+        except SessionExpiredError:
+            # Another process (cron + manual run) may have rotated the pair first: adopt its tokens.
+            stored = self._store.load() if self._store else None
+            if not stored or stored.refresh_token in (None, self._session.refresh_token) or not stored.can_refresh():
+                raise
+            return stored if not stored.is_expired() else self._auth.refresh(stored)
+
+    def _headers(self, extra: Mapping[str, str] | None = None) -> dict[str, str]:
+        headers = {"authorization": f"Bearer {self._session.access_token}", "x-device-id": self._session.device_id}
+        return {**headers, **(extra or {})}
+
+    def _send(
+        self, method: str, path: str, *, headers: Mapping[str, str] | None = None, **kwargs: Any
+    ) -> httpx.Response:
+        refreshed = False
+        if self._session.is_expired():
+            self.refresh()
+            refreshed = True
+        url = f"{API_BASE}/{path.lstrip('/')}"
+        response = self._http.request(method, url, headers=self._headers(headers), **kwargs)
+        if response.status_code == 401 and not refreshed and (self._session.can_refresh() or self._relogin):
+            self.refresh()
+            response = self._http.request(method, url, headers=self._headers(headers), **kwargs)
+        raise_for_response(response)
+        return response
+
+    def _call(self, method: str, path: str, **kwargs: Any) -> Any:
+        if method != "GET":
+            raise MyInvestorError(f"Petición no permitida en un cliente de solo lectura: {method} {path}")
+        response = self._send(method, path, **kwargs)
+        body = envelope.decode(response)
+        if response.status_code != 202:
+            return body
+        request = parse_signature_request(envelope.data(body))
+        if request is None or not request.is_pending:
+            raise ApiError(202, "respuesta 202 inesperada (sin firma pendiente)", path)
+        self._signer_factory(self._signer_call).complete(request, self._ui)
+        response = self._send(method, path, headers={SIGNATURE_HEADER: request.id}, **kwargs)
+        body = envelope.decode(response)
+        if response.status_code == 202:
+            raise SignatureError("MyInvestor sigue pidiendo firma tras aprobarla.")
+        return body
+
+    def _signer_call(self, method: str, path: str, *, params: Any = None, json: Any = None) -> Any:
+        """The only non-GET requests this client sends: starting/validating a second factor."""
+        if method not in SIGNER_METHODS or not path.startswith(SIGNATURE_PREFIX):
+            raise MyInvestorError(f"Petición no permitida en un cliente de solo lectura: {method} {path}")
+        return envelope.data(envelope.decode(self._send(method, path, params=params, json=json)))
+
+    def _list(self, path: str, params: Any = None) -> list[Any]:
+        data = self.get_data(path, params)
+        return data if isinstance(data, list) else []
+
+    # ---- customer ----------------------------------------------------------
+
+    def customer(self) -> dict[str, Any]:
+        data = self.get_data(f"{CPERF}/v3/customers/self")
+        return data if isinstance(data, dict) else {}
+
+    # ---- cash accounts -----------------------------------------------------
+
+    def cash_accounts(self) -> list[CashAccount]:
+        return [CashAccount.model_validate(a) for a in self._list(f"{CPERF}/v2/cash-accounts/self")]
+
+    def statement(self, account_uuid: str, date_from: date, date_to: date) -> Statement:
+        """Movements of a cash account. Ranges older than ~90 days need a second factor (app)."""
+        if date_from > date_to:
+            raise ValueError("date_from > date_to")
+        params = {"dateFrom": date_from.isoformat(), "dateTo": date_to.isoformat()}
+        data = self.get_data(f"/account/api/v3/account/{seg(account_uuid)}/flows", params)
+        if not isinstance(data, dict):
+            raise ApiError(200, "respuesta de movimientos inesperada", "flows")
+        return Statement(
+            iban=data.get("iban"),
+            start_balance=data.get("startBalance"),
+            end_balance=data.get("endBalance"),
+            flows=[Flow.model_validate(f) for f in data.get("flowList") or []],
+        )
+
+    def holds(self, account_uuid: str) -> list[Hold]:
+        return [Hold.model_validate(h) for h in self._list(f"/account/api/v3/account/{seg(account_uuid)}/holds")]
+
+    def balance_history(self) -> list[tuple[date, Decimal]]:
+        """Daily total of all cash accounts (enabled + withheld), oldest first."""
+        rows = self._list(f"{CPERF}/v2/cash-accounts/historical-balance", {"accountTypes": "CASH_ACCOUNT"})
+        points = [(date.fromisoformat(str(r["date"])[:10]), Decimal(str(r["balance"]))) for r in rows]
+        return sorted(points)
+
+    # ---- securities accounts (funds, ETFs, stocks) -------------------------
+
+    def securities_account_ids(self) -> list[str]:
+        rows = self._list(f"{CPERF}/v2/securities-accounts/self-basic")
+        return [str(r["accountId"]) for r in rows if r.get("accountId") and r.get("status", "ACTIVE") == "ACTIVE"]
+
+    def securities_account(self, account_id: str) -> SecuritiesAccount:
+        return SecuritiesAccount.model_validate(self.get_data(f"{CPERF}/v2/securities-accounts/{seg(account_id)}"))
+
+    def securities_accounts(self) -> list[SecuritiesAccount]:
+        return [self.securities_account(i) for i in self.securities_account_ids()]
+
+    def orders(self, account_id: str, date_from: date | None = None, date_to: date | None = None) -> list[Order]:
+        """Without dates the API returns only recent/in-progress orders; with them, the full range."""
+        params = None
+        if date_from or date_to:
+            params = {
+                "dateFrom": (date_from or date(2000, 1, 1)).isoformat(),
+                "dateTo": (date_to or date.today()).isoformat(),
+            }
+        rows = self._list(f"{CPERF}/v3/securities-accounts/{seg(account_id)}/orders", params)
+        return sorted((Order.model_validate(r) for r in rows), key=lambda o: o.order_date, reverse=True)
+
+    def position_history(
+        self, account_id: str, period: Period = Period.six_months, *, pension: bool = False
+    ) -> dict[str, list[PositionPoint]]:
+        kind = "pension-accounts" if pension else "securities-accounts"
+        data = self.get_data(f"{CPERF}/v2/{kind}/{seg(account_id)}/positions", {"groupType": period.value})
+        positions = data.get("positions") if isinstance(data, dict) else None
+        return {
+            product: sorted((PositionPoint.model_validate(p) for p in points), key=lambda p: p.date)
+            for product, points in (positions or {}).items()
+        }
+
+    # ---- pension plans -----------------------------------------------------
+
+    def pension_accounts(self) -> list[PensionAccount]:
+        return [PensionAccount.model_validate(a) for a in self._list(f"{CPERF}/v2/pension-accounts/self")]
+
+    def pension_plans(self, account_id: str) -> list[PensionPlanPosition]:
+        rows = self._list(f"{CPERF}/v2/pension-accounts/{seg(account_id)}")
+        return [PensionPlanPosition.model_validate(p) for p in rows]
+
+    def pension_orders(self, account_id: str) -> list[Order]:
+        rows = self._list(f"{CPERF}/v2/pension-accounts/{seg(account_id)}/orders", {"order": "DATE"})
+        return sorted((Order.model_validate(r) for r in rows), key=lambda o: o.order_date, reverse=True)
+
+    def pension_plan(self, dgs_code: str) -> dict[str, Any]:
+        data = self.get_data(f"{CPERF}/v2/pension-plans/{seg(dgs_code)}")
+        return data if isinstance(data, dict) else {}
+
+    # ---- contributions, catalog, feed --------------------------------------
+
+    def contributions(self) -> list[Contribution]:
+        return [Contribution.model_validate(c) for c in self._list(f"{CPERF}/v2/automatic-contributions/self")]
+
+    def fund(self, isin: str) -> dict[str, Any]:
+        data = self.get_data(f"{CPERF}/v2/funds/{seg(isin)}")
+        return data if isinstance(data, dict) else {}
+
+    def fund_price(self, isin: str) -> dict[str, Any]:
+        data = self.get_data(f"{CPERF}/v2/funds/{seg(isin)}/prices/last")
+        return data if isinstance(data, dict) else {}
+
+    def funds(
+        self, query: str | None = None, *, sort: str = "ter,asc", page: int = 0, limit: int = FUND_PAGE_SIZE
+    ) -> FundPage:
+        """Fund catalog; `query` is the web's free-text box (`mainInputFilter`: name, ISIN…)."""
+        params: dict[str, Any] = {"page": page, "limit": limit, "sort": sort}
+        if query:
+            params["mainInputFilter"] = query
+        body = self.get(f"{CPERF}/v2/funds", params)
+        pagination = envelope.payload(body).get("pagination") or {}
+        rows = envelope.data(body) or []
+        return FundPage(
+            funds=[FundSummary.model_validate(r) for r in rows],
+            total=pagination.get("totalElements"),
+            last=bool(pagination.get("last", True)),
+        )
+
+    def feed(self) -> list[FeedItem]:
+        data = self.get_data("/feed/api/feed/self")
+        items = data.get("feed") if isinstance(data, dict) else None
+        return [FeedItem.model_validate(i) for i in items or []]
+
+
+def ensure_session(session: Session | None, *, can_relogin: bool = False) -> Session:
+    if session is None or not session.access_token:
+        raise NotLoggedInError()
+    if session.is_expired() and not session.can_refresh() and not can_relogin:
+        raise SessionExpiredError()
+    return session
