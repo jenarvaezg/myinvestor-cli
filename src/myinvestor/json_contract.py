@@ -704,7 +704,7 @@ CONTRACTS: tuple[Contract, ...] = (
         "pension-plans",
         1,
         (_rows(*PENSION_PLAN_ROW),),
-        "El catálogo de planes; las mismas claves con filtros, `--featured` y `--mine`.",
+        "El catálogo de planes; las mismas claves con filtros y con `--mine`.",
     ),
     Contract(
         "fund-history",
