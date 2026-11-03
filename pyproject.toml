@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# `myinvestor login` (sin flags) abre un navegador real: el login web exige reCAPTCHA.
+# `myinvestor login` (sin flags) abre un navegador real, que pasa el reCAPTCHA del login web.
 browser = ["playwright>=1.55.0"]
 
 [build-system]

@@ -214,6 +214,24 @@ def test_logout_forgets_password(store: MemorySessionStore) -> None:
     assert store.session is not None and store.session.device_id == DEVICE  # device kept
 
 
+@pytest.mark.parametrize("forget_device", [False, True])
+def test_logout_clears_the_relogin_pause(store: MemorySessionStore, forget_device: bool) -> None:
+    store.save_relogin_block("00000000T", ReloginBlock(datetime.now(tz=UTC) + RELOGIN_PAUSE, "errCode X, HTTP 403"))
+    runner.invoke(app, ["logout", *(["--forget-device"] if forget_device else [])], catch_exceptions=False)
+    assert store.load_relogin_block("00000000T") is None
+
+
+def test_logout_clears_the_relogin_pause_in_the_file_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    file_store = FileSessionStore(tmp_path / "session.json")
+    file_store.save(dead_session())
+    file_store.save_relogin_block("00000000T", ReloginBlock(datetime.now(tz=UTC) + RELOGIN_PAUSE, "errCode X"))
+    monkeypatch.setattr(cli_auth, "get_store", lambda: file_store)
+
+    runner.invoke(app, ["logout", "--forget-device"], catch_exceptions=False)
+
+    assert json.loads(file_store.path.read_text()).get("relogin_blocks") == {}
+
+
 def test_status_mentions_auto_relogin(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
     store.save_password("00000000T", "pw")
     mock_api.post(f"{API}{LOGIN_PATH}").respond(200, json=tokens())

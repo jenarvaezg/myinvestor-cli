@@ -1,4 +1,7 @@
-"""Login in a real browser, because the web login requires reCAPTCHA Enterprise.
+"""Login in a real browser, which passes the reCAPTCHA Enterprise check of the web login.
+
+`login --direct` skips that check and works from a known device (verified 2026-11-03); this is the
+default for people at a desktop and the fallback if MyInvestor ever rejects `--direct`.
 
 `myinvestor login` opens newapp.myinvestor.es in a Chromium window driven by Playwright (optional
 extra `myinvestor[browser]`). The person logs in as usual, the web app stores its Keycloak tokens

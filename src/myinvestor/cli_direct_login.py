@@ -40,7 +40,7 @@ def direct_login(store: SessionStore, base: Session, how: DirectLogin, read_pass
     user = base.customer_id or typer.prompt("DNI/NIE")
     password = read_password(store.load_password(user) if how.start else None)
     with build_http_client() as http:
-        auth = Authenticator(http)
+        auth = Authenticator(http, approval_timeout=options.approval_timeout)
         if how.start:
             result = auth.start_login(
                 user, password, base, keep_password=how.remember, send_code=not options.no_signature
@@ -64,7 +64,9 @@ def _finish(store: SessionStore, base: Session, code: str, *, remember: bool, re
     password = read_password(pending.password or store.load_password(pending.customer_id))
     try:
         with build_http_client() as http:
-            session = Authenticator(http).finish_login(pending, password, code, signature_ui())
+            session = Authenticator(http, approval_timeout=options.approval_timeout).finish_login(
+                pending, password, code, signature_ui()
+            )
     except WrongCodeError as exc:
         _after_wrong_code(store, pending, exc)
         raise
