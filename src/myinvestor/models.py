@@ -494,3 +494,108 @@ class FeedItem(_Model):
     body: str | None = None
 
     _days = field_validator("date", mode="before")(_day)
+
+
+def _empty_list(value: Any) -> Any:
+    """`null` where the API means "none yet" (e.g. the executions of an order in progress)."""
+    return [] if value is None else value
+
+
+def _euros(value: Any) -> Any:
+    return "EUR" if value is None else value
+
+
+class OrderExecution(_Model):
+    """One execution (`relatedOperations[]`) of an order: what was really bought or sold, and at what NAV.
+
+    Gross amount, commissions and withholdings are in the fund's currency; `net_amount_eur` in euros.
+    """
+
+    operation_number: str | None = None
+    execution_date: dt.date | None = None
+    executed_shares: Decimal | None = None
+    liquidation_value: Decimal | None = None
+    gross_amount_operation_fund_currency: Decimal | None = None
+    commissions: Decimal | None = None
+    origin_retention: Decimal | None = None
+    destiny_retention: Decimal | None = None
+    net_amount_fund_currency: Decimal | None = None
+    exchange_rate: Decimal | None = None
+    net_amount_eur: Decimal | None = Field(None, alias="netAmountEUR")
+    net_amount_account_currency: Decimal | None = None
+    tax_result: Decimal | None = None  # realised gain (+) or loss (-) of a sale
+
+    _days = field_validator("execution_date", mode="before")(_day)
+
+    @property
+    def retentions(self) -> Decimal | None:
+        """Withholding at origin plus at destination (`None` when the API sends neither)."""
+        parts = [r for r in (self.origin_retention, self.destiny_retention) if r is not None]
+        return sum(parts, Decimal(0)) if parts else None
+
+
+class OrderDetail(_Model):
+    """An order with its executions (`…/{securities,pension}-accounts/{id}/orders/{reference}`).
+
+    The API also sends `ordererCustomer` (the ID card) and `accountNumber`: never parsed.
+    On a pension order `isin` holds the plan's DGS code.
+    """
+
+    order_reference: str
+    isin: str | None = None
+    order_status: str | None = None  # INITIAL | PENDING | IN_PROGRESS | COMPLETE | CANCEL | REJECTED
+    order_date: dt.date | None = None
+    order_type_name: str | None = None
+    order_class: str | None = None
+    operation_type: str | None = None
+    gross_amount_eur: Decimal | None = Field(None, alias="grossAmountEUR")
+    gross_amount_fund_currency: Decimal | None = None
+    cash: Decimal | None = None
+    shares: Decimal | None = None
+    fund_name: str | None = None
+    currency: str = "EUR"
+    expiration_date: dt.date | None = None
+    periodicity_code: str | None = None
+    related_operations: list[OrderExecution] = Field(default_factory=list)  # `null` while in progress
+
+    _days = field_validator("order_date", "expiration_date", mode="before")(_day)
+    _lists = field_validator("related_operations", mode="before")(_empty_list)
+    _currency = field_validator("currency", mode="before")(_euros)
+
+
+class FundLot(_Model):
+    """An open lot of a fund (FIFO): the shares of one subscription still held, with its latent gain.
+
+    `fiscal_date` is the lot's tax date: after a transfer between funds it is the date inherited from
+    the source fund, not the date of the transfer.
+    """
+
+    operation_type: str | None = None  # SUBSCRIPTION
+    operation_desc: str | None = None  # "SUSCRIPCIÓN FONDOS INVERSIÓN", "ALTA IIC SWITCH", "SUSC.TRASPASO. INT."…
+    operation_num: str | None = None
+    fiscal_date: dt.date | None = None
+    securities: Decimal | None = None
+    net_asset_value: Decimal | None = None
+    investment: Decimal | None = None
+    market_value: Decimal | None = None
+    plus_minus: Decimal | None = None
+    fiscal_result: Decimal | None = None
+
+    _days = field_validator("fiscal_date", mode="before")(_day)
+
+    @property
+    def gain(self) -> Decimal | None:
+        return self.fiscal_result if self.fiscal_result is not None else self.plus_minus
+
+
+class FundLots(_Model):
+    """Open lots of a fund (`…/investment-summary/funds/{isin}/added-values`): latent, not realised, gains."""
+
+    currency: str = "EUR"
+    fund_name: str | None = None
+    investment_added_value: Decimal | None = None
+    added_value: Decimal | None = None
+    plus_minus_list: list[FundLot] = Field(default_factory=list)
+
+    _lists = field_validator("plus_minus_list", mode="before")(_empty_list)
+    _currency = field_validator("currency", mode="before")(_euros)

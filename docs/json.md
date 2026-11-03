@@ -497,6 +497,82 @@ Con `--by account`: lista de objetos.
 | `aportar` | number (€, 2 decimales) | sí | sí | solo con `--target`; cuánto aportar para llegar al objetivo sin vender |
 | `consultado_en` | datetime ISO 8601 con zona | no | sí | fecha y hora de la consulta (la misma en todas las filas) |
 
+### `order` — `myinvestor.order/1`
+
+Un objeto con la orden y sus ejecuciones. Nunca incluye el DNI del ordenante.
+
+Salida: un objeto.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `orden` | object | no | sí |  |
+| `orden.cuenta` | string | no | sí | id de la cuenta de valores o de pensiones |
+| `orden.tipo_cuenta` | string | no | sí | `valores` o `pensiones` |
+| `orden.ref` | string | no | sí | `orderReference` |
+| `orden.fecha` | date `AAAA-MM-DD` | sí | sí | fecha de la orden |
+| `orden.isin` | string | sí | sí | ISIN (código DGS en un plan de pensiones) |
+| `orden.fondo` | string | sí | sí |  |
+| `orden.operacion` | string | sí | sí | `operationType`: `INVESTMENT_FUNDS_SUBSCRIPTION`, `INVESTMENT_FUND_REIMBURSEMENT`… |
+| `orden.tipo` | string | sí | sí | `orderTypeName` |
+| `orden.estado` | string | sí | sí | `INITIAL`, `PENDING`, `IN_PROGRESS`, `COMPLETE`, `CANCEL`, `REJECTED` |
+| `orden.importe` | number (€, 2 decimales) | sí | sí | importe bruto en euros |
+| `orden.participaciones` | number (exacto) | sí | sí |  |
+| `orden.divisa` | string | no | sí | divisa del fondo |
+| `orden.vencimiento` | date `AAAA-MM-DD` | sí | sí | `expirationDate` |
+| `ejecuciones` | array de objetos | no | sí | `relatedOperations`; vacía si no se ha ejecutado |
+| `ejecuciones[].num_operacion` | string | sí | sí | `operationNumber` |
+| `ejecuciones[].fecha` | date `AAAA-MM-DD` | sí | sí | fecha de ejecución |
+| `ejecuciones[].participaciones` | number (exacto) | sí | sí | participaciones ejecutadas |
+| `ejecuciones[].vl` | number (exacto) | sí | sí | valor liquidativo aplicado |
+| `ejecuciones[].bruto` | number (€, 2 decimales) | sí | sí | en la divisa del fondo |
+| `ejecuciones[].comisiones` | number (€, 2 decimales) | sí | sí | en la divisa del fondo |
+| `ejecuciones[].retenciones` | number (€, 2 decimales) | sí | sí | en origen + en destino, en la divisa del fondo |
+| `ejecuciones[].neto` | number (€, 2 decimales) | sí | sí | en euros |
+| `ejecuciones[].tipo_cambio` | number (exacto) | sí | sí |  |
+| `ejecuciones[].resultado` | number (€, 2 decimales) | sí | sí | `taxResult`: resultado fiscal (en ventas y traspasos de salida) |
+
+### `lots` — `myinvestor.lots/1`
+
+Una fila por lote vivo y, al final, el total (`cuenta: "total"`).
+
+Salida: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `cuenta` | string | no | sí | id de la cuenta de valores; `total` en la última fila |
+| `isin` | string | sí | sí | `null` en el total |
+| `fondo` | string | sí | sí |  |
+| `fecha_fiscal` | date `AAAA-MM-DD` | sí | sí | fecha fiscal del lote: heredada del fondo de origen en un traspaso |
+| `operacion` | string | sí | sí | `operationDesc`: `SUSCRIPCIÓN FONDOS INVERSIÓN`, `ALTA IIC SWITCH`… |
+| `participaciones` | number (exacto) | sí | sí | participaciones vivas del lote |
+| `vl_compra` | number (exacto) | sí | sí | VL de compra |
+| `coste` | number (€, 2 decimales) | sí | sí | coste fiscal |
+| `valor` | number (€, 2 decimales) | sí | sí | valor actual |
+| `plusvalia` | number (€, 2 decimales) | sí | sí | plusvalía (o minusvalía) latente |
+
+### `gains` — `myinvestor.gains/1`
+
+Una fila por ejecución de un reembolso o traspaso de salida y, al final, `plusvalias`, `minusvalias` y `total` (solo reembolsos).
+
+Salida: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `cuenta` | string | no | sí | id de la cuenta de valores; `plusvalias`, `minusvalias` y `total` en las tres últimas |
+| `fecha` | date `AAAA-MM-DD` | sí | sí | fecha de ejecución; `null` en los totales |
+| `ref` | string | sí | sí | referencia de la orden; `null` en los totales |
+| `isin` | string | sí | sí |  |
+| `fondo` | string | sí | sí |  |
+| `operacion` | string | sí | sí | `operationType` de la orden |
+| `traspaso` | boolean | sí | sí | traspaso entre fondos: no suma en los totales |
+| `participaciones` | number (exacto) | sí | sí |  |
+| `vl` | number (exacto) | sí | sí |  |
+| `bruto` | number (€, 2 decimales) | sí | sí |  |
+| `comisiones` | number (€, 2 decimales) | sí | sí |  |
+| `retenciones` | number (€, 2 decimales) | sí | sí |  |
+| `neto` | number (€, 2 decimales) | sí | sí |  |
+| `resultado` | number (€, 2 decimales) | sí | sí | `taxResult`; en los totales, la suma de los reembolsos |
+
 ### `status` — `myinvestor.status/1`
 
 Nunca incluye tokens ni la contraseña.
@@ -759,7 +835,7 @@ Salida: un objeto.
 
 | Clave | Tipo | `null` | Estable | Notas |
 |---|---|---|---|---|
-| `error` | string | no | sí | tipo de error en snake_case (`signature_required`, `network`…) |
+| `error` | string | no | sí | tipo de error en snake_case (`signature_required`, `network`, `unexpected_response`…) |
 | `exit_code` | integer | no | sí | el mismo código con el que sale el proceso |
 | `message` | string | no | no (informativo) | texto para personas |
 

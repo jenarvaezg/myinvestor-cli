@@ -46,6 +46,15 @@ from myinvestor.output import AMOUNT_COLUMNS
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
 from tests.conftest import API, CASH_UUID, CPERF, cash_account, flow, investment, ok, order, securities_account
+from tests.test_cli_gains import (
+    added_values,
+    execution,
+    fund_lots,
+    gains_api,
+    lot,
+    mock_holdings,
+    order_detail,
+)
 from tests.test_cli_transfers import JUNIOR_UUID, STAMP, junior_flows, own_flows
 from tests.test_cli_upcoming import NOW, mock_everything
 from tests.test_documents import document
@@ -287,6 +296,21 @@ def snapshot_api(mock_api: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) ->
     mock_api.get(f"{CPERF}/v2/automatic-contributions/self").respond(200, json=ok([due]))
 
 
+def order_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> None:
+    detail = order_detail("R1", executions=[execution()])
+    mock_api.get(f"{CPERF}/v2/securities-accounts/201/orders/R1").respond(200, json=ok(detail))
+
+
+def lots_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_holdings(mock_api)
+    for isin in ("IE0000000001", "IE0000000002"):
+        mock_api.get(added_values(isin)).respond(200, json=ok(fund_lots(lot("N1", "2024-03-01"))))
+
+
+def gains_contract_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> None:
+    gains_api(mock_api)
+
+
 # ---- one case per variant of every contract ------------------------------------------------------
 
 
@@ -362,6 +386,9 @@ CASES = (
         options=("--target", "{target}"),
         target={"Cartera": 100},
     ),
+    Case("order", "", ("order", "R1", "-a", "201"), setup=order_api),
+    Case("lots", "", ("lots",), setup=lots_api),
+    Case("gains", "", ("gains", "--year", "2025"), setup=gains_contract_api),
     Case(
         "status",
         "",
