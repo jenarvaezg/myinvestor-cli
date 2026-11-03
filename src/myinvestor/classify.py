@@ -40,6 +40,7 @@ class Category(StrEnum):
     venta = "venta"  # sale of securities
     aportacion_externa = "aportacion_externa"  # money from/to outside MyInvestor (transfers)
     traspaso_interno = "traspaso_interno"  # between the user's own products
+    aportacion_plan = "aportacion_plan"  # contribution to a pension plan: leaves the account, not a spend
     otros = "otros"
 
 
@@ -77,6 +78,9 @@ EXACT_TYPES: Mapping[str, Category] = MappingProxyType(
         "TRANSFERENCIA INMEDIATA": Category.aportacion_externa,
         "TRANSFERENCIA SEPA": Category.aportacion_externa,
         "COMPRA RV CONTADO": Category.compra,  # stock/ETF purchase (renta variable, al contado)
+        "SUSCRIPCION IIC": Category.compra,  # fund subscription (institución de inversión colectiva)
+        "LIQUIDAC. INTERESES": Category.intereses,  # interest settlement of the cash account
+        "APORTACION PLANES": Category.aportacion_plan,  # contribution to a pension plan
         "APERTURA": Category.otros,  # account opening; known, so not reported as unknown
     }
 )

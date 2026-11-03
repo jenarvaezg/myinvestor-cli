@@ -17,6 +17,9 @@ from myinvestor.classify import EXACT_TYPE_RULE, Category, classify, normalize
         ("TRANSFERENCIA SEPA", Category.aportacion_externa),
         ("COMPRA RV CONTADO", Category.compra),
         ("APERTURA", Category.otros),
+        ("LIQUIDAC. INTERESES", Category.intereses),
+        ("SUSCRIPCION IIC", Category.compra),
+        ("APORTACIÓN PLANES", Category.aportacion_plan),
     ],
 )
 def test_observed_types_match_exactly(operation_type: str, category: Category) -> None:

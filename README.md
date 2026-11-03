@@ -123,14 +123,15 @@ Categorías (`--by type` muestra cada `operationType` con su categoría y la reg
 
 | Categoría | Cómo se reconoce |
 |---|---|
-| `intereses` | tipo con «INTERES…» o «REMUNERAC…» |
+| `intereses` | «LIQUIDAC. INTERESES» (observado) o cualquier tipo con «INTERES…» o «REMUNERAC…» |
 | `dividendos` | «DIVIDEND…» |
 | `retencion` | «RETENC…» o «IRPF» (se miran antes que intereses y dividendos: «RETENCION DIVIDENDOS» es retención) |
 | `comision` | «COMISION…» o «CUSTODIA» |
-| `compra` | «COMPRA RV CONTADO» (observado), «COMPRA» + «RV»/«VALORES», «SUSCRIPC…» |
+| `compra` | «COMPRA RV CONTADO» y «SUSCRIPCION IIC» (observados; acciones/ETF y fondos), «COMPRA» + «RV»/«VALORES», «SUSCRIPC…» |
 | `venta` | «VENTA» + «RV»/«VALORES» |
 | `aportacion_externa` | transferencias: «CARGO POR TRANSFERENCIA», «ABONO POR TRANSFERENCIA», «TRANSFERENCIA INMEDIATA», «TRANSFERENCIA SEPA» (observados) o cualquier tipo con «TRANSFERENCIA»; el signo del importe dice si entra o sale |
 | `traspaso_interno` | «TRASPASO…» |
+| `aportacion_plan` | «APORTACION PLANES» (observado): dinero que sale de la cuenta hacia un plan de pensiones; no es un gasto ni una compra de valores |
 | `otros` | «APERTURA» y todo lo demás |
 
 Solo los tipos marcados como observados se han visto en cuentas reales; el resto son palabras clave, porque la API no publica la lista de tipos. Se comparan sin tildes ni mayúsculas, y cada palabra debe empezar una palabra del tipo (`RV` no casa con «SERVICIO»). Los tipos que no casan con nada van a `otros` y el CLI los lista en stderr para poder [ampliar la tabla](src/myinvestor/classify.py). Las transferencias entre cuentas propias salen de momento como `aportacion_externa`: distinguirlas requiere emparejar el cargo y el abono.
