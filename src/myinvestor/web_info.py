@@ -1,7 +1,9 @@
 """Public, unauthenticated facts about the web app: its current version and the maintenance flags.
 
-- The version is a constant of the web's entry bundle, the one it sends as `x-myinvestor-app:
+- The version is a constant of the web bundle, the one it sends as `x-myinvestor-app:
   version=${X},platform=…`. It is found by following that header to the constant's definition.
+  Vite/rolldown does not keep it in the entry (`/assets/index-<hash>.js`) but in a chunk the entry
+  imports statically (`import{…}from"./api-<hash>.js"`), so those imports are searched too.
 - `config.myinvestor.es/flags/settings.json` is what the web polls for its mode:
   `{"mode_name": "transactional" | "read_only" | "maintenance", "min_version": {"android", "ios", "web"},
   "active_from"?, "active_until"?, "exception"?: {"mode_name", "enabled_clients": [customer ids]}}`.
@@ -27,6 +29,11 @@ _SRC_ATTR = re.compile(r"""\bsrc\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 _MODULE_ATTR = re.compile(r"""\btype\s*=\s*["']module["']""", re.IGNORECASE)
 _VERSION_HEADER = re.compile(r"""["']?x-myinvestor-app["']?\s*:\s*`version=\$\{([\w$]+)\}""")
 _SEMVER = re.compile(r"^\d+(?:\.\d+)+$")
+# Top-level static imports of a chunk: `from"./x.js"` and side-effect `import"./x.js"` (same origin only).
+_STATIC_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*["'](\.{1,2}/[^"'?#]+\.js)["']""")
+
+MAX_CHUNK_DOWNLOADS = 5  # imported chunks fetched after the entry
+MAX_SCRIPT_BYTES = 8 * 1024 * 1024  # the chunk with the version is ~3.2 MB
 
 
 class WebInfoError(Exception):
@@ -80,21 +87,46 @@ def bundle_version(js: str) -> str | None:
     return definition.group(1)
 
 
+def static_imports(js: str, script_url: str) -> list[str]:
+    """Absolute URLs of the chunks `js` imports statically, `api-*` first, without duplicates."""
+    urls = list(dict.fromkeys(urljoin(script_url, path) for path in _STATIC_IMPORT.findall(js)))
+    return sorted(urls, key=lambda url: not url.rsplit("/", 1)[-1].startswith("api-"))
+
+
+def _fetch_script(http: httpx.Client, url: str) -> str | None:
+    """Body of a script, or None if it fails or is larger than MAX_SCRIPT_BYTES (read in streaming)."""
+    with http.stream("GET", url, headers={"accept": "*/*"}) as response:
+        if not response.is_success:
+            return None
+        if int(response.headers.get("content-length") or 0) > MAX_SCRIPT_BYTES:
+            return None
+        body = bytearray()
+        for chunk in response.iter_bytes():
+            body.extend(chunk)
+            if len(body) > MAX_SCRIPT_BYTES:
+                return None
+    return body.decode("utf-8", errors="replace")
+
+
 def fetch_web_version(http: httpx.Client) -> str:
     """Raises WebInfoError (or httpx.HTTPError) when it cannot be determined."""
     page = http.get(f"{WEB_ORIGIN}/", headers={"accept": "text/html"})
     if not page.is_success:
         raise WebInfoError(f"{WEB_ORIGIN} responde HTTP {page.status_code}")
-    script = entry_script_url(page.text)
-    if script is None:
+    entry_url = entry_script_url(page.text)
+    if entry_url is None:
         raise WebInfoError("no se encuentra el script principal en la página")
-    bundle = http.get(script, headers={"accept": "*/*"})
-    if not bundle.is_success:
-        raise WebInfoError(f"el script principal responde HTTP {bundle.status_code}")
-    version = bundle_version(bundle.text)
-    if version is None:
-        raise WebInfoError("no se encuentra la versión en el script principal")
-    return version
+    entry = _fetch_script(http, entry_url)
+    if entry is None:
+        raise WebInfoError("no se puede descargar el script principal")
+    if version := bundle_version(entry):
+        return version
+    chunks = static_imports(entry, entry_url)[:MAX_CHUNK_DOWNLOADS]
+    for url in chunks:
+        script = _fetch_script(http, url)
+        if script is not None and (version := bundle_version(script)):
+            return version
+    raise WebInfoError(f"no se encuentra la versión en el script principal ni en {len(chunks)} de sus imports")
 
 
 def _mode(value: Any) -> WebMode:

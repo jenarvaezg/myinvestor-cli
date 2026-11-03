@@ -185,7 +185,7 @@ Nunca incluye tokens ni la contraseña, y el DNI/NIE va enmascarado. `logged_in`
 | `red` | `GET` sin autenticar a `api.myinvestor.es/login/api/v1/features`: latencia y bloqueo de Imperva (cualquier otra respuesta, incluso 401, vale) |
 | `api` | con la sesión, que el perfil de cliente responda (puede renovarla, como `status`) |
 | `reloj` | desfase con la cabecera `Date` del servidor: `WARN` a partir de 30 s (el margen con el que se dan por caducados los tokens), `FAIL` a partir de 5 min |
-| `version` | la versión con la que se presenta el CLI (`x-myinvestor-app`) frente a la de la web, que se lee de su script principal; `WARN` si no coinciden, si está por debajo de la mínima de `settings.json` o si no se puede leer |
+| `version` | la versión con la que se presenta el CLI (`x-myinvestor-app`) frente a la de la web, que se lee de su script principal o de los que este importa (primero `api-*.js`; como mucho 5, de hasta 8 MB); `WARN` si no coinciden, si está por debajo de la mínima de `settings.json` o si no se puede leer |
 | `mantenimiento` | `config.myinvestor.es/flags/settings.json`, el mismo aviso que consulta la web: `FAIL` en mantenimiento, `WARN` en modo solo lectura |
 
 Con `--offline` solo se miran `store` y `sesion`; el resto sale como `WARN` «no comprobado». Con `-f json`: `{"ok": false, "cli_version": "0.1.0", "checks": [{"check": "red", "status": "FAIL", "message": "…", "data": {"http_status": 403, "latency_ms": 85}}, …]}`. Las comprobaciones de red no reintentan y esperan 10 s como mucho; `-v` las muestra.
