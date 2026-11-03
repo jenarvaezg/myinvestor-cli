@@ -115,7 +115,8 @@ def _pension_rows(client: MyInvestorClient, refs: list[str] | None, start: date,
     rows: list[dict[str, Any]] = []
     for i in _pension_ids(client, refs):
         external = [_pension_row(i, t) for t in client.pension_transfers(i, start, end)]
-        merged = _merged(external, [_internal_row(t) for t in pair_orders(_alive(client.pension_orders(i)))])
+        orders = client.pension_orders(i, start - timedelta(days=MAX_GAP_DAYS), _orders_until(end))
+        merged = _merged(external, [_internal_row(t) for t in pair_orders(_alive(orders))])
         series = client.position_history(i, _history_period(start), pension=True)
         rows += _merged(merged, [_move_row(i, m) for m in deduce_plan_moves(series)])
     return rows

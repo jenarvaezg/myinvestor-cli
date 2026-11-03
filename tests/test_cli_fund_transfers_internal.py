@@ -176,7 +176,7 @@ def test_a_mobilisation_in_the_pension_orders_is_internal(
         plan_order("A1", "2026-06-11", "REGISTRATION_BY_INTERNAL_PLAN_TRANSFER", "N0002", shares=75.0),
         plan_order("C1", "2026-06-12", "PLAN_CONTRIBUTION", "N0002"),
     ]
-    mock_api.get(f"{PENSIONS}/301/orders").respond(200, json=ok(legs))
+    orders = mock_api.get(f"{PENSIONS}/301/orders").respond(200, json=ok(legs))
     series = {  # the history shows the same move: it is not repeated
         "N0001": [point("2026-06-09", 10, 1000), point("2026-06-10", 2.5, 250)],
         "N0002": [point("2026-06-10", 75, 750)],
@@ -184,6 +184,9 @@ def test_a_mobilisation_in_the_pension_orders_is_internal(
     mock_api.get(f"{PENSIONS}/301/positions").respond(200, json=ok({"positions": series}))
 
     got = rows(invoke("fund-transfers", "--pension", "--since", "2026-06-01", "--until", "2026-06-30", "-f", "json"))
+
+    # without dates the API only returns the last two plan orders (#69): the range goes with margin
+    assert orders.calls.last.request.url.params["dateFrom"] == "20260525"
 
     assert got == [
         {
