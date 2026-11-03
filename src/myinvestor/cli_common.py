@@ -17,7 +17,7 @@ from myinvestor.auth import Authenticator, stored_password_relogin
 from myinvestor.client import MyInvestorClient, ensure_session
 from myinvestor.errors import InputError, SignatureError
 from myinvestor.http import build_http_client
-from myinvestor.output import OutputFormat
+from myinvestor.output import OutputFormat, set_wide
 from myinvestor.signature import DEFAULT_APPROVAL_TIMEOUT, Challenge, SignatureRequest, SignatureUI, Signer
 from myinvestor.stores import SessionStore, StoreKind, resolve_store
 
@@ -70,7 +70,12 @@ def _global_options(
             "(p. ej. desde un script). Sin esto, fuera de una terminal falla en vez de mandarte una notificación.",
         ),
     ] = False,
+    wide: Annotated[
+        bool,
+        typer.Option("--wide", envvar="MYINVESTOR_WIDE", help="Tablas a todo lo ancho, una línea por fila."),
+    ] = False,
 ) -> None:
+    set_wide(wide)
     options.kind = store
     options.path = store_path
     options.approval_timeout = approval_timeout
