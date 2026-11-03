@@ -14,6 +14,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - Nuevo `myinvestor.fund-transfers/1`, con la variante `--pending` (#8).
 - `myinvestor.accounts/1` gana `tipo_pct` y `tae_pct` (números en %, `null` si la cuenta no tiene remuneración; `tae_pct` también es `null` si MyInvestor manda 0, «sin calcular») (compatible) (#5).
 - Nuevos `myinvestor.fund-filters/1` y `myinvestor.pension-plans/1`; `myinvestor.funds/1` no cambia con los filtros (#6).
+- `myinvestor.pension-plans/1` gana `com_gestion` y `com_deposito` (en %, de la ficha del plan; `null` en las filas del buscador) (compatible) (#68).
 - Nuevo `myinvestor.fund-history/1`: filas `{fecha, vl, moneda}`. `myinvestor.funds/1` gana `moneda` (divisa del fondo; compatible) (#7).
 - `myinvestor.upcoming/1` y la sección `upcoming` de `myinvestor.snapshot/1` ganan `estado` (`programada` o `en_curso`) (compatible: ningún campo cambia de significado). En `myinvestor.holds/1` y `pending.holds` de `snapshot`, `importe` es siempre negativo, que es lo que ya mandaba la API (#58, #57).
 - Nuevo `myinvestor.portfolios/1` (catálogo; con CARTERA, objeto `{cartera, fondos}`; con `--mine`, filas con `posiciones` y `rentabilidad_anual`). `myinvestor.position/1` gana `cartera`, `perfil`, `efectivo` y `efectivo_id`, y `myinvestor.holdings/1`, `cartera` y `perfil` (compatible: claves añadidas, `null` fuera de las carteras del roboadvisor). En `position`, el `valor` de una cartera incluye el saldo de su cuenta de efectivo propia, que deja de salir como fila `efectivo` aparte (#6).
@@ -55,6 +56,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 ### Corregido
 
 - Con stderr redirigido (fichero, tubería, cron) los errores y avisos salen en una sola línea aunque pasen de 80 columnas: una ruta larga ya no parte el mensaje (`grep "ya existe"` o `tail -n 1` lo leen entero). En una terminal siguen ajustándose a su ancho. La línea JSON de `-f json` ya era una sola (#67).
+- `pension-plans` y `funds` con `-n` mayor que 50 hacen una petición por cada 50 filas: antes `pension-plans -n 100` daba 5 planes y `-n 200`, ninguno. `pension-plans --featured` lee los planes propios de MyInvestor (Indexado S&P 500 y Global), Finanbest y Merchbanc, que el buscador no trae, y `--mine` los que tienes, los dos con `com_gestion` y `com_deposito`. `fund N1234` enseña sus comisiones (`commissionList`) sin `--full` (#68).
 - `position`: la tabla ya no añade la columna `efectivo` con una cartera contratada (su saldo ya va en `valor`), y vuelve a caber en 80 columnas; JSON/CSV/TSV no cambian.
 - Una respuesta de MyInvestor con un formato inesperado ya no acaba en un traceback: sale un error claro con el modelo y las claves afectadas (sin sus valores), código 1 y, con `-f json`, `"error": "unexpected_response"` en stderr.
 - `--approval-timeout` también vale en el login y el re-login; `logout` borra la pausa del re-login (#46).

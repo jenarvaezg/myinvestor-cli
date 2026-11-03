@@ -56,6 +56,13 @@ FILTER_OPTIONS = {
     FilterKind.regions: "--region",
 }
 PENSION_FILTERS = (FilterKind.managers, FilterKind.asset_types)  # what the pension-plan searcher filters by
+# Plans the web shows apart from the searcher, by promoter (a constant of its bundle, 2026-11). They
+# are not in `/v2/pension-plans`: the web reads each one with `/v2/pension-plans/{dgs}` (#68).
+FEATURED_PENSION_PLANS = {
+    "MyInvestor": ("N5394", "N5396", "N5459"),  # Indexado S&P 500, Indexado Global…
+    "Finanbest": ("N5271", "N5270"),
+    "Merchbanc": ("N1175", "N5290"),
+}
 
 
 @dataclass(frozen=True)

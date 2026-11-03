@@ -6,12 +6,15 @@ group would read `funds filters` (or any query that names a subcommand) as a sub
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import replace
+from decimal import Decimal
 from typing import Annotated, Any
 
 import typer
 
 from myinvestor.catalog import (
+    FEATURED_PENSION_PLANS,
     PENSION_FILTERS,
     CatalogFilters,
     Domain,
@@ -25,7 +28,7 @@ from myinvestor.catalog import (
 from myinvestor.cli_common import FormatOpt, app, build_client
 from myinvestor.client import MyInvestorClient
 from myinvestor.errors import InputError
-from myinvestor.models import PensionPlanSummary
+from myinvestor.models import Commission, PensionPlanSheet, PensionPlanSummary
 from myinvestor.output import OutputFormat, render
 
 QueryOpt = Annotated[
@@ -90,19 +93,50 @@ def fund_filters(
     render(rows, fmt, title=f"Filtros del buscador de {what}")
 
 
-def pension_plan_row(plan: PensionPlanSummary) -> dict[str, Any]:
+def pension_plan_row(plan: PensionPlanSummary | PensionPlanSheet) -> dict[str, Any]:
+    """A catalog row or a plan's detail; only the detail has fees (`com_gestion`, `com_deposito`)."""
     returns = plan.annualized_profitability
+    sheet = isinstance(plan, PensionPlanSheet)
+    commissions = plan.commission_list if sheet else []
     return {
         "dgs": plan.dgs_code,
         "nombre": plan.name,
-        "gestora": plan.managing_entity,
+        "gestora": plan.management_entity if sheet else plan.managing_entity,
         "categoria": plan.category,
         "ter": plan.ter,
+        "com_gestion": commission(commissions, "gesti"),
+        "com_deposito": commission(commissions, "dep"),
         "ytd": returns.ytd if returns else None,
         "1a": returns.one_year if returns else None,
         "3a": returns.three_year if returns else None,
         "5a": returns.five_year if returns else None,
     }
+
+
+def commission(commissions: list[Commission], word: str) -> Decimal | None:
+    """Percentage of the first fee whose name has `word` (accents and case ignored)."""
+    for fee in commissions:
+        if word in fold(fee.name or ""):
+            return fee.percentage
+    return None
+
+
+def fold(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))
+
+
+def plan_codes(client: MyInvestorClient, *, featured: bool, mine: bool) -> list[str]:
+    """DGS codes of the featured plans and/or of the ones held, without duplicates."""
+    codes = [code for group in FEATURED_PENSION_PLANS.values() for code in group] if featured else []
+    if mine:
+        codes += [
+            plan.dgs_code for account in client.pension_accounts() for plan in client.pension_plans(account.account_id)
+        ]
+    return list(dict.fromkeys(code.upper() for code in codes))
+
+
+def matches(sheet: PensionPlanSheet, query: str | None) -> bool:
+    return not query or fold(query) in fold(f"{sheet.dgs_code or ''} {sheet.name or ''}")
 
 
 @app.command("pension-plans")
@@ -117,9 +151,37 @@ def pension_plans(
     sort: SortOpt = "ter,asc",
     limit: LimitOpt = 20,
     page: Annotated[int, typer.Option(min=1, help="Página (desde 1).")] = 1,
+    featured: Annotated[
+        bool,
+        typer.Option(
+            "--featured",
+            help="Los planes que la web enseña aparte y no salen en el buscador (MyInvestor Indexado S&P 500 "
+            "y Global, Finanbest, Merchbanc), con sus comisiones. Una petición por plan.",
+        ),
+    ] = False,
+    mine: Annotated[
+        bool,
+        typer.Option("--mine", help="Los planes que tienes, con sus comisiones. Una petición por plan."),
+    ] = False,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
-    """Busca en el catálogo de planes de pensiones de MyInvestor: TER y rentabilidades anualizadas."""
+    """Busca en el catálogo de planes de pensiones de MyInvestor: TER y rentabilidades anualizadas.
+
+    El buscador no trae los planes propios de MyInvestor (Indexado S&P 500 `N5394`, Indexado Global
+    `N5396`…): `--featured` los lee de su ficha, como la web, y `--mine` lee los tuyos. Con ellos,
+    QUERY filtra por nombre o código sin distinguir mayúsculas ni tildes, y no valen los filtros del
+    buscador. `com_gestion` y `com_deposito` solo salen de la ficha: en el buscador van a null.
+    Con `-n` mayor que 50 hace una petición por cada 50 planes (la API no da más por página).
+    """
+    if featured or mine:
+        if any(v is not None for v in (manager, asset_type, min_ter, max_ter, risk, rating)) or page != 1:
+            raise InputError("--featured y --mine no admiten los filtros del buscador ni --page: solo QUERY y -n.")
+        with build_client() as client:
+            sheets = [client.pension_plan_sheet(code) for code in plan_codes(client, featured=featured, mine=mine)]
+        rows = [pension_plan_row(s) for s in sheets if matches(s, query)][:limit]
+        what = " y ".join(w for w, on in (("destacados", featured), ("tuyos", mine)) if on)
+        render(rows, fmt, title=f"Planes de pensiones {what}")
+        return
     low_ter, high_ter = ter_range(min_ter, max_ter)
     filters = CatalogFilters(
         asset_type=code_or_none(asset_type), min_ter=low_ter, max_ter=high_ter, risk=risk_or_none(risk), rating=rating

@@ -228,7 +228,18 @@ def full_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> No
     mock_api.get(f"{CPERF}/v2/pension-accounts/301").respond(200, json=ok([PLAN]))
     mock_api.get(f"{CPERF}/v2/pension-accounts/301/positions").respond(200, json=ok({"positions": {"N0001": [POINT]}}))
     mock_api.get(f"{CPERF}/v2/pension-plans/N0001").respond(
-        200, json=ok({"dgsCode": "N0001", "activeType": "RENTA VARIABLE", "category": "RV MIXTA"})
+        200,
+        json=ok(
+            {
+                "dgsCode": "N0001",
+                "activeType": "RENTA VARIABLE",
+                "category": "RV MIXTA",
+                "commissionList": [
+                    {"name": "Comisión de gestión", "percentage": 0.25},
+                    {"name": "Comisión de depósito", "percentage": 0.05},
+                ],
+            }
+        ),
     )
     mock_api.get(f"{CPERF}/v2/automatic-contributions/self").respond(200, json=ok([CONTRIBUTION]))
     mock_api.get(f"{CPERF}/v2/funds").respond(200, json=ok([CATALOG_ROW], pagination={"totalElements": 1}))
@@ -435,7 +446,7 @@ CASES = (
     Case("contributions", "", ("contributions",)),
     Case("funds", "", ("funds",)),
     Case("fund-filters", "", ("fund-filters",)),
-    Case("pension-plans", "", ("pension-plans",)),
+    Case("pension-plans", "", ("pension-plans",), options=("--mine",)),
     Case("fund-history", "", ("fund-history", FUND)),
     Case("portfolios", "", ("portfolios",), setup=portfolio_api),
     Case("portfolios", "CARTERA", ("portfolios", "metal"), setup=portfolio_api),

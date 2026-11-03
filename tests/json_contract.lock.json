@@ -709,6 +709,8 @@
       "gestora": "string|null",
       "categoria": "string|null",
       "ter": "number|null",
+      "com_gestion": "number|null",
+      "com_deposito": "number|null",
       "ytd": "number|null",
       "1a": "number|null",
       "3a": "number|null",
