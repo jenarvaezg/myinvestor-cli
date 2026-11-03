@@ -10,6 +10,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 
 - Primera versión del contrato: todas las órdenes con `-f json` pasan a `myinvestor.<orden>/1` con las claves y tipos de [docs/json.md](docs/json.md); `raw` y `fund` (respuesta de la API tal cual) van con `myinvestor.raw/1`, que solo garantiza el envoltorio, y la línea de error de stderr es `myinvestor.error/1`. `snapshot` lleva su propio `schema` (`myinvestor.snapshot/1`) y nunca va en el envoltorio. En 0.1.0 no había contrato.
 - Nuevos `myinvestor.transfers/1` y `myinvestor.interest/1`. `myinvestor.movements/1` gana `beneficiario` e `iban_destino`, solo con `--details` (compatible). En `myinvestor.upcoming/1`, `tipo` puede valer `transferencia` (#4, #5).
+- Nuevos: `myinvestor.order/1` (objeto `{orden, ejecuciones}`), `myinvestor.lots/1` y `myinvestor.gains/1` (#3, #1).
 
 ### Añadido
 
@@ -29,6 +30,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - `snapshot` (un JSON diario, esquema propio `myinvestor.snapshot/1`, con `delta` aportado/mercado frente a la foto anterior, `--save DIR`, `upcoming` y errores por sección) y `summary` (la misma foto en tablas, o una guardada con `--from-file`) (#25, #33).
 - `documents` (las cinco listas de documentos), `documents get` (descarga del PDF por id, nombre o `--fiscal AÑO`, 0600, sin sobrescribir), `documents summary` (extracto de una cuenta) y `xray` (radiografías); esquema `myinvestor.documents/1` (#2).
 - `transfers` (transferencias emitidas y programadas: beneficiario, IBAN de destino, estado, periodicidad y próxima fecha) e `interest` (última liquidación de intereses: tipo, TAE, brutos, retención y neto); `upcoming` (y la sección `upcoming` de `snapshot`, con una petición más por cuenta de efectivo) incluye las transferencias programadas (`tipo: transferencia`) y `movements --details` añade `beneficiario` e `iban_destino` a los cargos de transferencias emitidas (#4, #5).
+- `order REF`: una orden con su ejecución (VL, participaciones, comisiones, retenciones, neto y resultado fiscal) (#3); `lots`: lotes vivos FIFO de cada fondo con su plusvalía latente, y `gains [--year]`: plusvalías y minusvalías realizadas en reembolsos y traspasos de salida (#1).
 
 ### Cambiado
 
@@ -39,6 +41,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 
 ### Corregido
 
+- Una respuesta de MyInvestor con un formato inesperado ya no acaba en un traceback: sale un error claro con el modelo y las claves afectadas (sin sus valores), código 1 y, con `-f json`, `"error": "unexpected_response"` en stderr.
 - `--approval-timeout` también vale en el login y el re-login; `logout` borra la pausa del re-login (#46).
 - `movements --id -f json` redondea los importes a céntimos, como la lista (antes, `-50.0` en vez de `-50.00`) (#30).
 

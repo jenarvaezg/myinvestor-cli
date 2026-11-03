@@ -494,6 +494,65 @@ SNAPSHOT = (
     ),
 )
 
+ORDER_HEAD = (
+    Field("cuenta", S, note="id de la cuenta de valores o de pensiones"),
+    Field("tipo_cuenta", S, note="`valores` o `pensiones`"),
+    Field("ref", S, note="`orderReference`"),
+    Field("fecha", D, True, "fecha de la orden"),
+    Field("isin", S, True, "ISIN (código DGS en un plan de pensiones)"),
+    Field("fondo", S, True),
+    Field("operacion", S, True, "`operationType`: `INVESTMENT_FUNDS_SUBSCRIPTION`, `INVESTMENT_FUND_REIMBURSEMENT`…"),
+    Field("tipo", S, True, "`orderTypeName`"),
+    Field("estado", S, True, "`INITIAL`, `PENDING`, `IN_PROGRESS`, `COMPLETE`, `CANCEL`, `REJECTED`"),
+    Field("importe", A, True, "importe bruto en euros"),
+    Field("participaciones", N, True),
+    Field("divisa", S, note="divisa del fondo"),
+    Field("vencimiento", D, True, "`expirationDate`"),
+)
+
+EXECUTION = (
+    Field("num_operacion", S, True, "`operationNumber`"),
+    Field("fecha", D, True, "fecha de ejecución"),
+    Field("participaciones", N, True, "participaciones ejecutadas"),
+    Field("vl", N, True, "valor liquidativo aplicado"),
+    Field("bruto", A, True, "en la divisa del fondo"),
+    Field("comisiones", A, True, "en la divisa del fondo"),
+    Field("retenciones", A, True, "en origen + en destino, en la divisa del fondo"),
+    Field("neto", A, True, "en euros"),
+    Field("tipo_cambio", N, True),
+    Field("resultado", A, True, "`taxResult`: resultado fiscal (en ventas y traspasos de salida)"),
+)
+
+LOT = (
+    Field("cuenta", S, note="id de la cuenta de valores; `total` en la última fila"),
+    Field("isin", S, True, "`null` en el total"),
+    Field("fondo", S, True),
+    Field("fecha_fiscal", D, True, "fecha fiscal del lote: heredada del fondo de origen en un traspaso"),
+    Field("operacion", S, True, "`operationDesc`: `SUSCRIPCIÓN FONDOS INVERSIÓN`, `ALTA IIC SWITCH`…"),
+    Field("participaciones", N, True, "participaciones vivas del lote"),
+    Field("vl_compra", N, True, "VL de compra"),
+    Field("coste", A, True, "coste fiscal"),
+    Field("valor", A, True, "valor actual"),
+    Field("plusvalia", A, True, "plusvalía (o minusvalía) latente"),
+)
+
+GAIN = (
+    Field("cuenta", S, note="id de la cuenta de valores; `plusvalias`, `minusvalias` y `total` en las tres últimas"),
+    Field("fecha", D, True, "fecha de ejecución; `null` en los totales"),
+    Field("ref", S, True, "referencia de la orden; `null` en los totales"),
+    Field("isin", S, True),
+    Field("fondo", S, True),
+    Field("operacion", S, True, "`operationType` de la orden"),
+    Field("traspaso", B, True, "traspaso entre fondos: no suma en los totales"),
+    Field("participaciones", N, True),
+    Field("vl", N, True),
+    Field("bruto", A, True),
+    Field("comisiones", A, True),
+    Field("retenciones", A, True),
+    Field("neto", A, True),
+    Field("resultado", A, True, "`taxResult`; en los totales, la suma de los reembolsos"),
+)
+
 RAW_NOTE = "Respuesta de MyInvestor tal cual (claves en camelCase de la API): fuera del contrato de claves."
 
 
@@ -563,6 +622,31 @@ CONTRACTS: tuple[Contract, ...] = (
         ),
         'La última fila es el total (`clave: "total"`).',
     ),
+    Contract(
+        "order",
+        1,
+        (
+            Variant(
+                "",
+                Shape.object,
+                (
+                    Field("orden", OBJ, fields=ORDER_HEAD),
+                    Field(
+                        "ejecuciones", ARR, note="`relatedOperations`; vacía si no se ha ejecutado", fields=EXECUTION
+                    ),
+                ),
+            ),
+        ),
+        "Un objeto con la orden y sus ejecuciones. Nunca incluye el DNI del ordenante.",
+    ),
+    Contract("lots", 1, (_rows(*LOT),), 'Una fila por lote vivo y, al final, el total (`cuenta: "total"`).'),
+    Contract(
+        "gains",
+        1,
+        (_rows(*GAIN),),
+        "Una fila por ejecución de un reembolso o traspaso de salida y, al final, `plusvalias`, `minusvalias` y "
+        "`total` (solo reembolsos).",
+    ),
     Contract("status", 1, (Variant("", Shape.object, STATUS),), "Nunca incluye tokens ni la contraseña."),
     Contract("doctor", 1, (Variant("", Shape.object, DOCTOR),)),
     Contract("state show", 1, (Variant("", Shape.object, STATE),)),
@@ -585,7 +669,11 @@ ERROR_LINE = Contract(
             "",
             Shape.object,
             (
-                Field("error", S, note="tipo de error en snake_case (`signature_required`, `network`…)"),
+                Field(
+                    "error",
+                    S,
+                    note="tipo de error en snake_case (`signature_required`, `network`, `unexpected_response`…)",
+                ),
                 Field("exit_code", INT, note="el mismo código con el que sale el proceso"),
                 Field("message", S, note="texto para personas", stable=False),
             ),

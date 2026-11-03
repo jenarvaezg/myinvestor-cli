@@ -81,6 +81,9 @@ myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|ye
 myinvestor holdings [-a 123456] [--kind fondos|broker] [--ter]   # posiciones: participaciones, coste, VL, valor, rentabilidad y peso
 myinvestor allocation [--by asset|geo|category|product|account] [--include-cash] [--target objetivo.json]   # reparto de la cartera y TER medio
 myinvestor orders [--all | --from 2025-01-01 --to …] [--status EXECUTED] [--pension] [--new]
+myinvestor order REF [-a ID] [--pension]         # una orden con su ejecución: VL, participaciones, comisiones, retenciones, neto y resultado fiscal
+myinvestor lots [IE0032126645] [-a ID]            # lotes vivos (FIFO) de cada fondo: coste, valor y plusvalía latente
+myinvestor gains [IE0032126645] [--year 2025] [-a ID]   # plusvalías y minusvalías realizadas: reembolsos y traspasos de salida
 myinvestor pensions                               # planes de pensiones
 myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year]
 myinvestor contributions [--all] [--new]          # aportaciones periódicas
@@ -272,6 +275,26 @@ Categorías (`--by type` muestra cada `operationType` con su categoría y la reg
 
 Solo los tipos marcados como observados se han visto en cuentas reales; el resto son palabras clave, porque la API no publica la lista de tipos. Se comparan sin tildes ni mayúsculas, y cada palabra debe empezar una palabra del tipo (`RV` no casa con «SERVICIO»). Los tipos que no casan con nada van a `otros` y el CLI los lista en stderr para poder [ampliar la tabla](src/myinvestor/classify.py). Una transferencia solo es `traspaso_interno` si su otro lado está entre las cuentas consultadas: con `-a` u `--owner`, un traspaso hacia o desde una cuenta que queda fuera sale como `aportacion_externa`, igual que las transferencias de otros clientes.
 
+### Órdenes, lotes y plusvalías: `order`, `lots` y `gains`
+
+`orders` lista las órdenes; **`order REF`** enseña una con su ejecución real (`relatedOperations` de la API): por cada ejecución, `fecha` (de ejecución), `participaciones`, `vl` aplicado, `bruto`, `comisiones`, `retenciones` (en origen + en destino), `neto` (en euros), `tipo_cambio` y `resultado` (el resultado fiscal, `taxResult`). Sin `-a` busca la referencia en el histórico de órdenes de cada cuenta de valores y, si no aparece (o con `--pension`), en las de pensiones: una petición por cuenta más la del detalle; con `-a ID` va directa al detalle (una sola petición). En JSON sale un objeto `{"orden": {…}, "ejecuciones": […]}`; en CSV/TSV, una fila por ejecución. La API manda también el DNI del ordenante (`ordererCustomer`) y el número de cuenta de cargo: el CLI no los lee nunca. Una orden en curso no tiene ejecuciones (`relatedOperations: null`, `ejecuciones: []`), y en las aportaciones a planes completadas la `fecha` de ejecución puede venir vacía (en `gains`, entonces, cuenta la fecha de la orden).
+
+**`lots`** son los **lotes vivos** de cada fondo que tienes, lo que da la ventana de «plusvalías y minusvalías» de la web: una fila por suscripción que sigue en cartera (FIFO), con `fecha_fiscal`, `operacion`, `participaciones`, `vl_compra`, `coste` (fiscal), `valor` (actual) y `plusvalia` latente, y el total al final. Es lo que tributaría si reembolsases hoy, **no** lo ya vendido. `fecha_fiscal` es la fecha fiscal del lote: **en un traspaso entre fondos se hereda la del fondo de origen** (un lote «ALTA IIC SWITCH» o «SUSC.TRASPASO. INT.» puede tener una fecha anterior a la del traspaso). Peticiones: una por cuenta de valores más una por fondo. Solo fondos: la API no tiene un equivalente para acciones ni ETF.
+
+**`gains`** son las plusvalías y minusvalías **realizadas** en un año fiscal (`--year`, por defecto el actual): las ejecuciones de las órdenes de reembolso y de traspaso de salida de fondos, con el `resultado` fiscal que da MyInvestor en el detalle de cada orden. Qué órdenes cuentan, por su `operationType` (nombres de la web):
+
+| `operationType` | En la web | `traspaso` |
+|---|---|---|
+| `INVESTMENT_FUND_REIMBURSEMENT` | Reembolso Fondos de Inversión | `false`: suma en los totales |
+| `INTERNAL_TRANSFER_REIMBURSEMENT` | Reembolso por Traspaso Interno | `true` |
+| `EXTERNAL_TRANSFER_REIMBURSEMENT` | Reembolso por Traspaso Externo | `true` |
+| `IIC_SWITCH_DEREGISTRATION` | Baja switch | `true` |
+| `INTERNAL_TRANSFER_IIC` | Traspaso interno IIC LP | `true` |
+
+Los traspasos entre fondos difieren la tributación, así que salen en la lista pero **no suman** en las tres filas finales (`plusvalias`, `minusvalias` y `total`, con el importe en `resultado`), que son solo los reembolsos. El año va por **fecha de ejecución**: se piden las órdenes desde el 1 de diciembre del año anterior (una orden del 30 de diciembre puede ejecutarse en enero) y se quedan las ejecuciones del año.
+
+**Peticiones de `gains`**: una por cuenta de valores para las órdenes, y **una más por cada orden de salida** del periodo (las de compra y las canceladas o rechazadas no se piden). Con muchos reembolsos o traspasos, usa `--min-interval` (ver [ritmo de peticiones](#silencio-depuración-y-ritmo-de-peticiones)) o filtra por ISIN. Pendiente de validar con una venta real: los tipos salen del bundle de la web y la forma del detalle se ha visto en una suscripción. Para la declaración, cuádralo con la «Información fiscal» anual de MyInvestor.
+
 ### Traspasos internos
 
 `internal-transfers` empareja cada cargo de una cuenta tuya con su abono en otra (p. ej. «Mi Cuenta» → cuenta junior). Una fila por traspaso:
@@ -438,7 +461,7 @@ Para que un script distinga qué ha pasado sin leer el texto de error (también 
 | Código | Caso | Excepciones |
 |---|---|---|
 | 0 | OK | |
-| 1 | Otros errores | `ApiError` (4xx), `LoginRejectedError` (login manual rechazado por otro motivo), `AuthError`… |
+| 1 | Otros errores, también una respuesta de MyInvestor con un formato que el CLI no conoce (`unexpected_response`: el mensaje dice el modelo y las claves, nunca los valores) | `ApiError` (4xx), `LoginRejectedError` (login manual rechazado por otro motivo), `AuthError`, `UnexpectedResponseError`… |
 | 2 | Uso o datos de entrada incorrectos | opciones de Typer, `InputError` |
 | 10 | Contraseña rechazada (la guardada se ha borrado) o cambio de contraseña obligatorio | `InvalidCredentialsError`, `StoredPasswordRejectedError`, `PasswordChangeRequired` |
 | 11 | Sin sesión, o caducada sin forma de renovarla (incluido el re-login en pausa) | `NotLoggedInError`, `SessionExpiredError`, `ReloginBlockedError` |
@@ -665,6 +688,9 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/{securities,pension}-accounts/{id}/positions?groupType=` | serie diaria por ISIN/código; `ONE_WEEK`, `ONE_MONTH`, `THREE_MONTHS`, `SIX_MONTHS`, `ONE_YEAR`, `THREE_YEAR`, `MAX` |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/investment-summary` | totales fondos/acciones |
 | GET | `/cperf-server/api/v2/pension-accounts/self` · `/{id}` · `/{id}/orders?order=DATE` | planes y sus aportaciones |
+| GET | `/cperf-server/api/v2/securities-accounts/{id}/orders/{reference}` | detalle de una orden: `orderReference`, `isin`, `orderStatus` (`INITIAL`, `PENDING`, `IN_PROGRESS`, `COMPLETE`, `CANCEL`, `REJECTED`), `orderDate`, `orderTypeName`, `orderClass`, `operationType`, `grossAmountEUR`, `grossAmountFundCurrency`, `cash`, `shares`, `fundName`, `currency`, `expirationDate`, `periodicityCode`, `accountNumber`, `ordererCustomer` (el DNI: no se lee) y `relatedOperations: [{operationNumber, executionDate, executedShares, liquidationValue, grossAmountOperationFundCurrency, commissions, originRetention, destinyRetention, netAmountFundCurrency, exchangeRate, netAmountEUR, netAmountAccountCurrency, taxResult}]` |
+| GET | `/cperf-server/api/v2/pension-accounts/{id}/orders/{reference}` | lo mismo para un plan (en `isin`, el código DGS); visto en el bundle, no con una cuenta real |
+| GET | `/cperf-server/api/v2/securities-accounts/{id}/investment-summary/funds/{isin}/added-values` | lotes vivos de un fondo: `{currency, fundName, investmentAddedValue, addedValue, plusMinusList: [{operationType, operationDesc, operationNum, fiscalDate, securities, netAssetValue, investment, marketValue, plusMinus, fiscalResult}]}`; solo fondos |
 | GET | `/cperf-server/api/v2/pension-plans/{dgsCode}` | ficha del plan |
 | GET | `/cperf-server/api/v2/automatic-contributions/self` | aportaciones periódicas |
 | GET | `/cperf-server/api/v2/customers/self/documents/fiscal` · `cash-accounts/self/documents` · `securities-accounts/self/documents` · `pension-accounts/self/documents` · `portfolios/self/documents` | listas de documentos, todas con `{documentId, documentUuid, name, extension, isNotified, createDate, signDate, accountId ("" si no es de una cuenta), accountCode, accountAlias, accountType, isCurrentCustomerAnOwner}` |

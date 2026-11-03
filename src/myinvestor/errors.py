@@ -185,6 +185,19 @@ class WrongCodeError(SignatureError):
         super().__init__(f"Código incorrecto; {hint}.")
 
 
+class UnexpectedResponseError(MyInvestorError):
+    """A response did not fit its model: MyInvestor changed a format. Names the model and keys, never values."""
+
+    def __init__(self, model: str, fields: list[str]) -> None:
+        self.model = model
+        self.fields = fields
+        where = f"{model} ({', '.join(fields)})" if fields else model
+        super().__init__(
+            f"MyInvestor ha devuelto una respuesta con un formato inesperado en {where}; "
+            "abre un issue con la salida de `-v`."
+        )
+
+
 def envelope_status(body: object) -> tuple[str | None, str | None]:
     if not isinstance(body, dict):
         return None, None

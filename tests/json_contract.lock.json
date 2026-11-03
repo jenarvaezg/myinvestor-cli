@@ -602,5 +602,66 @@
       "promocion": "string|null",
       "fin_promocion": "date|null"
     }
+  },
+  "myinvestor.order/1": {
+    "por defecto": {
+      "orden": "object",
+      "orden.cuenta": "string",
+      "orden.tipo_cuenta": "string",
+      "orden.ref": "string",
+      "orden.fecha": "date|null",
+      "orden.isin": "string|null",
+      "orden.fondo": "string|null",
+      "orden.operacion": "string|null",
+      "orden.tipo": "string|null",
+      "orden.estado": "string|null",
+      "orden.importe": "amount|null",
+      "orden.participaciones": "number|null",
+      "orden.divisa": "string",
+      "orden.vencimiento": "date|null",
+      "ejecuciones": "array",
+      "ejecuciones[].num_operacion": "string|null",
+      "ejecuciones[].fecha": "date|null",
+      "ejecuciones[].participaciones": "number|null",
+      "ejecuciones[].vl": "number|null",
+      "ejecuciones[].bruto": "amount|null",
+      "ejecuciones[].comisiones": "amount|null",
+      "ejecuciones[].retenciones": "amount|null",
+      "ejecuciones[].neto": "amount|null",
+      "ejecuciones[].tipo_cambio": "number|null",
+      "ejecuciones[].resultado": "amount|null"
+    }
+  },
+  "myinvestor.lots/1": {
+    "por defecto": {
+      "cuenta": "string",
+      "isin": "string|null",
+      "fondo": "string|null",
+      "fecha_fiscal": "date|null",
+      "operacion": "string|null",
+      "participaciones": "number|null",
+      "vl_compra": "number|null",
+      "coste": "amount|null",
+      "valor": "amount|null",
+      "plusvalia": "amount|null"
+    }
+  },
+  "myinvestor.gains/1": {
+    "por defecto": {
+      "cuenta": "string",
+      "fecha": "date|null",
+      "ref": "string|null",
+      "isin": "string|null",
+      "fondo": "string|null",
+      "operacion": "string|null",
+      "traspaso": "boolean|null",
+      "participaciones": "number|null",
+      "vl": "number|null",
+      "bruto": "amount|null",
+      "comisiones": "amount|null",
+      "retenciones": "amount|null",
+      "neto": "amount|null",
+      "resultado": "amount|null"
+    }
   }
 }

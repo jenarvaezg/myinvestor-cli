@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 import pytest
 import respx
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from myinvestor import cli, cli_accounts, cli_auth, cli_common
@@ -34,6 +35,7 @@ from myinvestor.errors import (
     SignatureRequired,
     StoredPasswordRejectedError,
 )
+from myinvestor.models import Order
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
 from tests.conftest import (
@@ -430,6 +432,31 @@ def test_exit_code_per_error_type(
     status, stderr = run_main(monkeypatch, capsys, "accounts")
     assert status == code
     assert stderr.startswith("Error")  # human message without -f json
+
+
+def unexpected_shape() -> ValidationError:
+    """What a model raises when MyInvestor changes the shape of a response (here, with personal data in it)."""
+    try:
+        Order.model_validate({"reference": "R1", "orderDate": "2026-10-01", "shares": "SECRETO 12345678Z"})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("the payload should not validate")
+
+
+def test_unexpected_response_is_a_clear_error_without_the_data(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    failing_client(monkeypatch, unexpected_shape())
+
+    status, stderr = run_main(monkeypatch, capsys, "accounts")
+    json_status, json_stderr = run_main(monkeypatch, capsys, "accounts", "-f", "json")
+
+    assert status == json_status == 1
+    message = " ".join(stderr.split())  # the console wraps long lines
+    assert message.startswith("Error") and "formato inesperado en Order (shares)" in message
+    error = json.loads(json_stderr)
+    assert (error["error"], error["exit_code"]) == ("unexpected_response", 1)
+    assert "SECRETO" not in stderr + json_stderr and "12345678Z" not in stderr + json_stderr
 
 
 def test_expired_session_exits_11(

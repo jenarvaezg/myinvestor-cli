@@ -35,10 +35,12 @@ from myinvestor.models import (
     Contribution,
     FeedItem,
     Flow,
+    FundLots,
     FundSheet,
     FundSummary,
     Hold,
     Order,
+    OrderDetail,
     PensionAccount,
     PensionPlanPosition,
     PensionPlanSheet,
@@ -393,6 +395,16 @@ class MyInvestorClient:
             product: sorted((PositionPoint.model_validate(p) for p in points), key=lambda p: p.date)
             for product, points in (positions or {}).items()
         }
+
+    def order_detail(self, account_id: str, reference: str, *, pension: bool = False) -> OrderDetail:
+        """An order with its executions (`relatedOperations`): NAV, shares, fees and tax result."""
+        kind = "pension-accounts" if pension else "securities-accounts"
+        return OrderDetail.model_validate(self.get_data(f"{CPERF}/v2/{kind}/{seg(account_id)}/orders/{seg(reference)}"))
+
+    def fund_lots(self, account_id: str, isin: str) -> FundLots:
+        """Open FIFO lots of a fund with their latent gain (funds only; not realised sales)."""
+        path = f"{CPERF}/v2/securities-accounts/{seg(account_id)}/investment-summary/funds/{seg(isin)}/added-values"
+        return FundLots.model_validate(self.get_data(path))
 
     # ---- pension plans -----------------------------------------------------
 
