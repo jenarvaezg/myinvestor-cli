@@ -26,7 +26,7 @@ Lo nuevo se marca **después** de escribir la foto (en `--save` y en stdout): si
 
 ## Esquema (`myinvestor.snapshot/1`)
 
-Los nombres de las secciones van en inglés, como en el issue; los campos de cada fila son los de la orden equivalente (en español, sin tildes). Los importes son números JSON exactos, redondeados a céntimos como en `-f json` (participaciones, VL y porcentajes conservan su precisión): `json.loads(texto, parse_float=Decimal)` los recupera sin pérdida.
+Las claves y sus tipos están también en la referencia generada, [docs/json.md](json.md) (`myinvestor.snapshot/1`), y `myinvestor schema snapshot` da su JSON Schema. `--json-envelope` no la envuelve: ya lleva su `schema`. Los nombres de las secciones van en inglés, como en el issue; los campos de cada fila son los de la orden equivalente (en español, sin tildes). Los importes son números JSON exactos, redondeados a céntimos como en `-f json` (participaciones, VL y porcentajes conservan su precisión): `json.loads(texto, parse_float=Decimal)` los recupera sin pérdida.
 
 ```json
 {"schema": "myinvestor.snapshot/1", "as_of": "2026-11-04T09:00:05+01:00", "cli_version": "0.1.0",
@@ -48,8 +48,8 @@ Los nombres de las secciones van en inglés, como en el issue; los campos de cad
                "retenido": false, "disponible": 950.00, "disponible_tras": 890.00, "falta": null, "tipo_retencion": null}],
  "movements": {"desde": "2026-11-01", "hasta": "2026-11-04", "huecos": [], "movimientos": [ … ]},
  "new": {"movements": [ … ], "orders": [ … ], "pension_orders": [ … ]},
- "delta": {"since": "2026-11-03T09:00:04+01:00", "total": 12.34, "aportado": 0.00, "mercado": 12.34,
-           "by_product": [{"producto": "valores", "id": "201", "nombre": "…", "valor": 5.67, "aportado": 0.00, "mercado": 5.67}]},
+ "delta": {"desde": "2026-11-03T09:00:04+01:00", "total": 12.34, "aportado": 0.00, "mercado": 12.34,
+           "por_producto": [{"producto": "valores", "id": "201", "nombre": "…", "valor": 5.67, "aportado": 0.00, "mercado": 5.67}]},
  "errors": []}
 ```
 
@@ -67,7 +67,7 @@ Los nombres de las secciones van en inglés, como en el issue; los campos de cad
 | `upcoming` | lo que viene en los próximos **14 días** | `upcoming -f json` |
 | `movements` | movimientos de efectivo desde el día de la foto anterior menos 3 días (sin anterior, los últimos 3 días) hasta hoy, de todas las cuentas, con los campos de `movements -f json` (`pareja_id`, `traspaso_interno`…); `huecos`, los tramos que no se han podido pedir. Es la base del `aportado` del efectivo en la foto siguiente | `movements --from … -f json` |
 | `new` | `null` con `--no-new`; si no, lo que `movements --new`, `orders --new` y `orders --pension --new` darían, con el mismo estado local | ver [Solo lo nuevo](../README.md#solo-lo-nuevo---new---since-date-y---since-id) |
-| `delta` | `null` sin foto anterior; ver abajo | |
+| `delta` | `null` sin foto anterior; si no, `desde` (el `as_of` de la anterior), `total`, `aportado`, `mercado` y `por_producto` (`producto`, `id`, `nombre`, `valor`, `aportado`, `mercado`); ver abajo | |
 | `errors` | `[{"section", "error", "exit_code", "message"}]`, ver abajo | |
 
 Una sección que falla vale `null` (y una lista vacía es que no hay nada): no las confundas. Los movimientos nunca se piden fuera de la ventana de 90 días sin segundo factor.
@@ -98,7 +98,7 @@ Y en total: `total` = `total` ahora − `total` antes, `aportado` = Σ `aportado
 - **Dinero en tránsito.** Si el cargo de una compra aparece en el efectivo un día y la posición (`invertido`) al siguiente, el total baja ese día con `aportado` negativo y sube al siguiente con `aportado` positivo: el `mercado` sale bien los dos días.
 - **Traspasos de fondos o planes desde otra entidad** no pasan por el efectivo: suben `invertido` y salen como `aportado`, que es correcto.
 - **Fechas de valor.** Los fondos van con el VL de uno o dos días hábiles antes (`fecha_valor`, `fecha_vl`): el `mercado` de hoy puede ser el movimiento del mercado de anteayer, y un lunes puede no reflejar ningún cambio.
-- Si la foto anterior no está completa (p. ej. le falló `pensions`), los productos de esa sección no salen en `by_product` y el total es `null`.
+- Si la foto anterior no está completa (p. ej. le falló `pensions`), los productos de esa sección no salen en `por_producto` y el total es `null`.
 
 ## Errores por sección y código de salida
 

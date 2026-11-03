@@ -36,7 +36,6 @@ from myinvestor.cli_state import MarkOpt, StateOpt, state_file
 from myinvestor.cli_upcoming import DEFAULT_UPCOMING_DAYS, _warn
 from myinvestor.client import MyInvestorClient
 from myinvestor.errors import AuthError, CorruptKeyringError, CorruptStoreError, InputError, PartialResultError
-from myinvestor.json_output import dumps
 from myinvestor.models import (
     CashAccount,
     Contribution,
@@ -46,7 +45,7 @@ from myinvestor.models import (
     PensionPlanPosition,
     SecuritiesAccount,
 )
-from myinvestor.output import OutputFormat, render
+from myinvestor.output import OutputFormat, print_json, render
 from myinvestor.psd2 import free_start
 from myinvestor.snapshot import (
     SCHEMA,
@@ -128,7 +127,7 @@ def snapshot(
     """
     requested.json = True  # errors on stderr as one JSON line, like any `-f json`
     doc, errors, commit = _take(_Request(save, previous, new, state_path, mark))
-    print(dumps(doc))
+    print_json(doc)  # never wrapped by --json-envelope: it carries its own `schema`
     commit()
     _finish(errors)
 

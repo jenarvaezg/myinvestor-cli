@@ -314,6 +314,121 @@ STATE = (
     Field("pending", OBJ, note="lo mostrado con `--no-mark`, con las mismas claves"),
 )
 
+HOLD = (
+    Field("cuenta", S, note="alias de la cuenta (o su id si no tiene)"),
+    Field("id", S),
+    Field("tipo", S, True, "`INVESTMENT_ORDER`…"),
+    Field("importe", A),
+)
+
+SNAPSHOT_ACCOUNT_VALUES = (
+    Field("producto", S, note="`valores` o `pensiones`"),
+    Field("id", S, note="id de la cuenta"),
+    Field("nombre", S, True),
+    Field("valor", A, True),
+    Field("invertido", A, True),
+    Field("ganancia", A, True),
+    Field("rentab", N, True, "en %"),
+    Field("fecha_valor", D, True, "VL más reciente de sus posiciones"),
+)
+SNAPSHOT_HOLDING = tuple(f for f in HOLDING if f.name not in ("ter", "consultado_en"))
+SNAPSHOT_SECTION = "`null` si la sección ha fallado (ver `errors`)"
+DELTA_ROW = (
+    Field("producto", S, note="`efectivo`, `valores` o `pensiones`"),
+    Field("id", S, note="id de la cuenta"),
+    Field("nombre", S, True),
+    Field("valor", A, note="valor ahora - valor antes (en efectivo, el saldo)"),
+    Field("aportado", A, True, "dinero neto que ha entrado en el producto; `null` si no se puede saber"),
+    Field("mercado", A, True, "valor - aportado"),
+)
+SNAPSHOT = (
+    Field("schema", S, note="`myinvestor.snapshot/1`"),
+    Field("as_of", DT, note="fecha y hora de la consulta; su día da el nombre del fichero de `--save`"),
+    Field("cli_version", S),
+    Field("total", A, True, "efectivo + valores + pensiones; `null` si falla alguna de esas secciones"),
+    Field("cash", ARR, True, f"como `accounts`; {SNAPSHOT_SECTION}", fields=(*ACCOUNT, Field("fecha_valor", D))),
+    Field(
+        "securities",
+        ARR,
+        True,
+        SNAPSHOT_SECTION,
+        fields=(
+            *SNAPSHOT_ACCOUNT_VALUES,
+            Field("posiciones", ARR, note="como `holdings`; `peso` sobre toda la cartera", fields=SNAPSHOT_HOLDING),
+        ),
+    ),
+    Field(
+        "pensions",
+        ARR,
+        True,
+        SNAPSHOT_SECTION,
+        fields=(*SNAPSHOT_ACCOUNT_VALUES, Field("planes", ARR, note="como `pensions`", fields=PENSION)),
+    ),
+    Field(
+        "pending",
+        OBJ,
+        True,
+        SNAPSHOT_SECTION,
+        fields=(
+            Field("orders", ARR, note="órdenes de valores y de planes en curso", fields=ORDER),
+            Field("holds", ARR, note="como `holds`", fields=HOLD),
+        ),
+    ),
+    Field("upcoming", ARR, True, f"como `upcoming`, 14 días; {SNAPSHOT_SECTION}", fields=UPCOMING),
+    Field(
+        "movements",
+        OBJ,
+        True,
+        f"movimientos recientes, base del delta siguiente; {SNAPSHOT_SECTION}",
+        fields=(
+            Field("desde", D),
+            Field("hasta", D),
+            Field(
+                "huecos",
+                ARR,
+                note="tramos que no se han podido pedir",
+                fields=(Field("cuenta_id", S), Field("cuenta", S), Field("desde", D), Field("hasta", D)),
+            ),
+            Field("movimientos", ARR, fields=MOVEMENT),
+        ),
+    ),
+    Field(
+        "new",
+        OBJ,
+        True,
+        "`null` con `--no-new`",
+        fields=(
+            Field("movements", ARR, True, SNAPSHOT_SECTION, fields=MOVEMENT),
+            Field("orders", ARR, True, SNAPSHOT_SECTION, fields=ORDER),
+            Field("pension_orders", ARR, True, SNAPSHOT_SECTION, fields=ORDER),
+        ),
+    ),
+    Field(
+        "delta",
+        OBJ,
+        True,
+        "`null` sin foto anterior",
+        fields=(
+            Field("desde", DT, note="`as_of` de la foto anterior"),
+            Field("total", A, True),
+            Field("aportado", A, True),
+            Field("mercado", A, True),
+            Field("por_producto", ARR, fields=DELTA_ROW),
+        ),
+    ),
+    Field(
+        "errors",
+        ARR,
+        note="secciones que han fallado",
+        fields=(
+            Field("section", S, note="`cash`, `pensions`, `movements`, `new.orders`…"),
+            Field("error", S, note="como `error` de la línea de error"),
+            Field("exit_code", INT),
+            Field("message", S, note="texto para personas", stable=False),
+        ),
+    ),
+)
+
 RAW_NOTE = "Respuesta de MyInvestor tal cual (claves en camelCase de la API): fuera del contrato de claves."
 
 
@@ -334,18 +449,7 @@ CONTRACTS: tuple[Contract, ...] = (
         (_rows(*MOVEMENT), Variant("--id", Shape.object, MOVEMENT)),
         "Con `--id` sale el objeto del movimiento, no una lista. `--new`, `--since-*` y `--search` solo filtran filas.",
     ),
-    Contract(
-        "holds",
-        1,
-        (
-            _rows(
-                Field("cuenta", S, note="alias de la cuenta (o su id si no tiene)"),
-                Field("id", S),
-                Field("tipo", S, True, "`INVESTMENT_ORDER`…"),
-                Field("importe", A),
-            ),
-        ),
-    ),
+    Contract("holds", 1, (_rows(*HOLD),)),
     Contract("balance-history", 1, (_rows(Field("fecha", D), Field("saldo", A, note="total del efectivo")),)),
     Contract("holdings", 1, (_rows(*HOLDING),)),
     Contract("orders", 1, (_rows(*ORDER),), "Las mismas claves con `--pension` y con `--new`."),
@@ -389,6 +493,13 @@ CONTRACTS: tuple[Contract, ...] = (
     Contract("status", 1, (Variant("", Shape.object, STATUS),), "Nunca incluye tokens ni la contraseña."),
     Contract("doctor", 1, (Variant("", Shape.object, DOCTOR),)),
     Contract("state show", 1, (Variant("", Shape.object, STATE),)),
+    Contract(
+        "snapshot",
+        1,
+        (Variant("", Shape.object, SNAPSHOT),),
+        "Siempre JSON (sin `-f`), con su propio `schema`: `--json-envelope` no la envuelve. Ver docs/snapshot.md.",
+        enveloped=False,
+    ),
     Contract("raw", 1, (Variant("", Shape.any),), RAW_NOTE),
     Contract("fund", 1, (Variant("", Shape.any),), f"{RAW_NOTE} Sin `--full`, solo unas claves de la ficha.", "raw"),
 )

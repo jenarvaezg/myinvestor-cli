@@ -475,6 +475,197 @@ Salida: un objeto.
 | `contributions` | object | no | sí | `{id: {estado, proxima}}`; formato del fichero de estado (cambia con `version`) |
 | `pending` | object | no | sí | lo mostrado con `--no-mark`, con las mismas claves |
 
+### `snapshot` — `myinvestor.snapshot/1`
+
+Siempre JSON (sin `-f`), con su propio `schema`: `--json-envelope` no la envuelve. Ver docs/snapshot.md.
+
+Salida: un objeto.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `schema` | string | no | sí | `myinvestor.snapshot/1` |
+| `as_of` | datetime ISO 8601 con zona | no | sí | fecha y hora de la consulta; su día da el nombre del fichero de `--save` |
+| `cli_version` | string | no | sí |  |
+| `total` | number (€, 2 decimales) | sí | sí | efectivo + valores + pensiones; `null` si falla alguna de esas secciones |
+| `cash` | array de objetos | sí | sí | como `accounts`; `null` si la sección ha fallado (ver `errors`) |
+| `cash[].id` | string | no | sí |  |
+| `cash[].uuid` | string | no | sí |  |
+| `cash[].alias` | string | sí | sí |  |
+| `cash[].iban` | string | sí | sí |  |
+| `cash[].tipo` | string | sí | sí | `accountType` |
+| `cash[].rol` | string | sí | sí | tu `participantType` |
+| `cash[].titular` | string | sí | sí | nombre del titular principal (el menor en una cuenta junior) |
+| `cash[].estado` | string | sí | sí |  |
+| `cash[].disponible` | number (€, 2 decimales) | no | sí |  |
+| `cash[].retenido` | number (€, 2 decimales) | no | sí |  |
+| `cash[].saldo` | number (€, 2 decimales) | no | sí | disponible + retenido |
+| `cash[].titulares` | array de objetos | no | sí | nunca el DNI |
+| `cash[].titulares[].nombre` | string | sí | sí |  |
+| `cash[].titulares[].rol` | string | sí | sí | `participantType` |
+| `cash[].titulares[].yo` | boolean | no | sí |  |
+| `cash[].fecha_valor` | date `AAAA-MM-DD` | no | sí |  |
+| `securities` | array de objetos | sí | sí | `null` si la sección ha fallado (ver `errors`) |
+| `securities[].producto` | string | no | sí | `valores` o `pensiones` |
+| `securities[].id` | string | no | sí | id de la cuenta |
+| `securities[].nombre` | string | sí | sí |  |
+| `securities[].valor` | number (€, 2 decimales) | sí | sí |  |
+| `securities[].invertido` | number (€, 2 decimales) | sí | sí |  |
+| `securities[].ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `securities[].rentab` | number (exacto) | sí | sí | en % |
+| `securities[].fecha_valor` | date `AAAA-MM-DD` | sí | sí | VL más reciente de sus posiciones |
+| `securities[].posiciones` | array de objetos | no | sí | como `holdings`; `peso` sobre toda la cartera |
+| `securities[].posiciones[].cuenta` | string | no | sí | id de la cuenta de valores |
+| `securities[].posiciones[].tipo` | string | sí | sí | `investmentProductType`: `INDEXED_FUND`, `BROKER`… |
+| `securities[].posiciones[].isin` | string | sí | sí |  |
+| `securities[].posiciones[].nombre` | string | sí | sí |  |
+| `securities[].posiciones[].participaciones` | number (exacto) | sí | sí |  |
+| `securities[].posiciones[].coste_medio` | number (exacto) | sí | sí |  |
+| `securities[].posiciones[].vl` | number (exacto) | sí | sí | valor liquidativo / precio |
+| `securities[].posiciones[].fecha_vl` | date `AAAA-MM-DD` | sí | sí |  |
+| `securities[].posiciones[].invertido` | number (€, 2 decimales) | sí | sí |  |
+| `securities[].posiciones[].valor` | number (€, 2 decimales) | sí | sí |  |
+| `securities[].posiciones[].ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `securities[].posiciones[].rentab` | number (exacto) | sí | sí | rentabilidad total, en % |
+| `securities[].posiciones[].peso` | number (exacto) | sí | sí | % sobre el valor de las posiciones listadas, a 2 decimales |
+| `pensions` | array de objetos | sí | sí | `null` si la sección ha fallado (ver `errors`) |
+| `pensions[].producto` | string | no | sí | `valores` o `pensiones` |
+| `pensions[].id` | string | no | sí | id de la cuenta |
+| `pensions[].nombre` | string | sí | sí |  |
+| `pensions[].valor` | number (€, 2 decimales) | sí | sí |  |
+| `pensions[].invertido` | number (€, 2 decimales) | sí | sí |  |
+| `pensions[].ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `pensions[].rentab` | number (exacto) | sí | sí | en % |
+| `pensions[].fecha_valor` | date `AAAA-MM-DD` | sí | sí | VL más reciente de sus posiciones |
+| `pensions[].planes` | array de objetos | no | sí | como `pensions` |
+| `pensions[].planes[].cuenta` | string | no | sí |  |
+| `pensions[].planes[].codigo` | string | no | sí | código DGS del plan (`N1234`) |
+| `pensions[].planes[].nombre` | string | sí | sí |  |
+| `pensions[].planes[].participaciones` | number (exacto) | sí | sí |  |
+| `pensions[].planes[].coste_medio` | number (exacto) | sí | sí |  |
+| `pensions[].planes[].vl` | number (exacto) | sí | sí |  |
+| `pensions[].planes[].fecha_vl` | date `AAAA-MM-DD` | sí | sí |  |
+| `pensions[].planes[].invertido` | number (€, 2 decimales) | sí | sí |  |
+| `pensions[].planes[].valor` | number (€, 2 decimales) | sí | sí |  |
+| `pensions[].planes[].ganancia` | number (€, 2 decimales) | sí | sí |  |
+| `pensions[].planes[].rentab` | number (exacto) | sí | sí | rentabilidad total, en % |
+| `pending` | object | sí | sí | `null` si la sección ha fallado (ver `errors`) |
+| `pending.orders` | array de objetos | no | sí | órdenes de valores y de planes en curso |
+| `pending.orders[].fecha` | date `AAAA-MM-DD` | no | sí |  |
+| `pending.orders[].cuenta` | string | sí | sí | id de la cuenta de valores o de pensiones |
+| `pending.orders[].ref` | string | no | sí | `reference`: única |
+| `pending.orders[].producto` | string | sí | sí | ISIN, código DGS o ticker |
+| `pending.orders[].nombre` | string | sí | sí |  |
+| `pending.orders[].operacion` | string | sí | sí | `operationType` |
+| `pending.orders[].estado` | string | sí | sí | `IN_PROGRESS`, `EXECUTED`… |
+| `pending.orders[].importe` | number (€, 2 decimales) | sí | sí |  |
+| `pending.orders[].participaciones` | number (exacto) | sí | sí |  |
+| `pending.holds` | array de objetos | no | sí | como `holds` |
+| `pending.holds[].cuenta` | string | no | sí | alias de la cuenta (o su id si no tiene) |
+| `pending.holds[].id` | string | no | sí |  |
+| `pending.holds[].tipo` | string | sí | sí | `INVESTMENT_ORDER`… |
+| `pending.holds[].importe` | number (€, 2 decimales) | no | sí |  |
+| `upcoming` | array de objetos | sí | sí | como `upcoming`, 14 días; `null` si la sección ha fallado (ver `errors`) |
+| `upcoming[].fecha` | date `AAAA-MM-DD` | no | sí |  |
+| `upcoming[].tipo` | string | no | sí | `aportacion`, `orden` o `retencion` |
+| `upcoming[].producto` | string | sí | sí |  |
+| `upcoming[].importe` | number (€, 2 decimales) | sí | sí | con signo: los cargos son negativos |
+| `upcoming[].cuenta_cargo` | string | sí | sí |  |
+| `upcoming[].retenido` | boolean | no | sí | una retención lo cubre |
+| `upcoming[].disponible` | number (€, 2 decimales) | sí | sí |  |
+| `upcoming[].disponible_tras` | number (€, 2 decimales) | sí | sí | disponible tras lo pendiente hasta esa fila |
+| `upcoming[].falta` | number (€, 2 decimales) | sí | sí | lo que no cubre la cuenta; `null` si lo cubre |
+| `upcoming[].tipo_retencion` | string | sí | sí | `type` de la retención |
+| `movements` | object | sí | sí | movimientos recientes, base del delta siguiente; `null` si la sección ha fallado (ver `errors`) |
+| `movements.desde` | date `AAAA-MM-DD` | no | sí |  |
+| `movements.hasta` | date `AAAA-MM-DD` | no | sí |  |
+| `movements.huecos` | array de objetos | no | sí | tramos que no se han podido pedir |
+| `movements.huecos[].cuenta_id` | string | no | sí |  |
+| `movements.huecos[].cuenta` | string | no | sí |  |
+| `movements.huecos[].desde` | date `AAAA-MM-DD` | no | sí |  |
+| `movements.huecos[].hasta` | date `AAAA-MM-DD` | no | sí |  |
+| `movements.movimientos` | array de objetos | no | sí |  |
+| `movements.movimientos[].id` | string | no | sí | id estable: `{cuenta_uuid}:{reference}` (o `:h…` sin reference, `#2` si se repite) |
+| `movements.movimientos[].fecha` | date `AAAA-MM-DD` | no | sí | fecha de operación |
+| `movements.movimientos[].valor_fecha` | date `AAAA-MM-DD` | sí | sí | fecha valor |
+| `movements.movimientos[].cuenta` | string | no | sí | alias de la cuenta (o su id si no tiene); puede cambiar |
+| `movements.movimientos[].cuenta_id` | string | no | sí |  |
+| `movements.movimientos[].cuenta_uuid` | string | no | sí |  |
+| `movements.movimientos[].iban` | string | sí | sí |  |
+| `movements.movimientos[].sentido` | string | sí | sí | `flowType`: `IN` / `OUT` |
+| `movements.movimientos[].tipo` | string | sí | sí | `operationType` |
+| `movements.movimientos[].clase` | string | sí | sí | `operationClass` |
+| `movements.movimientos[].concepto` | string | sí | sí |  |
+| `movements.movimientos[].importe` | number (€, 2 decimales) | no | sí | con signo: los cargos son negativos |
+| `movements.movimientos[].saldo` | number (€, 2 decimales) | sí | sí | saldo de la cuenta tras el movimiento |
+| `movements.movimientos[].origen` | string | sí | sí | `operationOriginLabel` |
+| `movements.movimientos[].destino` | string | sí | sí | `operationTargetLabel` |
+| `movements.movimientos[].contraparte` | string | sí | sí | `destino` en cargos, `origen` en abonos |
+| `movements.movimientos[].ref` | string | sí | sí | `reference`: contador por cuenta |
+| `movements.movimientos[].operacion_ref` | string | sí | sí | `operationRef`, sin interpretar |
+| `movements.movimientos[].fichero_ref` | string | sí | sí | `fileRef` |
+| `movements.movimientos[].pareja_id` | string | sí | sí | `id` del otro lado de un traspaso entre tus cuentas |
+| `movements.movimientos[].traspaso_interno` | boolean | no | sí |  |
+| `new` | object | sí | sí | `null` con `--no-new` |
+| `new.movements` | array de objetos | sí | sí | `null` si la sección ha fallado (ver `errors`) |
+| `new.movements[].id` | string | no | sí | id estable: `{cuenta_uuid}:{reference}` (o `:h…` sin reference, `#2` si se repite) |
+| `new.movements[].fecha` | date `AAAA-MM-DD` | no | sí | fecha de operación |
+| `new.movements[].valor_fecha` | date `AAAA-MM-DD` | sí | sí | fecha valor |
+| `new.movements[].cuenta` | string | no | sí | alias de la cuenta (o su id si no tiene); puede cambiar |
+| `new.movements[].cuenta_id` | string | no | sí |  |
+| `new.movements[].cuenta_uuid` | string | no | sí |  |
+| `new.movements[].iban` | string | sí | sí |  |
+| `new.movements[].sentido` | string | sí | sí | `flowType`: `IN` / `OUT` |
+| `new.movements[].tipo` | string | sí | sí | `operationType` |
+| `new.movements[].clase` | string | sí | sí | `operationClass` |
+| `new.movements[].concepto` | string | sí | sí |  |
+| `new.movements[].importe` | number (€, 2 decimales) | no | sí | con signo: los cargos son negativos |
+| `new.movements[].saldo` | number (€, 2 decimales) | sí | sí | saldo de la cuenta tras el movimiento |
+| `new.movements[].origen` | string | sí | sí | `operationOriginLabel` |
+| `new.movements[].destino` | string | sí | sí | `operationTargetLabel` |
+| `new.movements[].contraparte` | string | sí | sí | `destino` en cargos, `origen` en abonos |
+| `new.movements[].ref` | string | sí | sí | `reference`: contador por cuenta |
+| `new.movements[].operacion_ref` | string | sí | sí | `operationRef`, sin interpretar |
+| `new.movements[].fichero_ref` | string | sí | sí | `fileRef` |
+| `new.movements[].pareja_id` | string | sí | sí | `id` del otro lado de un traspaso entre tus cuentas |
+| `new.movements[].traspaso_interno` | boolean | no | sí |  |
+| `new.orders` | array de objetos | sí | sí | `null` si la sección ha fallado (ver `errors`) |
+| `new.orders[].fecha` | date `AAAA-MM-DD` | no | sí |  |
+| `new.orders[].cuenta` | string | sí | sí | id de la cuenta de valores o de pensiones |
+| `new.orders[].ref` | string | no | sí | `reference`: única |
+| `new.orders[].producto` | string | sí | sí | ISIN, código DGS o ticker |
+| `new.orders[].nombre` | string | sí | sí |  |
+| `new.orders[].operacion` | string | sí | sí | `operationType` |
+| `new.orders[].estado` | string | sí | sí | `IN_PROGRESS`, `EXECUTED`… |
+| `new.orders[].importe` | number (€, 2 decimales) | sí | sí |  |
+| `new.orders[].participaciones` | number (exacto) | sí | sí |  |
+| `new.pension_orders` | array de objetos | sí | sí | `null` si la sección ha fallado (ver `errors`) |
+| `new.pension_orders[].fecha` | date `AAAA-MM-DD` | no | sí |  |
+| `new.pension_orders[].cuenta` | string | sí | sí | id de la cuenta de valores o de pensiones |
+| `new.pension_orders[].ref` | string | no | sí | `reference`: única |
+| `new.pension_orders[].producto` | string | sí | sí | ISIN, código DGS o ticker |
+| `new.pension_orders[].nombre` | string | sí | sí |  |
+| `new.pension_orders[].operacion` | string | sí | sí | `operationType` |
+| `new.pension_orders[].estado` | string | sí | sí | `IN_PROGRESS`, `EXECUTED`… |
+| `new.pension_orders[].importe` | number (€, 2 decimales) | sí | sí |  |
+| `new.pension_orders[].participaciones` | number (exacto) | sí | sí |  |
+| `delta` | object | sí | sí | `null` sin foto anterior |
+| `delta.desde` | datetime ISO 8601 con zona | no | sí | `as_of` de la foto anterior |
+| `delta.total` | number (€, 2 decimales) | sí | sí |  |
+| `delta.aportado` | number (€, 2 decimales) | sí | sí |  |
+| `delta.mercado` | number (€, 2 decimales) | sí | sí |  |
+| `delta.por_producto` | array de objetos | no | sí |  |
+| `delta.por_producto[].producto` | string | no | sí | `efectivo`, `valores` o `pensiones` |
+| `delta.por_producto[].id` | string | no | sí | id de la cuenta |
+| `delta.por_producto[].nombre` | string | sí | sí |  |
+| `delta.por_producto[].valor` | number (€, 2 decimales) | no | sí | valor ahora - valor antes (en efectivo, el saldo) |
+| `delta.por_producto[].aportado` | number (€, 2 decimales) | sí | sí | dinero neto que ha entrado en el producto; `null` si no se puede saber |
+| `delta.por_producto[].mercado` | number (€, 2 decimales) | sí | sí | valor - aportado |
+| `errors` | array de objetos | no | sí | secciones que han fallado |
+| `errors[].section` | string | no | sí | `cash`, `pensions`, `movements`, `new.orders`… |
+| `errors[].error` | string | no | sí | como `error` de la línea de error |
+| `errors[].exit_code` | integer | no | sí |  |
+| `errors[].message` | string | no | no (informativo) | texto para personas |
+
 ### `raw` — `myinvestor.raw/1`
 
 Respuesta de MyInvestor tal cual (claves en camelCase de la API): fuera del contrato de claves.

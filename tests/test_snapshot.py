@@ -355,8 +355,8 @@ def test_delta_separates_contributions_from_market(
 
     delta = snapshot_of(run("snapshot", "--no-new", "--previous", str(before)))["delta"]
 
-    assert delta["since"] == f"{TODAY - DAY}T09:00:00+01:00"
-    assert [(r["producto"], r["id"], r["valor"], r["aportado"], r["mercado"]) for r in delta["by_product"]] == [
+    assert delta["desde"] == f"{TODAY - DAY}T09:00:00+01:00"
+    assert [(r["producto"], r["id"], r["valor"], r["aportado"], r["mercado"]) for r in delta["por_producto"]] == [
         # +500 transfer and -100 into the fund are contributions; the 1.50 of interest is return
         ("efectivo", "101", Decimal("401.50"), Decimal("400.00"), Decimal("1.50")),
         ("valores", "201", Decimal("150.00"), Decimal("100.00"), Decimal("50.00")),
@@ -414,7 +414,7 @@ def test_cash_contributions_count_only_what_the_previous_snapshot_did_not_see() 
 
     delta = compute_delta(current, previous)
 
-    rows = {r["id"]: (r["valor"], r["aportado"], r["mercado"]) for r in delta["by_product"]}
+    rows = {r["id"]: (r["valor"], r["aportado"], r["mercado"]) for r in delta["por_producto"]}
     assert rows == {"101": (-25, -20, -5), "102": (50, 50, 0)}
     assert (delta["total"], delta["aportado"], delta["mercado"]) == (25, 30, -5)  # the internal 50 cancels out
 
@@ -427,11 +427,11 @@ def test_delta_is_unknown_where_it_cannot_be_computed() -> None:
 
     delta = compute_delta(current, previous)
 
-    assert {r["id"]: r["aportado"] for r in delta["by_product"]} == {"101": 0, "102": None}
+    assert {r["id"]: r["aportado"] for r in delta["por_producto"]} == {"101": 0, "102": None}
     assert (delta["total"], delta["aportado"], delta["mercado"]) == (None, None, None)
     late = delta_doc(day, [])
     late["movements"]["desde"] = day.isoformat()  # does not reach back to the previous day
-    assert {r["aportado"] for r in compute_delta(late, delta_doc(day - 2 * DAY, []))["by_product"]} == {None}
+    assert {r["aportado"] for r in compute_delta(late, delta_doc(day - 2 * DAY, []))["por_producto"]} == {None}
 
 
 # ---- --save and the automatic previous ---------------------------------------------------------------
@@ -451,7 +451,7 @@ def test_save_writes_the_day_file_and_compares_with_the_last_one_before_today(
 
     assert result.exit_code == 0, result.output
     doc = snapshot_of(result)
-    assert doc["delta"]["since"] == f"{TODAY - DAY}T09:00:00+01:00"
+    assert doc["delta"]["desde"] == f"{TODAY - DAY}T09:00:00+01:00"
     saved = out / f"{TODAY}.json"
     assert json.loads(saved.read_text(), parse_float=Decimal) == doc  # replaced, same as stdout
     assert stat.S_IMODE(saved.stat().st_mode) == 0o600

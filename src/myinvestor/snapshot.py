@@ -166,11 +166,11 @@ def compute_delta(current: Mapping[str, Any], previous: Mapping[str, Any]) -> di
     if complete and total is not None and all(r["aportado"] is not None for r in rows):
         contributed = sum((r["aportado"] for r in rows), ZERO)
     return {
-        "since": previous.get("as_of"),
+        "desde": previous.get("as_of"),
         "total": total,
         "aportado": contributed,
         "mercado": total - contributed if total is not None and contributed is not None else None,
-        "by_product": rows,
+        "por_producto": rows,
     }
 
 

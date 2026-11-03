@@ -28,7 +28,7 @@ def summary_tables(doc: Mapping[str, Any]) -> list[Table]:
     new = doc.get("new") or {}
     tables = [
         (f"Posición a {_moment(doc.get('as_of'))}", position_rows(doc)),
-        (f"Variación desde {_moment((doc.get('delta') or {}).get('since'))}", delta_rows(doc.get("delta"))),
+        (f"Variación desde {_moment((doc.get('delta') or {}).get('desde'))}", delta_rows(doc.get("delta"))),
         (
             "Cartera",
             _pick([p for s in doc.get("securities") or [] for p in s.get("posiciones") or []], HOLDING_COLUMNS),
@@ -79,7 +79,7 @@ def delta_rows(delta: Mapping[str, Any] | None) -> list[Row]:
         "aportado": delta.get("aportado"),
         "mercado": delta.get("mercado"),
     }
-    return [*_pick(delta.get("by_product") or [], DELTA_COLUMNS), total]
+    return [*_pick(delta.get("por_producto") or [], DELTA_COLUMNS), total]
 
 
 def _pick(rows: list[Mapping[str, Any]], columns: tuple[str, ...]) -> list[Row]:
