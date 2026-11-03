@@ -463,6 +463,22 @@ class FundSummary(_Model):
     _days = field_validator("liquidation_value_date", mode="before")(_day)
 
 
+class PensionPlanSummary(_Model):
+    """A row of the pension-plan catalog (`/cperf-server/api/v2/pension-plans`); any key may be null."""
+
+    dgs_code: str | None = None
+    name: str | None = None
+    managing_entity: str | None = None
+    category: str | None = None
+    currency: str | None = None
+    ter: Decimal | None = None
+    risk_rating: int | None = None
+    morningstar_rating: int | None = None
+    asset_type: str | None = None
+    liquidation_value: Decimal | None = None
+    annualized_profitability: Profitability | None = None
+
+
 class FundSheet(_Model):
     """The part of a fund's detail (`/cperf-server/api/v2/funds/{isin}`) that classifies it."""
 

@@ -685,5 +685,25 @@
       "cuenta": "string",
       "pendientes": "integer"
     }
+  },
+  "myinvestor.fund-filters/1": {
+    "por defecto": {
+      "filtro": "string",
+      "opcion": "string",
+      "nombre": "string"
+    }
+  },
+  "myinvestor.pension-plans/1": {
+    "por defecto": {
+      "dgs": "string|null",
+      "nombre": "string|null",
+      "gestora": "string|null",
+      "categoria": "string|null",
+      "ter": "number|null",
+      "ytd": "number|null",
+      "1a": "number|null",
+      "3a": "number|null",
+      "5a": "number|null"
+    }
   }
 }

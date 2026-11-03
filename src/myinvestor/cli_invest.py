@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
@@ -11,6 +12,24 @@ from typing import Annotated, Any
 import typer
 
 from myinvestor.allocation import is_fund, share
+from myinvestor.catalog import CatalogFilters, Domain, FilterKind, ter_range
+from myinvestor.cli_catalog import (
+    AssetTypeOpt,
+    CategoryOpt,
+    CurrencyOpt,
+    LimitOpt,
+    ManagerOpt,
+    MaxTerOpt,
+    MinTerOpt,
+    QueryOpt,
+    RatingOpt,
+    RegionOpt,
+    RiskOpt,
+    SortOpt,
+    code_or_none,
+    resolve_filter,
+    risk_or_none,
+)
 from myinvestor.cli_common import FormatOpt, app, build_client, iso_moment, now_local, parse_day
 from myinvestor.cli_state import MarkOpt, StateOpt, record, state_file
 from myinvestor.client import MyInvestorClient, Period
@@ -359,17 +378,48 @@ def fund(
 
 @app.command()
 def funds(
-    query: Annotated[
-        str | None, typer.Argument(help="Texto libre tal como aparece en el nombre («S&P 500», no «sp500»), ISIN…")
-    ] = None,
-    sort: Annotated[str, typer.Option(help="Orden `campo,asc|desc` (ter, name, liquidationValue…).")] = "ter,asc",
-    limit: Annotated[int, typer.Option("--limit", "-n", min=1, max=200, help="Máximo de resultados.")] = 20,
+    query: QueryOpt = None,
+    sort: SortOpt = "ter,asc",
+    limit: LimitOpt = 20,
     page: Annotated[int, typer.Option(min=0, help="Página (desde 0).")] = 0,
+    category: CategoryOpt = None,
+    manager: ManagerOpt = None,
+    currency: CurrencyOpt = None,
+    asset_type: AssetTypeOpt = None,
+    region: RegionOpt = None,
+    min_ter: MinTerOpt = None,
+    max_ter: MaxTerOpt = None,
+    risk: RiskOpt = None,
+    rating: RatingOpt = None,
+    esg: Annotated[bool, typer.Option("--esg", help="Solo fondos sostenibles (ESG).")] = False,
+    hedged: Annotated[bool, typer.Option("--hedged", help="Solo fondos con la divisa cubierta.")] = False,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
-    """Busca en el catálogo de fondos de MyInvestor."""
+    """Busca en el catálogo de fondos de MyInvestor.
+
+    Los valores de `--category`, `--manager`, `--currency`, `--asset-type` y `--region`
+    los lista `myinvestor fund-filters`; `--category` y `--manager` piden la lista para enviarlos tal
+    como los escribe MyInvestor (una petición más cada una).
+    """
+    low_ter, high_ter = ter_range(min_ter, max_ter)
+    filters = CatalogFilters(
+        region=code_or_none(region),
+        asset_type=code_or_none(asset_type),
+        currency=code_or_none(currency),
+        min_ter=low_ter,
+        max_ter=high_ter,
+        risk=risk_or_none(risk),
+        rating=rating,
+        esg=esg,
+        hedged=hedged,
+    )
     with build_client() as client:
-        result = client.funds(query, sort=sort, page=page, limit=limit)
+        filters = replace(
+            filters,
+            category=resolve_filter(client, Domain.funds, FilterKind.categories, category),
+            manager=resolve_filter(client, Domain.funds, FilterKind.managers, manager),
+        )
+        result = client.funds(query, sort=sort, page=page, limit=limit, filters=filters)
     rows = [
         {
             "isin": f.isin,

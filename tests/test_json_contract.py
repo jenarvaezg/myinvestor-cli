@@ -141,6 +141,14 @@ CATALOG_ROW = {
     "liquidationValue": 89.15,
     "annualizedProfitability": {"ytd": 9.1, "oneYear": 12.3},
 }
+PLAN_CATALOG_ROW = {
+    "dgsCode": "N0001",
+    "name": "Plan",
+    "managingEntity": "Gestora",
+    "category": "RV Global",
+    "ter": 0.3,
+    "annualizedProfitability": {"ytd": 8.5, "oneYear": 11.2, "threeYear": 7.1, "fiveYear": 6.4},
+}
 SHEET = {
     "isinCode": FUND,
     "name": "Fondo indexado",
@@ -223,6 +231,9 @@ def full_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> No
     mock_api.get(f"{CPERF}/v2/automatic-contributions/self").respond(200, json=ok([CONTRIBUTION]))
     mock_api.get(f"{CPERF}/v2/funds").respond(200, json=ok([CATALOG_ROW], pagination={"totalElements": 1}))
     mock_api.get(f"{CPERF}/v2/funds/{FUND}").respond(200, json=ok(SHEET))
+    for path in ("categories", "managers", "currencies", "assets-type", "regions"):
+        mock_api.get(f"{CPERF}/v2/masters/funds/searcher/filters/{path}").respond(200, json=ok(["\t Valor", None]))
+    mock_api.get(f"{CPERF}/v2/pension-plans").respond(200, json=ok([PLAN_CATALOG_ROW], pagination={"totalElements": 1}))
     mock_api.get(f"{CPERF}/v2/funds/{FUND}/prices/last").respond(
         200, json=ok({"date": "2026-11-02", "price": 89.15, "currency": "EUR", "dayProfitPercentage": 0.2})
     )
@@ -362,6 +373,8 @@ CASES = (
     Case("history", "", ("history",)),
     Case("contributions", "", ("contributions",)),
     Case("funds", "", ("funds",)),
+    Case("fund-filters", "", ("fund-filters",)),
+    Case("pension-plans", "", ("pension-plans",)),
     Case("feed", "", ("feed",)),
     Case("internal-transfers", "", ("internal-transfers", "--unmatched")),
     Case("upcoming", "", ("upcoming",), setup=upcoming_api),

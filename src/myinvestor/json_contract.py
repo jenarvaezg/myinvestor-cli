@@ -225,6 +225,24 @@ FUND_ROW = (
     Field("1a", N, True, "rentabilidad a 1 año, en %"),
 )
 
+FUND_FILTER = (
+    Field("filtro", S, note="`categories`, `managers`, `currencies`, `asset-types` o `regions`"),
+    Field("opcion", S, note="la opción de `funds` (o `pension-plans`) que lo usa: `--category`…"),
+    Field("nombre", S, note="el valor que se pasa a la opción, sin espacios ni tabuladores alrededor"),
+)
+
+PENSION_PLAN_ROW = (
+    Field("dgs", S, True, "código DGS del plan (`N1234`)"),
+    Field("nombre", S, True),
+    Field("gestora", S, True),
+    Field("categoria", S, True),
+    Field("ter", N, True, "en %"),
+    Field("ytd", N, True, "rentabilidad en el año, en %"),
+    Field("1a", N, True, "rentabilidad anualizada a 1 año, en %"),
+    Field("3a", N, True, "rentabilidad anualizada a 3 años, en %"),
+    Field("5a", N, True, "rentabilidad anualizada a 5 años, en %"),
+)
+
 FEED = (
     Field("fecha", D, True),
     Field("producto", S, True),
@@ -606,7 +624,9 @@ CONTRACTS: tuple[Contract, ...] = (
     Contract("pensions", 1, (_rows(*PENSION),)),
     Contract("history", 1, (_rows(*HISTORY),)),
     Contract("contributions", 1, (_rows(*CONTRIBUTION),)),
-    Contract("funds", 1, (_rows(*FUND_ROW),)),
+    Contract("funds", 1, (_rows(*FUND_ROW),), "Las mismas claves con cualquier filtro."),
+    Contract("fund-filters", 1, (_rows(*FUND_FILTER),), "Las mismas claves con un filtro y con `--pension`."),
+    Contract("pension-plans", 1, (_rows(*PENSION_PLAN_ROW),), "El catálogo de planes; las mismas claves con filtros."),
     Contract("feed", 1, (_rows(*FEED),)),
     Contract("internal-transfers", 1, (_rows(*TRANSFER),)),
     Contract("upcoming", 1, (_rows(*UPCOMING),)),

@@ -13,6 +13,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - Nuevos: `myinvestor.order/1` (objeto `{orden, ejecuciones}`), `myinvestor.lots/1` y `myinvestor.gains/1` (#3, #1).
 - Nuevo `myinvestor.fund-transfers/1`, con la variante `--pending` (#8).
 - `myinvestor.accounts/1` gana `tipo_pct` y `tae_pct` (números en %, `null` si la cuenta no tiene remuneración; `tae_pct` también es `null` si MyInvestor manda 0, «sin calcular») (compatible) (#5).
+- Nuevos `myinvestor.fund-filters/1` y `myinvestor.pension-plans/1`; `myinvestor.funds/1` no cambia con los filtros (#6).
 
 ### Añadido
 
@@ -36,6 +37,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - `fund-transfers`: traspasos de fondos de las cuentas de valores o, con `--pension`, de planes de pensiones (por defecto, los últimos 60 días, como la web; `--since`/`--until`), y `--pending` con el contador de traspasos en curso. Los cambios entre fondos dentro de MyInvestor siguen en `orders`/`lots` (#8).
 - `accounts`: columnas `tipo_pct` y `tae_pct` de la última liquidación, como en `interest` (una petición más por cuenta; vacías si la cuenta no tiene remuneración o la consulta falla, sin abortar la orden; una TAE de 0 sale vacía) (#5).
 - README: hallazgos del servicio `/read-only/api/v1` (copia diaria, no sirve como fuente principal ni para más de 90 días) (#10).
+- Filtros del buscador en `funds` (`--category`, `--manager`, `--currency`, `--asset-type`, `--region`, `--min-ter`/`--max-ter`, `--risk N[-M]`, `--rating`, `--esg`, `--hedged`), `fund-filters [FILTRO] [--pension]` (valores válidos de cada filtro) y `pension-plans [TEXTO]` (catálogo de planes de pensiones con TER y rentabilidades, con filtros) (#6).
 
 ### Cambiado
 
