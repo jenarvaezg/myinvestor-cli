@@ -13,6 +13,7 @@ from myinvestor import (  # noqa: F401
     cli_accounts,
     cli_allocation,
     cli_auth,
+    cli_cash,
     cli_doctor,
     cli_documents,
     cli_export,

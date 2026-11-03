@@ -96,6 +96,18 @@ MOVEMENT = (
     Field("traspaso_interno", B),
 )
 
+# only `movements --details`: `snapshot` never asks for the sent transfers behind its movements
+MOVEMENT_DETAILS = (
+    Field(
+        "beneficiario",
+        S,
+        True,
+        "`nameDestination` de la transferencia emitida que es este cargo",
+        only_with="--details",
+    ),
+    Field("iban_destino", S, True, "`ibanDestination` de esa transferencia", only_with="--details"),
+)
+
 PRODUCT_VALUES = (
     Field("invertido", A, True),
     Field("valor", A, True),
@@ -235,9 +247,54 @@ DOCUMENT = (
     Field("cuenta", S, True, "alias, código o id de la cuenta; `null` si el documento no es de una cuenta"),
     Field("notificado", B, True),
 )
+
+SENT_TRANSFER = (
+    Field("fecha", D, True, "`emissionDate`; `null` en una periódica que aún no se ha emitido"),
+    Field("cuenta", S, note="alias de la cuenta de cargo (o su id si no tiene)"),
+    Field("cuenta_id", S),
+    Field("importe", A, note="negativo, como el cargo"),
+    Field("concepto", S, True),
+    Field("beneficiario", S, True, "`nameDestination`"),
+    Field("iban_destino", S, True, "`ibanDestination`, sin espacios"),
+    Field("banco", S, True, "`bank`"),
+    Field("bic", S, True, "`bicSwift`"),
+    Field("tipo", S, True, "`transferType` (visto: `PUNCTUAL`)"),
+    Field("ejecucion", S, True, "`executionType`: `STANDARD` o `INSTANT`"),
+    Field("estado", S, True, "`status`: `COMMITED` (sic), `ACTIVE`, `PENDING`, `CANCELED`…"),
+    Field("ref", S, note="`reference`: el id de operación del `operationRef` del cargo"),
+    Field("periodicidad", S, True, "`periodicity` de las periódicas (`MONTHLY`…)"),
+    Field("inicio", D, True, "`startDate`"),
+    Field("fin", D, True, "`endDate`"),
+    Field("proxima", D, True, "próxima ejecución de una programada (estimada, sin festivos)"),
+)
+
+INTEREST = (
+    Field("cuenta", S, note="alias de la cuenta (o su id si no tiene)"),
+    Field("cuenta_id", S),
+    Field("periodo", S, True, "mes liquidado, `AAAA-MM` (`remunerationDate`)"),
+    Field("fecha_pago", D, True, "`paymentDate`: día del abono"),
+    Field("fecha_oficial", D, True, "`officialRemunerationDate`"),
+    Field("saldo_base", A, True, "`applicableBaseBalance`"),
+    Field("saldo_promo", A, True, "`balancePromo`"),
+    Field("saldo_total", A, True, "`totalBalance`"),
+    Field("tipo_pct", N, True, "`remunerationPercentage`, en %"),
+    Field("tipo_base_pct", N, True, "`baseRemunerationPercentage`, en %"),
+    Field("tipo_promo_pct", N, True, "`promotionRemunerationPercentage`, en %"),
+    Field("tae_pct", N, True, "`calculateTaeAverage`, en %"),
+    Field("tae_promo_pct", N, True, "`taePromotion`, en %"),
+    Field("intereses_base", A, True, "`baseResults`"),
+    Field("intereses_promo", A, True, "`promoResults`"),
+    Field("bruto", A, True, "`finalResult`: intereses brutos del periodo"),
+    Field("retencion", A, True, "`taxChargeAmount`, en negativo"),
+    Field("neto", A, True, "`bruto` + `retencion`"),
+    Field("remuneracion", S, True, "`remunerationType` (visto: `DEFAULT`)"),
+    Field("promocion", S, True, "`promotionCode`"),
+    Field("fin_promocion", D, True, "`endDateRemuneration`"),
+)
+
 UPCOMING = (
     Field("fecha", D),
-    Field("tipo", S, note="`aportacion`, `orden` o `retencion`"),
+    Field("tipo", S, note="`aportacion`, `transferencia`, `orden` o `retencion`"),
     Field("producto", S, True),
     Field("importe", A, True, "con signo: los cargos son negativos"),
     Field("cuenta_cargo", S, True),
@@ -454,7 +511,7 @@ CONTRACTS: tuple[Contract, ...] = (
     Contract(
         "movements",
         1,
-        (_rows(*MOVEMENT), Variant("--id", Shape.object, MOVEMENT)),
+        (_rows(*MOVEMENT, *MOVEMENT_DETAILS), Variant("--id", Shape.object, (*MOVEMENT, *MOVEMENT_DETAILS))),
         "Con `--id` sale el objeto del movimiento, no una lista. `--new`, `--since-*` y `--search` solo filtran filas.",
     ),
     Contract("holds", 1, (_rows(*HOLD),)),
@@ -469,6 +526,13 @@ CONTRACTS: tuple[Contract, ...] = (
     Contract("internal-transfers", 1, (_rows(*TRANSFER),)),
     Contract("upcoming", 1, (_rows(*UPCOMING),)),
     Contract("documents", 1, (_rows(*DOCUMENT),), "Más recientes primero; con `--kind`, las mismas claves."),
+    Contract(
+        "transfers",
+        1,
+        (_rows(*SENT_TRANSFER),),
+        "Las mismas claves con `--scheduled` y con `--ref`. Nunca incluye el DNI del ordenante.",
+    ),
+    Contract("interest", 1, (_rows(*INTEREST),), "Una fila por cuenta con remuneración: la última liquidación."),
     Contract(
         "income",
         1,

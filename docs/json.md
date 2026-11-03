@@ -141,6 +141,8 @@ Salida: lista de objetos.
 | `fichero_ref` | string | sí | sí | `fileRef` |
 | `pareja_id` | string | sí | sí | `id` del otro lado de un traspaso entre tus cuentas |
 | `traspaso_interno` | boolean | no | sí |  |
+| `beneficiario` | string | sí | sí | solo con `--details`; `nameDestination` de la transferencia emitida que es este cargo |
+| `iban_destino` | string | sí | sí | solo con `--details`; `ibanDestination` de esa transferencia |
 
 Con `--id`: un objeto.
 
@@ -305,7 +307,7 @@ Salida: lista de objetos.
 | Clave | Tipo | `null` | Estable | Notas |
 |---|---|---|---|---|
 | `fecha` | date `AAAA-MM-DD` | no | sí |  |
-| `tipo` | string | no | sí | `aportacion`, `orden` o `retencion` |
+| `tipo` | string | no | sí | `aportacion`, `transferencia`, `orden` o `retencion` |
 | `producto` | string | sí | sí |  |
 | `importe` | number (€, 2 decimales) | sí | sí | con signo: los cargos son negativos |
 | `cuenta_cargo` | string | sí | sí |  |
@@ -329,6 +331,62 @@ Salida: lista de objetos.
 | `fecha` | date `AAAA-MM-DD` | sí | sí | fecha de creación |
 | `cuenta` | string | sí | sí | alias, código o id de la cuenta; `null` si el documento no es de una cuenta |
 | `notificado` | boolean | sí | sí |  |
+
+### `transfers` — `myinvestor.transfers/1`
+
+Las mismas claves con `--scheduled` y con `--ref`. Nunca incluye el DNI del ordenante.
+
+Salida: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `fecha` | date `AAAA-MM-DD` | sí | sí | `emissionDate`; `null` en una periódica que aún no se ha emitido |
+| `cuenta` | string | no | sí | alias de la cuenta de cargo (o su id si no tiene) |
+| `cuenta_id` | string | no | sí |  |
+| `importe` | number (€, 2 decimales) | no | sí | negativo, como el cargo |
+| `concepto` | string | sí | sí |  |
+| `beneficiario` | string | sí | sí | `nameDestination` |
+| `iban_destino` | string | sí | sí | `ibanDestination`, sin espacios |
+| `banco` | string | sí | sí | `bank` |
+| `bic` | string | sí | sí | `bicSwift` |
+| `tipo` | string | sí | sí | `transferType` (visto: `PUNCTUAL`) |
+| `ejecucion` | string | sí | sí | `executionType`: `STANDARD` o `INSTANT` |
+| `estado` | string | sí | sí | `status`: `COMMITED` (sic), `ACTIVE`, `PENDING`, `CANCELED`… |
+| `ref` | string | no | sí | `reference`: el id de operación del `operationRef` del cargo |
+| `periodicidad` | string | sí | sí | `periodicity` de las periódicas (`MONTHLY`…) |
+| `inicio` | date `AAAA-MM-DD` | sí | sí | `startDate` |
+| `fin` | date `AAAA-MM-DD` | sí | sí | `endDate` |
+| `proxima` | date `AAAA-MM-DD` | sí | sí | próxima ejecución de una programada (estimada, sin festivos) |
+
+### `interest` — `myinvestor.interest/1`
+
+Una fila por cuenta con remuneración: la última liquidación.
+
+Salida: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `cuenta` | string | no | sí | alias de la cuenta (o su id si no tiene) |
+| `cuenta_id` | string | no | sí |  |
+| `periodo` | string | sí | sí | mes liquidado, `AAAA-MM` (`remunerationDate`) |
+| `fecha_pago` | date `AAAA-MM-DD` | sí | sí | `paymentDate`: día del abono |
+| `fecha_oficial` | date `AAAA-MM-DD` | sí | sí | `officialRemunerationDate` |
+| `saldo_base` | number (€, 2 decimales) | sí | sí | `applicableBaseBalance` |
+| `saldo_promo` | number (€, 2 decimales) | sí | sí | `balancePromo` |
+| `saldo_total` | number (€, 2 decimales) | sí | sí | `totalBalance` |
+| `tipo_pct` | number (exacto) | sí | sí | `remunerationPercentage`, en % |
+| `tipo_base_pct` | number (exacto) | sí | sí | `baseRemunerationPercentage`, en % |
+| `tipo_promo_pct` | number (exacto) | sí | sí | `promotionRemunerationPercentage`, en % |
+| `tae_pct` | number (exacto) | sí | sí | `calculateTaeAverage`, en % |
+| `tae_promo_pct` | number (exacto) | sí | sí | `taePromotion`, en % |
+| `intereses_base` | number (€, 2 decimales) | sí | sí | `baseResults` |
+| `intereses_promo` | number (€, 2 decimales) | sí | sí | `promoResults` |
+| `bruto` | number (€, 2 decimales) | sí | sí | `finalResult`: intereses brutos del periodo |
+| `retencion` | number (€, 2 decimales) | sí | sí | `taxChargeAmount`, en negativo |
+| `neto` | number (€, 2 decimales) | sí | sí | `bruto` + `retencion` |
+| `remuneracion` | string | sí | sí | `remunerationType` (visto: `DEFAULT`) |
+| `promocion` | string | sí | sí | `promotionCode` |
+| `fin_promocion` | date `AAAA-MM-DD` | sí | sí | `endDateRemuneration` |
 
 ### `income` — `myinvestor.income/1`
 
@@ -581,7 +639,7 @@ Salida: un objeto.
 | `pending.holds[].importe` | number (€, 2 decimales) | no | sí |  |
 | `upcoming` | array de objetos | sí | sí | como `upcoming`, 14 días; `null` si la sección ha fallado (ver `errors`) |
 | `upcoming[].fecha` | date `AAAA-MM-DD` | no | sí |  |
-| `upcoming[].tipo` | string | no | sí | `aportacion`, `orden` o `retencion` |
+| `upcoming[].tipo` | string | no | sí | `aportacion`, `transferencia`, `orden` o `retencion` |
 | `upcoming[].producto` | string | sí | sí |  |
 | `upcoming[].importe` | number (€, 2 decimales) | sí | sí | con signo: los cargos son negativos |
 | `upcoming[].cuenta_cargo` | string | sí | sí |  |

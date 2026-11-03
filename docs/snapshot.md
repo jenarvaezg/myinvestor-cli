@@ -110,7 +110,7 @@ Todo va con un solo cliente: un login/refresh y las mismas consultas compartidas
 | `securities` | cuentas de valores |
 | `pensions` | cuentas y planes de pensiones |
 | `pending` | órdenes de valores y de planes, retenciones |
-| `upcoming` | cuentas de efectivo, retenciones, aportaciones periódicas, órdenes |
+| `upcoming` | cuentas de efectivo, retenciones, transferencias emitidas (para las programadas), aportaciones periódicas, órdenes |
 | `movements` | cuentas de efectivo y sus movimientos (un tramo que pide firma deja un hueco y un error `partial_result`, 13; lo que sí se ha obtenido sale) |
 | `new.movements`, `new.orders`, `new.pension_orders` | el estado de `--new` (si está corrupto, fallan las tres con 1) y lo mismo que `movements` u órdenes |
 | `delta` | la foto anterior encontrada con `--save` (si no es válida: `invalid_snapshot`, 2) |
@@ -125,4 +125,4 @@ Cada error es `{"section", "error", "exit_code", "message"}`, con `error` y `exi
 
 ## Peticiones
 
-`snapshot` y `summary`: 4 + 2·C + 2·V + 2·P (C cuentas de efectivo, V cuentas de valores, P cuentas de pensiones); `--from-file`: ninguna. Con `--new`, una cuenta cuyo estado empiece antes que la ventana del delta se pide desde ahí (sigue siendo una petición por cuenta).
+`snapshot` y `summary`: 4 + 3·C + 2·V + 2·P (C cuentas de efectivo, V cuentas de valores, P cuentas de pensiones; por cada cuenta de efectivo: movimientos, retenciones y transferencias emitidas, estas para las programadas de `upcoming`); `--from-file`: ninguna. Con `--new`, una cuenta cuyo estado empiece antes que la ventana del delta se pide desde ahí (sigue siendo una petición por cuenta).

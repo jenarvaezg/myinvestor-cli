@@ -119,6 +119,18 @@ def parse_operation_ref(raw: str | None, reference: str | None = None) -> Operat
     )
 
 
+def operation_id(raw: str | None) -> str | None:
+    """Just the operation id (positions 28-42) of a charge's `operationRef`, or None if it is not one.
+
+    Looser than `parse_operation_ref`: a transfer to another bank fills positions 18-27, but the id is
+    still there, and it is the `reference` of the sent transfer (`…/cash-accounts/{id}/transfers`).
+    """
+    op_id = (raw or "")[REF_OPERATION_ID]
+    if len(op_id) != REF_OPERATION_ID.stop - REF_OPERATION_ID.start or not _digits(op_id):
+        return None
+    return op_id if _yyyymmdd(op_id[OP_ID_DAY]) else None
+
+
 @dataclass(frozen=True)
 class Leg:
     """One side of a possible transfer: a movement of one of the user's accounts."""

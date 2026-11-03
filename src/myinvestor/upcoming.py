@@ -6,7 +6,7 @@ so other commands (e.g. a snapshot) can reuse it.
 Balance rule. `disponible` is the charge account's `enabledBalance`, which MyInvestor already gives net
 of its holds (`withheldBalance`), and the money of an order in progress is withheld (a hold) or already
 charged when the order is placed. So holds and orders are listed for information but never subtracted
-again: only what has not happened yet (contributions due, and scheduled transfers once they exist)
+again: only what has not happened yet (contributions due and scheduled transfers)
 lowers `disponible_tras`, accumulated per account in date order. `falta` is how much the account is
 short at that row, when `disponible_tras` goes below zero.
 
@@ -60,7 +60,7 @@ class Kind(StrEnum):
 
     hold = "retencion"
     order = "orden"
-    transfer = "transferencia"  # scheduled transfers (#4): not fetched yet, see `upcoming_rows(transfers=…)`
+    transfer = "transferencia"  # scheduled transfers, see `sent_transfers.transfer_items`
     contribution = "aportacion"
 
 
@@ -108,7 +108,7 @@ def upcoming_rows(
     """Rows of `upcoming`, sorted by date, from today to `today + days` (both included).
 
     `orders` pairs each order with the `account_id` of the cash account it charges; `holds` maps that
-    id to the account's holds; `transfers` is the extension point for scheduled transfers. With `owner`,
+    id to the account's holds; `transfers` are the scheduled transfers (`sent_transfers.transfer_items`). With `owner`,
     only rows charged to accounts of that ownership are kept.
     """
     end = today + timedelta(days=days)
@@ -238,12 +238,17 @@ def contribution_dates(frame: ContributionTimeFrame, start: date, end: date) -> 
 
     Only the first is MyInvestor's date; the following ones are estimates (no bank holidays).
     """
-    first = frame.next_execution_date
-    if first is None:
+    if frame.next_execution_date is None:
         return
-    last = min(end, frame.end_date) if frame.end_date else end
+    yield from recurrence_dates(frame.next_execution_date, frame.recurrence, frame.end_date, start, end)
+
+
+def recurrence_dates(first: date, recurrence: str | None, until: date | None, start: date, end: date) -> Iterator[date]:
+    """`first` and every `recurrence` step after it (`RECURRENCE_DAYS`/`RECURRENCE_MONTHS` keys), up to
+    `until`, that fall in [start, end]. An unknown recurrence only gives `first`."""
+    last = min(end, until) if until else end
     n = 0
-    while (day := _nth(first, frame.recurrence, n)) is not None and day <= last:
+    while (day := _nth(first, recurrence, n)) is not None and day <= last:
         if day >= start:
             yield day
         n += 1

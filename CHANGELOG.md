@@ -9,6 +9,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 ### Esquemas JSON
 
 - Primera versión del contrato: todas las órdenes con `-f json` pasan a `myinvestor.<orden>/1` con las claves y tipos de [docs/json.md](docs/json.md); `raw` y `fund` (respuesta de la API tal cual) van con `myinvestor.raw/1`, que solo garantiza el envoltorio, y la línea de error de stderr es `myinvestor.error/1`. `snapshot` lleva su propio `schema` (`myinvestor.snapshot/1`) y nunca va en el envoltorio. En 0.1.0 no había contrato.
+- Nuevos `myinvestor.transfers/1` y `myinvestor.interest/1`. `myinvestor.movements/1` gana `beneficiario` e `iban_destino`, solo con `--details` (compatible). En `myinvestor.upcoming/1`, `tipo` puede valer `transferencia` (#4, #5).
 
 ### Añadido
 
@@ -27,6 +28,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - `--new`, `--since-date`, `--since-id` y `state show|mark|reset`; `export` incremental con `manifest.json` (#47).
 - `snapshot` (un JSON diario, esquema propio `myinvestor.snapshot/1`, con `delta` aportado/mercado frente a la foto anterior, `--save DIR`, `upcoming` y errores por sección) y `summary` (la misma foto en tablas, o una guardada con `--from-file`) (#25, #33).
 - `documents` (las cinco listas de documentos), `documents get` (descarga del PDF por id, nombre o `--fiscal AÑO`, 0600, sin sobrescribir), `documents summary` (extracto de una cuenta) y `xray` (radiografías); esquema `myinvestor.documents/1` (#2).
+- `transfers` (transferencias emitidas y programadas: beneficiario, IBAN de destino, estado, periodicidad y próxima fecha) e `interest` (última liquidación de intereses: tipo, TAE, brutos, retención y neto); `upcoming` (y la sección `upcoming` de `snapshot`, con una petición más por cuenta de efectivo) incluye las transferencias programadas (`tipo: transferencia`) y `movements --details` añade `beneficiario` e `iban_destino` a los cargos de transferencias emitidas (#4, #5).
 
 ### Cambiado
 

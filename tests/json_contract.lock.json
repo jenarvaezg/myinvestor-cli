@@ -61,7 +61,9 @@
       "operacion_ref": "string|null",
       "fichero_ref": "string|null",
       "pareja_id": "string|null",
-      "traspaso_interno": "boolean"
+      "traspaso_interno": "boolean",
+      "beneficiario": "string|null (solo con --details)",
+      "iban_destino": "string|null (solo con --details)"
     },
     "--id": {
       "id": "string",
@@ -84,7 +86,9 @@
       "operacion_ref": "string|null",
       "fichero_ref": "string|null",
       "pareja_id": "string|null",
-      "traspaso_interno": "boolean"
+      "traspaso_interno": "boolean",
+      "beneficiario": "string|null (solo con --details)",
+      "iban_destino": "string|null (solo con --details)"
     }
   },
   "myinvestor.holds/1": {
@@ -551,6 +555,52 @@
       "fecha": "date|null",
       "cuenta": "string|null",
       "notificado": "boolean|null"
+    }
+  },
+  "myinvestor.transfers/1": {
+    "por defecto": {
+      "fecha": "date|null",
+      "cuenta": "string",
+      "cuenta_id": "string",
+      "importe": "amount",
+      "concepto": "string|null",
+      "beneficiario": "string|null",
+      "iban_destino": "string|null",
+      "banco": "string|null",
+      "bic": "string|null",
+      "tipo": "string|null",
+      "ejecucion": "string|null",
+      "estado": "string|null",
+      "ref": "string",
+      "periodicidad": "string|null",
+      "inicio": "date|null",
+      "fin": "date|null",
+      "proxima": "date|null"
+    }
+  },
+  "myinvestor.interest/1": {
+    "por defecto": {
+      "cuenta": "string",
+      "cuenta_id": "string",
+      "periodo": "string|null",
+      "fecha_pago": "date|null",
+      "fecha_oficial": "date|null",
+      "saldo_base": "amount|null",
+      "saldo_promo": "amount|null",
+      "saldo_total": "amount|null",
+      "tipo_pct": "number|null",
+      "tipo_base_pct": "number|null",
+      "tipo_promo_pct": "number|null",
+      "tae_pct": "number|null",
+      "tae_promo_pct": "number|null",
+      "intereses_base": "amount|null",
+      "intereses_promo": "amount|null",
+      "bruto": "amount|null",
+      "retencion": "amount|null",
+      "neto": "amount|null",
+      "remuneracion": "string|null",
+      "promocion": "string|null",
+      "fin_promocion": "date|null"
     }
   }
 }

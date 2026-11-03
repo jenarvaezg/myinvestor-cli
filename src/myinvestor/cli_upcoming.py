@@ -1,7 +1,8 @@
-"""`upcoming`: contributions due, orders in progress and holds, against the charge account's balance."""
+"""`upcoming`: contributions due, scheduled transfers, orders in progress and holds, against the balance."""
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Annotated, Any
 
 import typer
@@ -12,6 +13,7 @@ from myinvestor.cli_common import FormatOpt, app, build_client, err, now_local
 from myinvestor.client import MyInvestorClient
 from myinvestor.models import Order
 from myinvestor.output import OutputFormat, format_eur, render
+from myinvestor.sent_transfers import transfer_items
 from myinvestor.upcoming import Shortfall, shortfalls, upcoming_rows
 
 DEFAULT_UPCOMING_DAYS = 14
@@ -56,14 +58,17 @@ def _warn(shortfall: Shortfall) -> None:
 def upcoming(
     days: Annotated[
         int,
-        typer.Option(min=0, max=MAX_UPCOMING_DAYS, help="Días por delante, contando hoy (aportaciones)."),
+        typer.Option(
+            min=0, max=MAX_UPCOMING_DAYS, help="Días por delante, contando hoy (aportaciones y transferencias)."
+        ),
     ] = DEFAULT_UPCOMING_DAYS,
     owner: OwnerOpt = None,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
-    """Lo que viene: aportaciones periódicas, órdenes en curso y retenciones, contra el disponible de la cuenta.
+    """Lo que viene: aportaciones y transferencias programadas, órdenes en curso y retenciones, contra el disponible.
 
-    `disponible_tras` resta solo lo que aún no se ha cargado (aportaciones): las retenciones y las órdenes
+    `disponible_tras` resta solo lo que aún no se ha cargado (aportaciones y transferencias programadas): las
+    retenciones y las órdenes
     en curso ya están descontadas del disponible. Una orden con su retención sale en una sola fila
     (`retenido`). `falta` dice cuánto no cubre la cuenta; también se avisa
     en stderr.
@@ -71,7 +76,9 @@ def upcoming(
     today = now_local().date()
     with build_client() as client:
         accounts = client.cash_accounts()
-        holds = {a.account_id: client.holds(a.account_uuid) for a in filter_owner(accounts, owner)}
+        mine = filter_owner(accounts, owner)
+        holds = {a.account_id: client.holds(a.account_uuid) for a in mine}
+        sent = {a.account_id: client.transfers(a.account_id) for a in mine}
         contributions = client.contributions()
         orders = _orders(client)
     rows = upcoming_rows(
@@ -81,6 +88,7 @@ def upcoming(
         contributions=contributions,
         orders=orders,
         holds=holds,
+        transfers=transfer_items(sent, today, today + timedelta(days=days)),
         owner=owner,
     )
     shown = [_table_row(r) for r in rows] if fmt is OutputFormat.table else rows

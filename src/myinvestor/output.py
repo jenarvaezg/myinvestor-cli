@@ -28,15 +28,21 @@ MONEY_COLUMNS = frozenset(
     | {"disponible_tras", "falta"}
     | {"aportar"}
     | {"aportado", "mercado"}
+    | {"saldo_base", "saldo_promo", "saldo_total", "intereses_base", "intereses_promo", "retencion"}
 )
 PRICE_COLUMNS = frozenset({"vl", "coste_medio"})
 AMOUNT_COLUMNS = MONEY_COLUMNS - PRICE_COLUMNS
 PERCENT_COLUMNS = frozenset(
-    {"rentab", "rentab_ytd", "ter", "1a", "3a", "5a", "ytd"} | {"peso", "peso_pct", "objetivo_pct", "desviacion_pct"}
+    {"rentab", "rentab_ytd", "ter", "1a", "3a", "5a", "ytd"}
+    | {"peso", "peso_pct", "objetivo_pct", "desviacion_pct"}
+    | {"tipo_pct", "tipo_base_pct", "tipo_promo_pct", "tae_pct", "tae_promo_pct"}
 )
 QUANTITY_COLUMNS = frozenset({"participaciones", "movimientos"})
 NUMERIC_COLUMNS = MONEY_COLUMNS | PERCENT_COLUMNS | QUANTITY_COLUMNS
-DATE_COLUMNS = frozenset({"fecha", "valor_fecha", "fecha_vl", "fecha_valor", "proxima", "consultado_en", "periodo"})
+DATE_COLUMNS = frozenset(
+    {"fecha", "valor_fecha", "fecha_vl", "fecha_valor", "proxima", "consultado_en", "periodo"}
+    | {"fecha_pago", "fecha_oficial", "fin_promocion", "inicio", "fin"}
+)
 MAX_QUANTITY_DECIMALS = 6
 CENTS = Decimal("0.01")
 

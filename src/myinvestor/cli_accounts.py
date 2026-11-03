@@ -38,9 +38,10 @@ from myinvestor.models import (
 )
 from myinvestor.output import OutputFormat, normalize_row, print_json, render
 from myinvestor.psd2 import Span, free_start, split_range
+from myinvestor.sent_transfers import with_beneficiaries
 from myinvestor.signature import INAPP, can_start
 from myinvestor.state import AccountCursor, StateKind, movement_marks, unseen_movements
-from myinvestor.transfers_match import with_transfer_fields
+from myinvestor.transfers_match import operation_id, with_transfer_fields
 
 DEFAULT_MOVEMENT_DAYS = 30
 # `movements` in a table keeps these columns; JSON and CSV export every field of the row.
@@ -73,6 +74,14 @@ FreeOnlyOpt = Annotated[
         "--clip",
         help=f"Solo lo que MyInvestor da sin segundo factor: recorta --from a los últimos {FREE_FLOWS_DAYS} "
         "días (lo avisa en stderr).",
+    ),
+]
+DetailsOpt = Annotated[
+    bool,
+    typer.Option(
+        "--details",
+        help="Añadir `beneficiario` e `iban_destino` a los cargos de transferencias emitidas (JSON/CSV): "
+        "una petición más por cuenta con algún cargo así.",
     ),
 ]
 AllowPartialOpt = Annotated[
@@ -271,6 +280,7 @@ def movements(
     ] = None,
     free_only: FreeOnlyOpt = False,
     allow_partial: AllowPartialOpt = False,
+    details: DetailsOpt = False,
     fmt: FormatOpt = OutputFormat.table,
 ) -> None:
     """Movimientos de las cuentas de efectivo.
@@ -287,7 +297,16 @@ def movements(
         _reject_with_new(
             date_to=date_to, since_date=since_date, since_id=since_id, query=query, movement_id=movement_id
         )
-        _new_movements(account, owner, (date_from, days), state_path, mark=mark, oldest_first=oldest_first, fmt=fmt)
+        _new_movements(
+            account,
+            owner,
+            (date_from, days),
+            state_path,
+            mark=mark,
+            oldest_first=oldest_first,
+            details=details,
+            fmt=fmt,
+        )
         return
     if since_date and since_id:
         raise InputError("Usa --since-date o --since-id, no ambos.")
@@ -302,6 +321,8 @@ def movements(
         if anchor:
             chosen = [a for a in chosen if anchor.startswith(f"{a.account_uuid}:")] or chosen
         rows, gaps = _movement_rows(client, chosen, start, end) if start <= end else ([], [])
+        if details:
+            rows = _with_details(client, chosen, rows)
     rows = with_transfer_fields(rows)  # before --since-id/--search: the other leg may not match them
     if since_id:
         rows = _after_movement(rows, since_id, gaps, start, end)
@@ -372,6 +393,7 @@ def _new_movements(
     *,
     mark: bool,
     oldest_first: bool,
+    details: bool,
     fmt: OutputFormat,
 ) -> None:
     """`movements --new`: ask each account from its last day minus the margin and emit the unseen ids."""
@@ -391,6 +413,8 @@ def _new_movements(
             got, missing = _movement_rows(client, accs, start, today)
             rows += got
             gaps += missing
+        if details:
+            rows = _with_details(client, chosen, rows)
     rows = with_transfer_fields(rows)  # over everything fetched: the other leg may have been seen already
     _render_movements(
         unseen_movements(rows, cursors), f"Movimientos nuevos (hasta {today})", oldest_first=oldest_first, fmt=fmt
@@ -416,6 +440,15 @@ def _new_start(acc: CashAccount, cursor: AccountCursor | None, first_start: date
         "(si lo necesitas, pídelo con --from)."
     )
     return window
+
+
+def _with_details(
+    client: MyInvestorClient, chosen: list[CashAccount], rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """`--details`: the sent transfers of each account with a charge that may be one (one request each)."""
+    wanted = {r["cuenta_id"] for r in rows if r["importe"] < 0 and operation_id(r["operacion_ref"])}
+    sent = {a.account_id: client.transfers(a.account_id) for a in chosen if a.account_id in wanted}
+    return with_beneficiaries(rows, sent)
 
 
 @dataclass(frozen=True)
