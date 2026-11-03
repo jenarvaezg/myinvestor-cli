@@ -149,8 +149,8 @@ ACCOUNT = (
 
 # Only `accounts` (one more request per account), not the `cash` section of `snapshot`.
 ACCOUNT_RATES = (
-    Field("tae", N, True, "`calculateTaeAverage` de la última liquidación, en %; null sin remuneración"),
-    Field("tipo_interes", N, True, "`remunerationPercentage` de la última liquidación, en %; null sin remuneración"),
+    Field("tipo_pct", N, True, "`remunerationPercentage` de la última liquidación, en %; null sin remuneración"),
+    Field("tae_pct", N, True, "`calculateTaeAverage`, en %; null sin remuneración o si llega 0 (sin calcular)"),
 )
 
 HOLDING = (

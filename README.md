@@ -390,7 +390,7 @@ La tabla muestra `fecha`, `cuenta`, `importe`, `beneficiario`, `concepto`, `ejec
 | `fecha_oficial` | `officialRemunerationDate` | la web la muestra como fecha de actualización |
 | `saldo_base`, `saldo_promo`, `saldo_total` | `applicableBaseBalance`, `balancePromo`, `totalBalance` | saldo remunerado al tipo base, al promocional y en total |
 | `tipo_pct`, `tipo_base_pct`, `tipo_promo_pct` | `remunerationPercentage`, `baseRemunerationPercentage`, `promotionRemunerationPercentage` | % aplicado: total, base y promocional |
-| `tae_pct`, `tae_promo_pct` | `calculateTaeAverage`, `taePromotion` | la web enseña `calculateTaeAverage` como el tipo medio del periodo |
+| `tae_pct`, `tae_promo_pct` | `calculateTaeAverage`, `taePromotion` | la web enseña `calculateTaeAverage` como el tipo medio del periodo; aquí sale tal cual, y `tae_pct: 0` significa «sin calcular» (la web lo oculta), no una TAE del 0 % |
 | `intereses_base`, `intereses_promo` | `baseResults`, `promoResults` | |
 | `bruto` | `finalResult` | intereses **brutos** del periodo: la web calcula el neto como `finalResult - taxChargeAmount` |
 | `retencion` | `taxChargeAmount` | retención (IRPF), **en negativo** como en `income` |
@@ -403,7 +403,7 @@ Las fechas que la API manda como texto vacío (`""`) salen como `null`. La tabla
 
 `accounts` muestra `tipo` (`accountType`), `rol` (el `participantType` del titular que eres tú) y `titular` (el menor en una cuenta junior; si no, el `OWNER`). En JSON añade `titulares: [{"nombre", "rol", "yo"}]`. El DNI de los titulares (`documentNumber`) no se lee ni se exporta nunca.
 
-También da `tae` y `tipo_interes` (en %) de la última liquidación de intereses, los mismos que `tae_pct` y `tipo_pct` de [`interest`](#remuneración-de-la-cuenta-interest): cuesta una petición más por cuenta (`…/cash-accounts/{accountId}/remuneration`). Si una cuenta no tiene remuneración (404 o respuesta vacía), las dos celdas quedan vacías (`null` en JSON); si la consulta falla por otro motivo, también, con un aviso en stderr, y la orden sigue con el resto. `snapshot` y `export` no las incluyen.
+También da `tipo_pct` y `tae_pct` (en %) de la última liquidación de intereses, como en [`interest`](#remuneración-de-la-cuenta-interest): cuesta una petición más por cuenta (`…/cash-accounts/{accountId}/remuneration`). Si una cuenta no tiene remuneración (404 o respuesta vacía), las dos celdas quedan vacías (`null` en JSON); si la consulta falla por otro motivo, también, con un aviso en stderr, y la orden sigue con el resto. MyInvestor manda a menudo `calculateTaeAverage: 0` aunque la cuenta tenga tipo (y `null` en una `CASH_PORTFOLIO`); la web trata el 0 como «sin dato», así que aquí `tae_pct` también sale vacía (`null`) cuando llega 0. `snapshot` y `export` no las incluyen.
 
 | Valor | Significado |
 |---|---|

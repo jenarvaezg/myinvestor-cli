@@ -37,7 +37,6 @@ PERCENT_COLUMNS = frozenset(
     {"rentab", "rentab_ytd", "ter", "1a", "3a", "5a", "ytd"}
     | {"peso", "peso_pct", "objetivo_pct", "desviacion_pct"}
     | {"tipo_pct", "tipo_base_pct", "tipo_promo_pct", "tae_pct", "tae_promo_pct"}
-    | {"tae", "tipo_interes"}
 )
 QUANTITY_COLUMNS = frozenset({"participaciones", "movimientos"})
 NUMERIC_COLUMNS = MONEY_COLUMNS | PERCENT_COLUMNS | QUANTITY_COLUMNS

@@ -111,8 +111,8 @@ Salida: lista de objetos.
 | `titulares[].nombre` | string | sí | sí |  |
 | `titulares[].rol` | string | sí | sí | `participantType` |
 | `titulares[].yo` | boolean | no | sí |  |
-| `tae` | number (exacto) | sí | sí | `calculateTaeAverage` de la última liquidación, en %; null sin remuneración |
-| `tipo_interes` | number (exacto) | sí | sí | `remunerationPercentage` de la última liquidación, en %; null sin remuneración |
+| `tipo_pct` | number (exacto) | sí | sí | `remunerationPercentage` de la última liquidación, en %; null sin remuneración |
+| `tae_pct` | number (exacto) | sí | sí | `calculateTaeAverage`, en %; null sin remuneración o si llega 0 (sin calcular) |
 
 ### `movements` — `myinvestor.movements/1`
 

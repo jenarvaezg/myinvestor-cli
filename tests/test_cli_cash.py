@@ -181,7 +181,7 @@ def test_accounts_show_tae_and_rate_per_account(mock_api: respx.MockRouter, stor
     result = invoke("accounts", "-f", "json")
 
     rows = json.loads(result.stdout, parse_float=Decimal)
-    assert [(r["id"], r["tae"], r["tipo_interes"]) for r in rows] == [
+    assert [(r["id"], r["tae_pct"], r["tipo_pct"]) for r in rows] == [
         ("101", Decimal("2.02"), Decimal("2.0")),
         ("102", None, None),
     ]
@@ -196,7 +196,7 @@ def test_accounts_keep_going_when_remuneration_fails(mock_api: respx.MockRouter,
     result = runner.invoke(app, ["--wide", "accounts"])
 
     assert result.exit_code == 0
-    assert "Cuenta 1" in result.stdout and "2,00 %" in result.stdout and "tae" in result.stdout
+    assert "Cuenta 1" in result.stdout and "2,00 %" in result.stdout and "tae_pct" in result.stdout
     assert "Cuenta 1" in result.stderr and "remuneración" in result.stderr
 
 
@@ -206,8 +206,23 @@ def test_accounts_csv_has_tae_column(mock_api: respx.MockRouter, store: MemorySe
 
     [header, row] = invoke("accounts", "-f", "csv").stdout.splitlines()
 
-    assert {"tae", "tipo_interes"} <= set(header.split(","))
+    assert {"tipo_pct", "tae_pct"} <= set(header.split(","))
     assert row.endswith(",,")
+
+
+def test_accounts_zero_tae_means_not_computed(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([cash_account(1), cash_account(2)]))
+    zero = {**REMUNERATION_DATA, "remunerationPercentage": 1.25, "calculateTaeAverage": 0}
+    mock_api.get(REMUNERATION).respond(200, json=ok(zero))
+    mock_api.get(f"{CPERF}/v2/cash-accounts/102/remuneration").respond(
+        200, json=ok({**REMUNERATION_DATA, "calculateTaeAverage": None})
+    )
+
+    rows = json.loads(invoke("accounts", "-f", "json").stdout, parse_float=Decimal)
+    interest_rows = json.loads(invoke("interest", "-a", "101", "-f", "json").stdout, parse_float=Decimal)
+
+    assert [(r["tipo_pct"], r["tae_pct"]) for r in rows] == [(Decimal("1.25"), None), (Decimal("2.0"), None)]
+    assert interest_rows[0]["tae_pct"] == 0  # `interest` keeps it as it comes
 
 
 # ---- --account matching ----------------------------------------------------------------------------

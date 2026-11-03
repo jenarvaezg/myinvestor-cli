@@ -205,8 +205,9 @@ def position(fmt: FormatOpt = OutputFormat.table) -> None:
 def accounts(owner: OwnerOpt = None, fmt: FormatOpt = OutputFormat.table) -> None:
     """Cuentas de efectivo con su tipo, tu rol, el titular, el saldo disponible y retenido, y su TAE.
 
-    `tae` y `tipo_interes` (en %) son los de la última liquidación de intereses (como en `interest`):
-    una petición más por cuenta, y vacíos si la cuenta no tiene remuneración.
+    `tipo_pct` y `tae_pct` (en %) son los de la última liquidación de intereses (como en `interest`):
+    una petición más por cuenta, y vacíos si la cuenta no tiene remuneración. Una TAE de 0 sale vacía:
+    MyInvestor la manda así cuando no la ha calculado, y la web la oculta.
     En JSON añade `titulares` (nombre, rol y si eres tú; nunca el DNI).
     """
     with build_client() as client:
@@ -216,7 +217,10 @@ def accounts(owner: OwnerOpt = None, fmt: FormatOpt = OutputFormat.table) -> Non
 
 
 def _rates(client: MyInvestorClient, acc: CashAccount) -> dict[str, Any]:
-    """`tae` and `tipo_interes` of the last settlement; empty (with a notice) if MyInvestor gives none or fails."""
+    """`tipo_pct` and `tae_pct` of the last settlement; empty (with a notice) if MyInvestor gives none or fails.
+
+    A TAE of 0 means «not computed» (the web hides it: `e !== 0 ? e : undefined`), so it becomes None.
+    """
     try:
         found = client.remuneration(acc.account_id)
     except ApiError as exc:
@@ -224,9 +228,10 @@ def _rates(client: MyInvestorClient, acc: CashAccount) -> dict[str, Any]:
             name = escape(acc.alias or acc.account_id)
             err.print(f"[yellow]{name}:[/yellow] sin TAE, falló la consulta de su remuneración ({escape(str(exc))}).")
         found = None
+    tae = found.calculate_tae_average if found else None
     return {
-        "tae": found.calculate_tae_average if found else None,
-        "tipo_interes": found.remuneration_percentage if found else None,
+        "tipo_pct": found.remuneration_percentage if found else None,
+        "tae_pct": tae or None,
     }
 
 
