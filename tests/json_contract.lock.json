@@ -281,6 +281,7 @@
     },
     "--by geo | --by category": {
       "clave": "string",
+      "origen": "string|null (solo con --by geo)",
       "valor": "amount",
       "peso_pct": "number|null",
       "invertido": "amount|null",

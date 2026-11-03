@@ -2,8 +2,9 @@
 
 Each position (fund, ETF, stock, pension plan and, optionally, cash) becomes a `Holding` with the
 classification of its sheet, its asset type translated to a canonical class (see `asset_classes`).
-`group` adds them up per key and `rebalance` compares the result with target weights, computing how
-much to contribute to each key to reach them without selling.
+Regions come from `regions` for whatever has no `geoZone` (ETFs, shares, plans), and commodities and
+cash go to `no_aplica`. `group` adds them up per key and `rebalance` compares the result with target
+weights, computing how much to contribute to each key to reach them without selling.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 from typing import Any
 
-from myinvestor.asset_classes import AssetClass, asset_class, known, underlying
+from myinvestor.asset_classes import AssetClass, asset_class, known, normalize, underlying
 from myinvestor.errors import InputError
 from myinvestor.models import (
     CashAccount,
@@ -25,11 +26,14 @@ from myinvestor.models import (
     PensionPlanSheet,
     SecuritiesAccount,
 )
+from myinvestor.regions import NOT_APPLICABLE, REGIONLESS, isin_region, ranked_region, zone_label
 
 UNCLASSIFIED = AssetClass.sin_clasificar.value  # the one "unknown" marker, in every grouping
 CASH = AssetClass.efectivo.value
 TOTAL = "total"
 BROKER = "BROKER"  # `investmentProductType` of stocks and ETFs
+SHARE_TYPES = frozenset({"RV", "STOCK"})  # `brokerProductType` of a share (not an ETF/ETC)
+GEO_ZONE = "geoZone"  # `origen` of a region taken from a fund's sheet
 MANAGED_PORTFOLIO = "SECURITIES_PORTFOLIO"  # `accountType` of a robo-advisor portfolio («Metal»…)
 HUNDRED = Decimal(100)
 PCT_STEP = Decimal("0.01")
@@ -52,9 +56,10 @@ class Grouping(StrEnum):
     account = "account"
 
 
-# Label columns that follow `clave` in each grouping (`origen`: the API labels behind an asset class).
+# Label columns that follow `clave` in each grouping (`origen`: what decided the asset class or region).
 LABEL_COLUMNS: dict[Grouping, tuple[str, ...]] = {
     Grouping.asset: ("origen",),
+    Grouping.geo: ("origen",),
     Grouping.product: ("nombre",),
     Grouping.account: ("cuenta_id", "tipo"),
 }
@@ -65,7 +70,9 @@ class Holding:
     """One position, classified. `ter` is a percent, `None` when unknown (broker, plans, cash).
 
     `asset` is an `AssetClass` value; `asset_label` is what it was translated from (`VARIABLE_INCOME`,
-    «Renta Variable», `RV`, `ETF: GOLD`…), `None` when there was nothing to translate.
+    «Renta Variable», `RV`, `ETF: GOLD`…), `None` when there was nothing to translate. `geo_label` is
+    what decided the region (`geoZone`, `nombre: S&P 500`, `categoría: GLOBAL`, `ISIN: US`, the asset
+    class of a `no_aplica`), `None` when it is unknown.
     """
 
     product: str  # ISIN, DGS code, ticker or `efectivo`
@@ -81,6 +88,7 @@ class Holding:
     category: str = UNCLASSIFIED
     ter: Decimal | None = None
     asset_label: str | None = None
+    geo_label: str | None = None
 
     def key(self, by: Grouping) -> str:
         keys = {
@@ -121,7 +129,41 @@ def broker_asset(inv: Investment) -> tuple[AssetClass, str]:
     return (hit[0], f"{kind}: {hit[1]}") if hit else (AssetClass.sin_clasificar, kind)
 
 
+def is_share(inv: Investment) -> bool:
+    return normalize(inv.broker_product_type or "") in SHARE_TYPES
+
+
+def geo_of(asset: str, *sources: tuple[str, str | None]) -> tuple[str, str | None]:
+    """Region (the web's label) and what decided it: `no_aplica` for regionless classes, else the most
+    specific zone any `(source, text)` names, the first source on a tie. «MyInvestor Indexado S&P500»
+    with category «RV Global PP» is Estados Unidos, not Global."""
+    if asset in REGIONLESS:
+        return NOT_APPLICABLE, str(asset)
+    hits = [(hit, i, source) for i, (source, text) in enumerate(sources) if (hit := ranked_region(text))]
+    if not hits:
+        return UNCLASSIFIED, None
+    (_, zone, words), _, source = min(hits, key=lambda h: (h[0][0], h[1]))
+    return zone_label(zone), f"{source}: {words}"
+
+
+def fund_geo(asset: str, sheet: FundSheet, inv: Investment) -> tuple[str, str | None]:
+    """A fund's `geoZone` (its label, as the web shows it); failing that, the region its name says."""
+    zone = known(sheet.geo_zone)
+    if zone and asset not in REGIONLESS:
+        return zone_label(zone), GEO_ZONE
+    return geo_of(asset, ("nombre", sheet.name or inv.investment_name))
+
+
+def broker_geo(asset: str, inv: Investment) -> tuple[str, str | None]:
+    """A share's issuer country (from its ISIN); an ETF's region, from its name and category."""
+    if is_share(inv):
+        zone = isin_region(inv.isin)
+        return (zone_label(zone), f"ISIN: {(inv.isin or '')[:2].upper()}") if zone else (UNCLASSIFIED, None)
+    return geo_of(asset, ("nombre", inv.investment_name), ("categoría", known(inv.my_investor_category)))
+
+
 def from_investment(sec: SecuritiesAccount, inv: Investment, sheet: FundSheet | None) -> Holding:
+    geo, geo_label = geo_of(UNCLASSIFIED, ("nombre", inv.investment_name))
     base = Holding(
         product=inv.isin or inv.ticker or inv.investment_name or UNCLASSIFIED,
         name=inv.investment_name,
@@ -132,24 +174,34 @@ def from_investment(sec: SecuritiesAccount, inv: Investment, sheet: FundSheet | 
         invested=inv.initial_investment,
         profit=inv.profit,
         category=known(inv.my_investor_category) or UNCLASSIFIED,
+        geo=geo,
+        geo_label=geo_label,
     )
     if inv.investment_product_type == BROKER:
         asset, label = broker_asset(inv)
-        return _replace(base, asset=asset.value, asset_label=label)
+        geo, geo_label = broker_geo(asset, inv)
+        return _replace(base, asset=asset.value, asset_label=label, geo=geo, geo_label=geo_label)
     if sheet is None:
         return base
+    fund_asset = asset_class(sheet.asset_type)
+    geo, geo_label = fund_geo(fund_asset, sheet, inv)
     return _replace(
         base,
-        asset=asset_class(sheet.asset_type).value,
+        asset=fund_asset.value,
         asset_label=sheet.asset_type,
-        geo=known(sheet.geo_zone) or UNCLASSIFIED,
+        geo=geo,
+        geo_label=geo_label,
         category=known(sheet.category) or base.category,
         ter=sheet.ter,
     )
 
 
 def from_pension(account: PensionAccount, plan: PensionPlanPosition, sheet: PensionPlanSheet | None) -> Holding:
+    """A plan's region comes from its category and name (`RV Global PP`, «… S&P 500, PP»)."""
     label = sheet.active_type if sheet else None
+    asset = asset_class(label)
+    name = (sheet.name if sheet else None) or plan.name
+    geo, geo_label = geo_of(asset, ("categoría", sheet.category if sheet else None), ("nombre", name))
     return Holding(
         product=plan.dgs_code,
         name=plan.name,
@@ -159,8 +211,10 @@ def from_pension(account: PensionAccount, plan: PensionPlanPosition, sheet: Pens
         value=plan.market_value or Decimal(0),
         invested=plan.total_invested,
         profit=plan.profit,
-        asset=asset_class(label).value,
+        asset=asset.value,
         asset_label=label,
+        geo=geo,
+        geo_label=geo_label,
         category=known(sheet.category if sheet else None) or UNCLASSIFIED,
     )
 
@@ -187,7 +241,8 @@ def from_cash(acc: CashAccount, portfolio: SecuritiesAccount | None = None) -> H
         invested=acc.balance,
         profit=Decimal(0),
         asset=CASH,
-        geo=CASH,
+        geo=NOT_APPLICABLE,
+        geo_label=CASH,
         category=CASH,
     )
 
@@ -227,12 +282,18 @@ def _labels(by: Grouping, holdings: Sequence[Holding]) -> dict[str, Any]:
         return dict.fromkeys(LABEL_COLUMNS.get(by, ()))
     h = holdings[0]
     if by is Grouping.asset:
-        return {"origen": ", ".join(sorted({x.asset_label for x in holdings if x.asset_label})) or None}
+        return {"origen": _origins(x.asset_label for x in holdings)}
+    if by is Grouping.geo:
+        return {"origen": _origins(x.geo_label for x in holdings)}
     if by is Grouping.product:
         return {"nombre": h.name}
     if by is Grouping.account:
         return {"cuenta_id": h.account_id, "tipo": h.account_kind}
     return {}
+
+
+def _origins(labels: Iterable[str | None]) -> str | None:
+    return ", ".join(sorted({label for label in labels if label})) or None
 
 
 def _row(key: str, by: Grouping, holdings: Sequence[Holding], total: Decimal) -> dict[str, Any]:
@@ -340,3 +401,8 @@ def target_total(rows: Sequence[dict[str, Any]], total: dict[str, Any]) -> dict[
 def untranslated_labels(holdings: Iterable[Holding]) -> list[str]:
     """Asset-type labels that fell into `sin_clasificar`, to report them."""
     return sorted({h.asset_label for h in holdings if h.asset == UNCLASSIFIED and h.asset_label})
+
+
+def unlocated(holdings: Iterable[Holding]) -> list[str]:
+    """Names of the positions whose region is unknown (in `sin_clasificar`), to report them."""
+    return sorted({h.name or h.product for h in holdings if h.geo == UNCLASSIFIED})

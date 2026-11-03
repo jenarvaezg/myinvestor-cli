@@ -196,12 +196,12 @@ Una cartera contratada es una cuenta de valores más (`accountType: SECURITIES_P
 | `--by` | `clave` | De dónde sale |
 |---|---|---|
 | `asset` (por defecto) | clase de activo canónica (tabla de abajo), con `origen`: las etiquetas de la API de las que sale | fondos: `assetType` de su ficha; planes: `activeType` de su ficha; acciones y ETF: ver abajo |
-| `geo` | zona: `GLOBAL`, `EUROPE`, `UNITED_STATES`, `EMERGENT_MARKETS`… | fondos: `geoZone` de su ficha; acciones, ETF y planes: `sin_clasificar` |
+| `geo` | zona, con la etiqueta de la web: «Global», «Europa», «Estados Unidos», «Mercados Emergentes»…, o `no_aplica` (materias primas y efectivo), con `origen`: qué decidió la zona | fondos: `geoZone` de su ficha; ETF y planes: su nombre y categoría; acciones: el país del ISIN (ver abajo) |
 | `category` | categoría | fondos y planes: `category` de su ficha; si no, el `myInvestorCategory` de la posición («Desconocido» cuenta como `sin_clasificar`) |
 | `product` | ISIN (o código del plan, o ticker), con `nombre` | la posición |
 | `account` | nombre de la cuenta (el de la cartera gestionada, p. ej. `METAL`, o el código), con `cuenta_id` y `tipo` (`valores`, `cartera`, `pensiones`, `efectivo`) | la cuenta |
 
-Cada fila trae `valor`, `peso_pct` (% sobre el total), `invertido`, `ganancia` y `ter`, la media ponderada por valor de las posiciones con TER conocido (solo los fondos: acciones, ETF, planes y efectivo no lo tienen y no lo diluyen). La última fila es el total (`clave: "total"`, `TOTAL` en la tabla) y su `ter` es el **TER medio ponderado de la cartera**. Lo que no tiene clasificación va a `sin_clasificar`, el único marcador de «desconocido» en todas las agrupaciones. En JSON/CSV/TSV cada fila lleva `consultado_en`, como `holdings`.
+Cada fila trae `valor`, `peso_pct` (% sobre el total), `invertido`, `ganancia` y `ter`, la media ponderada por valor de las posiciones con TER conocido (solo los fondos: acciones, ETF, planes y efectivo no lo tienen y no lo diluyen). La última fila es el total (`clave: "total"`, `TOTAL` en la tabla) y su `ter` es el **TER medio ponderado de la cartera**. Lo que no tiene clasificación va a `sin_clasificar`, el único marcador de «desconocido» en todas las agrupaciones; lo que no puede tenerla (la zona del oro o del efectivo) va a `no_aplica`. En JSON/CSV/TSV cada fila lleva `consultado_en`, como `holdings`.
 
 **Clases de activo.** MyInvestor usa vocabularios distintos según el producto (códigos en los fondos, texto libre en los planes, `RV`/`ETF` en el broker), así que `--by asset` los traduce a un conjunto fijo (`src/myinvestor/asset_classes.py`). Las etiquetas se comparan sin tildes ni mayúsculas:
 
@@ -227,7 +227,23 @@ Las **acciones** (`brokerProductType: RV`) son `renta_variable`. Un **ETF o ETC*
 
 Si ninguna encaja, `sin_clasificar` (nunca «ETF»). Con `--target`, las claves de `--by asset` son estas clases.
 
-La clasificación sale de la ficha de cada fondo (`/funds/{isin}`, una petición por ISIN distinto aunque esté en varias cuentas). El catálogo (`/funds`) trae lo mismo, pero solo se puede buscar de uno en uno (costaría igual) o recorrer entero (miles de fondos); la ficha, además, responde también por fondos que ya no se comercializan. Las acciones y ETF no piden nada: se clasifican con lo que trae la posición (tipo de producto, nombre y categoría). La ficha del plan de pensiones solo se pide con `--by asset` o `--by category`, que son las que la usan.
+**Zonas.** Los fondos traen su `geoZone` (`origen: geoZone`), salvo los de materias primas. Lo demás se lee de lo que dice el producto, sin tildes ni mayúsculas, y `origen` dice qué palabra decidió (`nombre: S&P 500`, `categoría: GLOBAL`, `ISIN: US`):
+
+- **Planes de pensiones:** la `category` de su ficha y el nombre. **ETF:** el nombre y, si la hay, la categoría. Un fondo sin `geoZone` usa también su nombre. Se miran todos y gana la regla más específica (la primera de esta lista que encaje en alguno): la ficha real de «MyInvestor Indexado S&P500, PP» dice «RV Global PP», y es Estados Unidos. La clave sale siempre con la etiqueta de la web (`EUROPE` y «Europa» son la misma). Reglas, en orden:
+  1. `Emerging Europe`, «Europa emergente» → `EUROPE_EMERGENT_MARKETS`; `Emergentes`, `Emerging`, `MSCI EM` → `EMERGENT_MARKETS` (antes que la región que nombren: «Global Emerging Markets» es emergente).
+  2. `Asia ex Japan` → `ASIA_EX_JAPAN`; `Latin America`, `LatAm` → `LATIN_AMERICA`.
+  3. `S&P 500`, `USA`, `EE.UU.`, «Estados Unidos», `United States`, `Nasdaq`, `Russell 2000`… → `UNITED_STATES`.
+  4. `Europa`, `Europe`, `European`, `Euro Stoxx`, «Eurozona», `EMU`, `Euro` (no `EUR`, que es la divisa) → `EUROPE`.
+  5. Países con zona propia: `UK`, `FTSE 100` → `UNITED_KINGDOM`; `Spain`, «España», `Ibex` → `SPAIN`; `Germany`, `DAX` → `GERMANY`; `France`, `CAC 40` → `FRANCE`; `Japan`, «Japón», `Nikkei`, `Topix` → `JAPAN`; `China`, `CSI 300` → `CHINA`; `India` → `INDIA`; `Asia`, `Pacific` → `ASIA`.
+  6. `Global`, `World`, «Mundial», `ACWI`, `All-World` → `GLOBAL`.
+
+  Lo que sigue a `ex` no cuenta: «MSCI World ex USA» es Global. Si ninguna encaja, `sin_clasificar`.
+- **Acciones:** el nombre de una empresa no dice dónde invierte, así que se usa el país del emisor, las dos primeras letras del ISIN, cuando tiene zona propia (`US`, `ES`, `DE`, `FR`, `IT`, `GB`, `CH`, `SE`, `NO`, `JP`, `CN`, `IN`, `KR`, `BR`, `MX`); si no (`NL`, `IE`…), `sin_clasificar`.
+- **Materias primas** (los ETC de oro o plata, los fondos `COMMODITIES`; la clase de `--by asset`) y **efectivo** (con `--include-cash`): `no_aplica`, con la clase en `origen`.
+
+Las posiciones que se quedan en `sin_clasificar` se avisan en stderr.
+
+La clasificación sale de la ficha de cada fondo (`/funds/{isin}`, una petición por ISIN distinto aunque esté en varias cuentas). El catálogo (`/funds`) trae lo mismo, pero solo se puede buscar de uno en uno (costaría igual) o recorrer entero (miles de fondos); la ficha, además, responde también por fondos que ya no se comercializan. Las acciones y ETF no piden nada: se clasifican con lo que trae la posición (tipo de producto, nombre y categoría). La ficha del plan de pensiones solo se pide con `--by asset`, `--by geo` o `--by category`, que son las que la usan.
 
 Con `--include-cash` el saldo de las cuentas de efectivo (todas, como en `position`) entra como la clase `efectivo` (con `invertido` = saldo y `ganancia` = 0). En `--by account`, la cuenta de efectivo propia de una cartera gestionada (su `cashAccountId`) se suma a esa cartera en vez de salir como otra cuenta.
 
@@ -737,7 +753,7 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | `movements`, `holds` | 1 + C (`movements --new`: igual; `--since-id`: 1 + 1; `--details`: + 1 por cuenta con algún cargo de transferencia emitida) |
 | `export` | 4 + C + 2V + P; la primera vez (o con un hueco), + C del tramo antiguo y sus firmas |
 | `holdings` | 1 + V (también con `-a`: se leen todas para resolverla); `--ter`: + F |
-| `allocation` | 2 + V + P + F; con `--by asset` o `category`: + D; con `--include-cash`: + 1 |
+| `allocation` | 2 + V + P + F; con `--by asset`, `geo` o `category`: + D; con `--include-cash`: + 1 |
 | `orders` | 1 + V; con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
 | `pensions` | 1 + P |
 | `upcoming` | 4 + 2·C + 2·V + P (C: con `--owner`, solo las de ese tipo; por cuenta, retenciones y transferencias emitidas) |

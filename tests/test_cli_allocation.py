@@ -119,7 +119,7 @@ def test_allocation_by_asset(mock_api: respx.MockRouter, store: MemorySessionSto
 @pytest.mark.parametrize(
     ("by", "keys"),
     [
-        ("geo", ["sin_clasificar", "GLOBAL", "EUROPE"]),
+        ("geo", ["Global", "sin_clasificar", "Europa", "Estados Unidos", "no_aplica"]),
         ("category", ["RV Global", "RV MIXTA", "RF Euro", "sin_clasificar"]),
     ],
 )
@@ -128,6 +128,51 @@ def test_allocation_by_geo_and_category(
 ) -> None:
     mock_portfolio(mock_api)
     assert [r["clave"] for r in json_rows("allocation", "--by", by)] == [*keys, "total"]
+
+
+def test_allocation_by_geo_classifies_plans_etfs_and_shares(
+    mock_api: respx.MockRouter, store: MemorySessionStore
+) -> None:
+    routes = mock_portfolio(mock_api)
+    mock_api.get(f"{CPERF}/v2/pension-accounts/301").respond(
+        200,
+        json=ok(
+            [
+                {"dgsCode": "N5396", "name": "MyInvestor Indexado Global, PP", "marketValue": 600.0},
+                {"dgsCode": "N5394", "name": "MyInvestor Indexado S&P 500, PP", "marketValue": 400.0},
+            ]
+        ),
+    )
+    plan_routes = [
+        mock_api.get(f"{CPERF}/v2/pension-plans/{dgs}").respond(
+            200, json=ok({"dgsCode": dgs, "name": name, "activeType": "Renta Variable", "category": category})
+        )
+        for dgs, name, category in (
+            ("N5396", "MyInvestor Indexado Global, PP", "RV Global PP"),
+            ("N5394", "MyInvestor Indexado S&P 500, PP", "RV Internacional PP"),
+        )
+    ]
+
+    result = invoke("allocation", "--by", "geo", "--include-cash", "-f", "json")
+
+    rows = json.loads(result.stdout, parse_float=Decimal)
+    assert [(r["clave"], r["origen"], r["valor"]) for r in rows] == [
+        ("no_aplica", "efectivo, materias_primas", Decimal("2100.60")),  # the cash accounts and the gold ETC
+        ("Global", "categoría: GLOBAL, geoZone", Decimal("1400.00")),  # fund A and the global plan
+        ("Estados Unidos", "ISIN: US, nombre: S&P 500", Decimal("500.00")),  # the share and the S&P 500 plan
+        ("Europa", "geoZone", Decimal("300.00")),
+        ("total", None, Decimal("4300.60")),
+    ]
+    assert "sin_clasificar" not in [r["clave"] for r in rows] and "Sin zona" not in result.stderr
+    assert all(route.call_count == 1 for route in plan_routes) and routes["plan"].call_count == 0
+
+
+def test_allocation_by_geo_reports_what_has_no_known_region(
+    mock_api: respx.MockRouter, store: MemorySessionStore
+) -> None:
+    mock_portfolio(mock_api)
+    result = invoke("allocation", "--by", "geo", "-f", "json")
+    assert "Sin zona conocida (van a sin_clasificar): «Plan»." in result.stderr
 
 
 def test_allocation_by_product_needs_no_plan_sheet(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
@@ -228,7 +273,7 @@ def test_allocation_table_has_total(
     monkeypatch.setenv("COLUMNS", "200")
     result = invoke("allocation", "--by", "geo")
     assert "Reparto por zona" in result.stdout and "TOTAL" in result.stdout and "2.000,00 €" in result.stdout
-    assert "45,00 %" in result.stdout and "consultado_en" not in result.stdout
+    assert "40,00 %" in result.stdout and "consultado_en" not in result.stdout
 
 
 def test_holdings_weight_over_listed_positions(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:

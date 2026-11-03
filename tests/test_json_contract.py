@@ -427,6 +427,7 @@ class Case:
     argv: tuple[str, ...]
     setup: Callable[[respx.MockRouter, pytest.MonkeyPatch], None] = full_api
     options: tuple[str, ...] = ()  # what adds the `only_with` keys (`{target}`: a target file)
+    activates: frozenset[str] = frozenset()  # `only_with` keys that `argv` itself already adds (`--by geo`)
     target: dict[str, Any] = field(default_factory=dict)
     always_null: frozenset[str] = frozenset()  # nullable keys the synthetic data cannot fill
     with_format: bool = True  # append `-f json`
@@ -482,6 +483,7 @@ CASES = (
         "--by geo | --by category",
         ("allocation", "--by", "geo"),
         options=("--target", "{target}"),
+        activates=frozenset({"--by geo"}),
         target={"global": 100},
     ),
     Case(
@@ -647,7 +649,7 @@ def test_output_follows_its_contract(
     case.setup(mock_api, monkeypatch)
     filled: set[str] = set()
     for with_options in dict.fromkeys((False, bool(case.options))):
-        options = set(case.options) if with_options else set()
+        options = {*case.activates, *(case.options if with_options else ())}
         check_data(run_json(argv(case, tmp_path, options=with_options)), contract, variant, options, filled)
     # every key must have shown a value, or its type would never have been checked
     unfilled = set(field_paths(variant.fields)) - filled - case.always_null
@@ -665,13 +667,13 @@ def test_envelope_wraps_the_output_with_its_schema(
 
     if not contract.enveloped:  # it already carries its own `schema`
         assert doc["schema"] == contract.schema_id
-        check_data(doc, contract, variant_of(contract, case.variant), set(), set())
+        check_data(doc, contract, variant_of(contract, case.variant), set(case.activates), set())
         return
     assert list(doc) == [f.name for f in ENVELOPE]
     assert doc["schema"] == contract.schema_id
     assert doc["cli_version"] == package_version()
     assert _is_datetime(doc["as_of"])
-    check_data(doc["data"], contract, variant_of(contract, case.variant), set(), set())
+    check_data(doc["data"], contract, variant_of(contract, case.variant), set(case.activates), set())
 
 
 def test_envelope_from_the_environment(
