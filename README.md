@@ -84,6 +84,7 @@ myinvestor orders [--all | --from 2025-01-01 --to …] [--status EXECUTED] [--pe
 myinvestor order REF [-a ID] [--pension]         # una orden con su ejecución: VL, participaciones, comisiones, retenciones, neto y resultado fiscal
 myinvestor lots [IE0032126645] [-a ID]            # lotes vivos (FIFO) de cada fondo: coste, valor y plusvalía latente
 myinvestor gains [IE0032126645] [--year 2025] [-a ID]   # plusvalías y minusvalías realizadas: reembolsos y traspasos de salida
+myinvestor fund-transfers [-a ID] [--pension] [--since 2026-01-01 --until …] | --pending   # traspasos de fondos o de planes (últimos 60 días)
 myinvestor pensions                               # planes de pensiones
 myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year]
 myinvestor contributions [--all] [--new]          # aportaciones periódicas
@@ -294,6 +295,25 @@ Solo los tipos marcados como observados se han visto en cuentas reales; el resto
 Los traspasos entre fondos difieren la tributación, así que salen en la lista pero **no suman** en las tres filas finales (`plusvalias`, `minusvalias` y `total`, con el importe en `resultado`), que son solo los reembolsos. El año va por **fecha de ejecución**: se piden las órdenes desde el 1 de diciembre del año anterior (una orden del 30 de diciembre puede ejecutarse en enero) y se quedan las ejecuciones del año.
 
 **Peticiones de `gains`**: una por cuenta de valores para las órdenes, y **una más por cada orden de salida** del periodo (las de compra y las canceladas o rechazadas no se piden). Con muchos reembolsos o traspasos, usa `--min-interval` (ver [ritmo de peticiones](#silencio-depuración-y-ritmo-de-peticiones)) o filtra por ISIN. Pendiente de validar con una venta real: los tipos salen del bundle de la web y la forma del detalle se ha visto en una suscripción. Para la declaración, cuádralo con la «Información fiscal» anual de MyInvestor.
+
+### Traspasos de fondos y de planes: `fund-transfers`
+
+`fund-transfers` lista los traspasos de fondos de tus cuentas de valores (todas, también las carteras gestionadas `SECURITIES_PORTFOLIO`): entre fondos, los que entran de otra entidad y los que salen a otra. Con **`--pension`**, los traspasos de planes de pensiones de tus cuentas de planes. Por defecto pide **los últimos 60 días, como la web**; `--since`/`--until` (o `--from`/`--to`) cambian el rango (sin `--since`, 60 días antes de `--until`). Es una sola petición por cuenta con el rango tal cual: la web nunca pide más de 60 días y no se sabe si MyInvestor acepta rangos largos; si uno le parece mal responderá con un error (no se trocea ni se reintenta). `-a` elige cuentas: de valores por id o código, o de pensiones por id con `--pension`. Una fila por traspaso:
+
+| Campo | Origen en la API | Notas |
+|---|---|---|
+| `fecha` | `transferDate` | |
+| `cuenta` | id de la cuenta | de valores o, con `--pension`, de pensiones |
+| `origen`, `destino` | `isinOrigin`, `isinDestination`; con `--pension`, `dgsCodeOrigin`, `dgsCodeDestination` | ISIN del fondo o código DGS del plan |
+| `origen_nombre`, `destino_nombre` | con `--pension`, `fundNameOrigin`, `pensionPlanNameDestination` | `null` en los fondos (la API solo da el ISIN) |
+| `participaciones`, `importe`, `moneda` | `shares`, `amount`, `currency` | |
+| `estado` | `status` | tal cual |
+| `cancelable` | `isCancelable` | sin él, `false` (como la web) |
+| `ref` | `reference` | |
+
+La tabla muestra `fecha`, `cuenta`, `origen` y `destino` (código y nombre juntos), `participaciones`, `importe`, `estado`, `cancelable` y `ref`; JSON y CSV, todo. **`--pending`** solo da el contador de traspasos de fondos en curso de cada cuenta de valores (`cuenta`, `pendientes`); no se combina con `--pension` ni con fechas.
+
+**Los cambios entre fondos dentro de MyInvestor no salen aquí**: un «ALTA IIC SWITCH» (o una «Baja switch») es una orden, y se ve en `orders`, `order REF`, `lots` y `gains`. En las cuentas observadas estos endpoints respondieron siempre `[]`: los campos salen del bundle de la web, por eso todos son opcionales salvo `reference` y los desconocidos se ignoran. Fuera de alcance: simular, solicitar o cancelar traspasos, y el detalle de uno (`…/transfers/{reference}`).
 
 ### Traspasos internos
 
@@ -618,6 +638,7 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | `upcoming` | 4 + 2·C + 2·V + P (C: con `--owner`, solo las de ese tipo; por cuenta, retenciones y transferencias emitidas) |
 | `snapshot`, `summary` | 4 + 3·C + 2·V + 2·P (`summary --from-file`: 0) |
 | `transfers`, `interest` | 1 + C |
+| `fund-transfers` | 1 + V (también con `--pending`); con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
 | `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V |
 | `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
 | `login` | `--direct` o `--refresh-token-stdin`: 1 |
@@ -691,6 +712,8 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/orders/{reference}` | detalle de una orden: `orderReference`, `isin`, `orderStatus` (`INITIAL`, `PENDING`, `IN_PROGRESS`, `COMPLETE`, `CANCEL`, `REJECTED`), `orderDate`, `orderTypeName`, `orderClass`, `operationType`, `grossAmountEUR`, `grossAmountFundCurrency`, `cash`, `shares`, `fundName`, `currency`, `expirationDate`, `periodicityCode`, `accountNumber`, `ordererCustomer` (el DNI: no se lee) y `relatedOperations: [{operationNumber, executionDate, executedShares, liquidationValue, grossAmountOperationFundCurrency, commissions, originRetention, destinyRetention, netAmountFundCurrency, exchangeRate, netAmountEUR, netAmountAccountCurrency, taxResult}]` |
 | GET | `/cperf-server/api/v2/pension-accounts/{id}/orders/{reference}` | lo mismo para un plan (en `isin`, el código DGS); visto en el bundle, no con una cuenta real |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/investment-summary/funds/{isin}/added-values` | lotes vivos de un fondo: `{currency, fundName, investmentAddedValue, addedValue, plusMinusList: [{operationType, operationDesc, operationNum, fiscalDate, securities, netAssetValue, investment, marketValue, plusMinus, fiscalResult}]}`; solo fondos |
+| GET | `/cperf-server/api/v2/securities-accounts/{id}/transfers?initDate&endDate` | traspasos de fondos (`AAAA-MM-DD`; sin las fechas, 400; la web pide 60 días): `[{reference, isinOrigin, isinDestination, status, transferDate, shares, amount, currency, isCancelable}]` (campos del bundle: solo se ha visto `[]`); `…/transfers/pending` → `{pendingTransfers}` |
+| GET | `/cperf-server/api/v2/pension-accounts/{id}/transfers?initDate&endDate` | traspasos de planes, igual: `[{reference, dgsCodeOrigin, fundNameOrigin, dgsCodeDestination, pensionPlanNameDestination, status, transferDate, shares, amount, currency, isCancelable}]` |
 | GET | `/cperf-server/api/v2/pension-plans/{dgsCode}` | ficha del plan |
 | GET | `/cperf-server/api/v2/automatic-contributions/self` | aportaciones periódicas |
 | GET | `/cperf-server/api/v2/customers/self/documents/fiscal` · `cash-accounts/self/documents` · `securities-accounts/self/documents` · `pension-accounts/self/documents` · `portfolios/self/documents` | listas de documentos, todas con `{documentId, documentUuid, name, extension, isNotified, createDate, signDate, accountId ("" si no es de una cuenta), accountCode, accountAlias, accountType, isCurrentCustomerAnOwner}` |

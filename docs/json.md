@@ -573,6 +573,34 @@ Salida: lista de objetos.
 | `neto` | number (€, 2 decimales) | sí | sí |  |
 | `resultado` | number (€, 2 decimales) | sí | sí | `taxResult`; en los totales, la suma de los reembolsos |
 
+### `fund-transfers` — `myinvestor.fund-transfers/1`
+
+Las mismas claves con `--pension`. Con `--pending`, una fila por cuenta de valores con el contador.
+
+Salida: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `fecha` | date `AAAA-MM-DD` | sí | sí | `transferDate` |
+| `cuenta` | string | no | sí | id de la cuenta de valores o, con `--pension`, de pensiones |
+| `origen` | string | sí | sí | `isinOrigin` o, con `--pension`, `dgsCodeOrigin` |
+| `origen_nombre` | string | sí | sí | `fundNameOrigin` (solo con `--pension`; `null` en los fondos) |
+| `destino` | string | sí | sí | `isinDestination` o, con `--pension`, `dgsCodeDestination` |
+| `destino_nombre` | string | sí | sí | `pensionPlanNameDestination` (solo con `--pension`; `null` en los fondos) |
+| `participaciones` | number (exacto) | sí | sí | `shares` |
+| `importe` | number (€, 2 decimales) | sí | sí | `amount`, en `moneda` |
+| `moneda` | string | sí | sí | `currency` |
+| `estado` | string | sí | sí | `status`, sin interpretar |
+| `cancelable` | boolean | no | sí | `isCancelable` (sin él, `false`, como la web) |
+| `ref` | string | no | sí | `reference` |
+
+Con `--pending`: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `cuenta` | string | no | sí | id de la cuenta de valores |
+| `pendientes` | integer | no | sí | `pendingTransfers`: traspasos de fondos en curso |
+
 ### `status` — `myinvestor.status/1`
 
 Nunca incluye tokens ni la contraseña.

@@ -599,3 +599,54 @@ class FundLots(_Model):
 
     _lists = field_validator("plus_minus_list", mode="before")(_empty_list)
     _currency = field_validator("currency", mode="before")(_euros)
+
+
+def _text(value: Any) -> Any:
+    """A reference the API may send as a number: keep it as text."""
+    return str(value) if isinstance(value, int | Decimal) and not isinstance(value, bool) else value
+
+
+class FundTransfer(_Model):
+    """A fund transfer of a securities account (`…/securities-accounts/{id}/transfers`).
+
+    Never seen with data (the accounts observed answered `[]`): the fields are the web's (bundle),
+    so all but `reference` are optional.
+    """
+
+    reference: str
+    isin_origin: str | None = None
+    isin_destination: str | None = None
+    status: str | None = None
+    transfer_date: dt.date | None = None
+    shares: Decimal | None = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    is_cancelable: bool | None = None
+
+    _reference = field_validator("reference", mode="before")(_text)
+    _days = field_validator("transfer_date", mode="before")(_day_or_none)
+
+
+class PensionTransfer(_Model):
+    """A pension-plan transfer of a pension account (`…/pension-accounts/{id}/transfers`), as `FundTransfer`."""
+
+    reference: str
+    dgs_code_origin: str | None = None
+    fund_name_origin: str | None = None
+    dgs_code_destination: str | None = None
+    pension_plan_name_destination: str | None = None
+    status: str | None = None
+    transfer_date: dt.date | None = None
+    shares: Decimal | None = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    is_cancelable: bool | None = None
+
+    _reference = field_validator("reference", mode="before")(_text)
+    _days = field_validator("transfer_date", mode="before")(_day_or_none)
+
+
+class PendingTransfers(_Model):
+    """`…/securities-accounts/{id}/transfers/pending`: how many fund transfers are still in progress."""
+
+    pending_transfers: int
