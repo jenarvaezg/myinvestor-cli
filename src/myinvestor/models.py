@@ -32,6 +32,16 @@ def _day_or_none(value: Any) -> Any:
     return _day(value)
 
 
+def _currency_code(value: Any) -> Any:
+    """The fund detail sends `currency` as an object (`{"code": "EUR", …}`); a bare code also works.
+
+    Anything else is None: the currency is informative and must never break `allocation` or `holdings --ter`.
+    """
+    if isinstance(value, dict):
+        value = value.get("code")
+    return value if isinstance(value, str) and value.strip() else None
+
+
 class _Model(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="ignore", frozen=True)
 
@@ -407,6 +417,18 @@ class PositionPoint(_Model):
     _days = field_validator("date", mode="before")(_day)
 
 
+class NavPoint(_Model):
+    """One NAV of a catalog fund (`…/funds/{isin}/graphs/INIT_GRAPH`).
+
+    The API also sends `profit`, equal to `marketValue` in every point observed: not a gain, never parsed.
+    """
+
+    position_date: dt.date
+    market_value: Decimal | None = None  # the NAV
+
+    _days = field_validator("position_date", mode="before")(_day)
+
+
 class ContributionTimeFrame(_Model):
     recurrence: str | None = None
     start_date: dt.date | None = None
@@ -490,6 +512,9 @@ class FundSheet(_Model):
     category: str | None = None
     myinvestor_category: str | None = None
     ter: Decimal | None = None  # percent
+    currency: str | None = None  # of the NAV (`EUR`, `USD`…)
+
+    _currency = field_validator("currency", mode="before")(_currency_code)
 
 
 class PensionPlanSheet(_Model):

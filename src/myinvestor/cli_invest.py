@@ -431,6 +431,7 @@ def funds(
             "vl": f.liquidation_value,
             "ytd": f.annualized_profitability.ytd if f.annualized_profitability else None,
             "1a": f.annualized_profitability.one_year if f.annualized_profitability else None,
+            "moneda": f.currency,
         }
         for f in result.funds
     ]

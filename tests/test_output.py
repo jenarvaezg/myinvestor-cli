@@ -157,3 +157,33 @@ def test_wide_table_one_line_per_row(monkeypatch: pytest.MonkeyPatch, capsys: py
 def test_table_without_tty_is_not_limited_to_80(capsys: pytest.CaptureFixture[str]) -> None:
     render([MOVEMENT], OutputFormat.table)
     assert MOVEMENT["concepto"] in capsys.readouterr().out
+
+
+def test_table_formats_money_and_prices_in_the_row_currency(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rows = [
+        {"isin": "US0000000001", "vl": Decimal("29.88"), "valor": Decimal("100"), "moneda": "USD"},
+        {"isin": "IE0000000001", "vl": Decimal("10.5"), "valor": Decimal("50"), "moneda": "EUR"},
+        {"isin": "IE0000000002", "vl": Decimal("7.25"), "valor": Decimal("20"), "moneda": None},
+    ]
+    monkeypatch.setenv("COLUMNS", "200")
+
+    render(rows, OutputFormat.table)
+
+    lines = capsys.readouterr().out.splitlines()
+    usd = next(line for line in lines if "US0000000001" in line)
+    assert "29,88 USD" in usd and "100,00 USD" in usd and "€" not in usd
+    assert "10,50 €" in next(line for line in lines if "IE0000000001" in line)
+    assert "7,25 €" in next(line for line in lines if "IE0000000002" in line)
+
+
+def test_table_without_currency_column_is_in_euros(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+
+    render([{"vl": Decimal("29.88"), "rentab": Decimal("1.5")}], OutputFormat.table)
+
+    out = capsys.readouterr().out
+    assert "29,88 €" in out and "1,50 %" in out

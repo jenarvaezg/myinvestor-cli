@@ -19,6 +19,7 @@ from myinvestor import (  # noqa: F401
     cli_doctor,
     cli_documents,
     cli_export,
+    cli_fund_history,
     cli_fund_transfers,
     cli_gains,
     cli_income,

@@ -188,7 +188,8 @@
       "riesgo": "integer|null",
       "vl": "number|null",
       "ytd": "number|null",
-      "1a": "number|null"
+      "1a": "number|null",
+      "moneda": "string|null"
     }
   },
   "myinvestor.feed/1": {
@@ -704,6 +705,13 @@
       "1a": "number|null",
       "3a": "number|null",
       "5a": "number|null"
+    }
+  },
+  "myinvestor.fund-history/1": {
+    "por defecto": {
+      "fecha": "date",
+      "vl": "number",
+      "moneda": "string|null"
     }
   }
 }

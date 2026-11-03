@@ -14,6 +14,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - Nuevo `myinvestor.fund-transfers/1`, con la variante `--pending` (#8).
 - `myinvestor.accounts/1` gana `tipo_pct` y `tae_pct` (números en %, `null` si la cuenta no tiene remuneración; `tae_pct` también es `null` si MyInvestor manda 0, «sin calcular») (compatible) (#5).
 - Nuevos `myinvestor.fund-filters/1` y `myinvestor.pension-plans/1`; `myinvestor.funds/1` no cambia con los filtros (#6).
+- Nuevo `myinvestor.fund-history/1`: filas `{fecha, vl, moneda}`. `myinvestor.funds/1` gana `moneda` (divisa del fondo; compatible) (#7).
 
 ### Añadido
 
@@ -38,6 +39,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - `accounts`: columnas `tipo_pct` y `tae_pct` de la última liquidación, como en `interest` (una petición más por cuenta; vacías si la cuenta no tiene remuneración o la consulta falla, sin abortar la orden; una TAE de 0 sale vacía) (#5).
 - README: hallazgos del servicio `/read-only/api/v1` (copia diaria, no sirve como fuente principal ni para más de 90 días) (#10).
 - Filtros del buscador en `funds` (`--category`, `--manager`, `--currency`, `--asset-type`, `--region`, `--min-ter`/`--max-ter`, `--risk N[-M]`, `--rating`, `--esg`, `--hedged`), `fund-filters [FILTRO] [--pension]` (valores válidos de cada filtro) y `pension-plans [TEXTO]` (catálogo de planes de pensiones con TER y rentabilidades, con filtros) (#6).
+- `fund-history ISIN [--since] [--until] [--every day|week|month]`: valor liquidativo de cualquier fondo del catálogo desde su inicio (`…/funds/{isin}/graphs/INIT_GRAPH`), con la variación frente al primer punto en la tabla; README: `INIT_GRAPH` es el único `graphType` válido y no hay más de un año de historial de las posiciones propias. `funds` añade `moneda`, y en las tablas los importes y precios de una fila con `moneda` salen en esa moneda (antes, siempre «€»: un fondo en USD salía en euros) (#7).
 
 ### Cambiado
 

@@ -37,6 +37,7 @@ PERCENT_COLUMNS = frozenset(
     {"rentab", "rentab_ytd", "ter", "1a", "3a", "5a", "ytd"}
     | {"peso", "peso_pct", "objetivo_pct", "desviacion_pct"}
     | {"tipo_pct", "tipo_base_pct", "tipo_promo_pct", "tae_pct", "tae_promo_pct"}
+    | {"variacion_pct"}
 )
 QUANTITY_COLUMNS = frozenset({"participaciones", "movimientos"})
 NUMERIC_COLUMNS = MONEY_COLUMNS | PERCENT_COLUMNS | QUANTITY_COLUMNS
@@ -46,6 +47,8 @@ DATE_COLUMNS = frozenset(
     | {"fecha_fiscal", "vencimiento"}
 )
 MAX_QUANTITY_DECIMALS = 6
+# A row with this key is in that currency: its money and price columns are formatted with it.
+CURRENCY_COLUMN = "moneda"
 CENTS = Decimal("0.01")
 
 # Text columns may wrap down to this width (or their header's); dates and numbers never wrap nor shrink.
@@ -198,7 +201,7 @@ def _table_chrome(count: int) -> int:
 
 
 def _print_table(rows: Sequence[dict[str, Any]], columns: list[str], title: str | None) -> None:
-    cells = [[format_cell(c, row.get(c)) for c in columns] for row in rows]
+    cells = [[format_cell(c, row.get(c), row.get(CURRENCY_COLUMN)) for c in columns] for row in rows]
     console = Console(
         width=table_width(wide=_settings.wide, columns=os.environ.get("COLUMNS"), is_tty=sys.stdout.isatty())
     )
@@ -217,12 +220,13 @@ def _print_table(rows: Sequence[dict[str, Any]], columns: list[str], title: str 
     console.print(table)
 
 
-def format_cell(column: str, value: Any) -> str:
+def format_cell(column: str, value: Any, currency: str | None = None) -> str:
+    """`currency` (the row's `moneda`) applies to money and price columns; without it, euros."""
     if value is None:
         return ""
     if isinstance(value, Decimal | int | float) and not isinstance(value, bool):
         if column in MONEY_COLUMNS:
-            return format_eur(value)
+            return format_eur(value, currency or "EUR")
         if column in PERCENT_COLUMNS:
             return format_pct(value)
         if column in QUANTITY_COLUMNS:

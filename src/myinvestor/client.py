@@ -41,6 +41,7 @@ from myinvestor.models import (
     FundSummary,
     FundTransfer,
     Hold,
+    NavPoint,
     Order,
     OrderDetail,
     PendingTransfers,
@@ -473,6 +474,16 @@ class MyInvestorClient:
     def fund_price(self, isin: str) -> dict[str, Any]:
         data = self.get_data(f"{CPERF}/v2/funds/{seg(isin)}/prices/last")
         return data if isinstance(data, dict) else {}
+
+    def fund_nav_history(self, isin: str) -> list[NavPoint]:
+        """NAV of a catalog fund since its launch, oldest first; spacing is irregular (weekly, then daily).
+
+        `INIT_GRAPH` is the only `graphType` the API accepts (`ONE_YEAR`, `MAX`… → 400).
+        """
+        data = self.get_data(f"{CPERF}/v2/funds/{seg(isin)}/graphs/INIT_GRAPH")
+        rows = data.get("investmentPositionValueList") if isinstance(data, dict) else None
+        points = (NavPoint.model_validate(r) for r in rows or [])
+        return sorted((p for p in points if p.market_value is not None), key=lambda p: p.position_date)
 
     def funds(
         self,

@@ -508,3 +508,20 @@ def test_help_documents_exit_codes() -> None:
     assert "Códigos de salida" in text
     for code in (10, 11, 12, 13, 14):
         assert f" {code} " in text
+
+
+@pytest.mark.usefixtures("store")
+def test_funds_carry_the_fund_currency_and_the_table_uses_it(
+    mock_api: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    usd = {"isin": "US0000000009", "name": "Fondo en dólares", "currency": "USD", "liquidationValue": 29.88}
+    eur = {"isin": "IE0000000001", "name": "Fondo en euros", "currency": "EUR", "liquidationValue": 10.5}
+    mock_api.get(f"{CPERF}/v2/funds").respond(200, json=ok([usd, eur]))
+    monkeypatch.setenv("COLUMNS", "200")
+
+    rows = json.loads(invoke("funds", "-f", "json").stdout)
+    table = invoke("funds").stdout
+
+    assert [(r["isin"], r["moneda"]) for r in rows] == [("US0000000009", "USD"), ("IE0000000001", "EUR")]
+    assert list(rows[0])[-1] == "moneda"  # appended: CSV columns keep their positions
+    assert "29,88 USD" in table and "10,50 €" in table

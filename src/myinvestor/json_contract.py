@@ -223,6 +223,7 @@ FUND_ROW = (
     Field("vl", N, True),
     Field("ytd", N, True, "rentabilidad en el año, en %"),
     Field("1a", N, True, "rentabilidad a 1 año, en %"),
+    Field("moneda", S, True, "divisa del fondo (`currency`): la de `vl`"),
 )
 
 FUND_FILTER = (
@@ -627,6 +628,19 @@ CONTRACTS: tuple[Contract, ...] = (
     Contract("funds", 1, (_rows(*FUND_ROW),), "Las mismas claves con cualquier filtro."),
     Contract("fund-filters", 1, (_rows(*FUND_FILTER),), "Las mismas claves con un filtro y con `--pension`."),
     Contract("pension-plans", 1, (_rows(*PENSION_PLAN_ROW),), "El catálogo de planes; las mismas claves con filtros."),
+    Contract(
+        "fund-history",
+        1,
+        (
+            _rows(
+                Field("fecha", D),
+                Field("vl", N, note="valor liquidativo (`marketValue`), en `moneda`"),
+                Field("moneda", S, True, "divisa del fondo, de su ficha; `null` si no se ha podido leer"),
+            ),
+        ),
+        "Más antiguas primero, desde el inicio del fondo. Con `--every week|month`, el último punto de cada "
+        "semana o mes. La `variacion_pct` de la tabla no va en JSON/CSV/TSV.",
+    ),
     Contract("feed", 1, (_rows(*FEED),)),
     Contract("internal-transfers", 1, (_rows(*TRANSFER),)),
     Contract("upcoming", 1, (_rows(*UPCOMING),)),
