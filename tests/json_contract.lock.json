@@ -225,7 +225,8 @@
       "disponible": "amount|null",
       "disponible_tras": "amount|null",
       "falta": "amount|null",
-      "tipo_retencion": "string|null"
+      "tipo_retencion": "string|null",
+      "estado": "string"
     }
   },
   "myinvestor.income/1": {
@@ -458,6 +459,7 @@
       "upcoming[].disponible_tras": "amount|null",
       "upcoming[].falta": "amount|null",
       "upcoming[].tipo_retencion": "string|null",
+      "upcoming[].estado": "string",
       "movements": "object|null",
       "movements.desde": "date",
       "movements.hasta": "date",

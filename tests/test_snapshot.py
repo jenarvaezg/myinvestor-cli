@@ -233,11 +233,12 @@ def test_snapshot_has_every_section_from_one_client(mock_api: respx.MockRouter, 
     [pen] = doc["pensions"]
     assert (pen["valor"], pen["fecha_valor"], pen["planes"][0]["codigo"]) == (Decimal("2000.00"), "2026-10-30", "N0001")
     assert [o["ref"] for o in doc["pending"]["orders"]] == ["p1", "o1"]  # newest first, like `orders`
-    assert [(h["id"], h["importe"]) for h in doc["pending"]["holds"]] == [("h1", Decimal("25.00"))]
-    assert [(r["tipo"], r["producto"]) for r in doc["upcoming"]] == [
-        ("orden", "Fondo indexado"),
-        ("orden", "Plan genérico"),
-        ("aportacion", "Fondo mensual"),
+    # the API sends this hold positive: a hold is money going out, negative like in `movements`
+    assert [(h["id"], h["importe"]) for h in doc["pending"]["holds"]] == [("h1", Decimal("-25.00"))]
+    assert [(r["tipo"], r["producto"], r["estado"]) for r in doc["upcoming"]] == [
+        ("orden", "Fondo indexado", "en_curso"),  # also in `pending.orders`
+        ("orden", "Plan genérico", "en_curso"),
+        ("aportacion", "Fondo mensual", "programada"),
     ]
     movements = doc["movements"]
     assert (movements["desde"], movements["hasta"], movements["huecos"]) == (str(TODAY - 3 * DAY), str(TODAY), [])
@@ -532,3 +533,26 @@ def test_summary_from_file_needs_no_session(tmp_path: Path, mock_api: respx.Mock
     assert result.exit_code == 0, result.output
     assert "TOTAL" in result.stdout and "12,50 €" in result.stdout and "2,50 €" in result.stdout
     assert not mock_api.calls
+
+
+def test_summary_from_file_shows_an_upcoming_saved_before_estado_existed(
+    tmp_path: Path, mock_api: respx.MockRouter
+) -> None:
+    row = {
+        "fecha": str(TODAY),
+        "tipo": "aportacion",
+        "producto": "Fondo mensual",
+        "importe": -60.0,
+        "cuenta_cargo": "Mi cuenta",
+        "retenido": False,
+        "disponible": 100.0,
+        "disponible_tras": 40.0,
+        "falta": None,
+        "tipo_retencion": None,
+    }
+    saved = write(tmp_path / "vieja.json", previous_snapshot(TODAY, upcoming=[row], errors=[]))
+
+    result = run("--wide", "summary", "--from-file", str(saved))
+
+    assert result.exit_code == 0, result.output
+    assert "Lo que viene" in result.stdout and "Fondo mensual" in result.stdout

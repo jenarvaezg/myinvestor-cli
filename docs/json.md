@@ -159,7 +159,7 @@ Salida: lista de objetos.
 | `cuenta` | string | no | sí | alias de la cuenta (o su id si no tiene) |
 | `id` | string | no | sí |  |
 | `tipo` | string | sí | sí | `INVESTMENT_ORDER`… |
-| `importe` | number (€, 2 decimales) | no | sí |  |
+| `importe` | number (€, 2 decimales) | no | sí | negativo, como un cargo en `movements`: dinero retenido que sale del disponible |
 
 ### `balance-history` — `myinvestor.balance-history/1`
 
@@ -363,6 +363,7 @@ Salida: lista de objetos.
 | `disponible_tras` | number (€, 2 decimales) | sí | sí | disponible tras lo pendiente hasta esa fila |
 | `falta` | number (€, 2 decimales) | sí | sí | lo que no cubre la cuenta; `null` si lo cubre |
 | `tipo_retencion` | string | sí | sí | `type` de la retención |
+| `estado` | string | no | sí | `programada` (aportaciones y transferencias: aún no ha empezado, es lo único que resta en `disponible_tras`) o `en_curso` (órdenes y retenciones: ya fuera del disponible, también en `orders` y `holds`) |
 
 ### `documents` — `myinvestor.documents/1`
 
@@ -787,8 +788,8 @@ Salida: un objeto.
 | `pending.holds[].cuenta` | string | no | sí | alias de la cuenta (o su id si no tiene) |
 | `pending.holds[].id` | string | no | sí |  |
 | `pending.holds[].tipo` | string | sí | sí | `INVESTMENT_ORDER`… |
-| `pending.holds[].importe` | number (€, 2 decimales) | no | sí |  |
-| `upcoming` | array de objetos | sí | sí | como `upcoming`, 14 días; `null` si la sección ha fallado (ver `errors`) |
+| `pending.holds[].importe` | number (€, 2 decimales) | no | sí | negativo, como un cargo en `movements`: dinero retenido que sale del disponible |
+| `upcoming` | array de objetos | sí | sí | como `upcoming`, 14 días; las filas `en_curso` son las órdenes y retenciones de `pending`: para no contarlas dos veces, suma solo las `programada`; `null` si la sección ha fallado (ver `errors`) |
 | `upcoming[].fecha` | date `AAAA-MM-DD` | no | sí |  |
 | `upcoming[].tipo` | string | no | sí | `aportacion`, `transferencia`, `orden` o `retencion` |
 | `upcoming[].producto` | string | sí | sí |  |
@@ -799,6 +800,7 @@ Salida: un objeto.
 | `upcoming[].disponible_tras` | number (€, 2 decimales) | sí | sí | disponible tras lo pendiente hasta esa fila |
 | `upcoming[].falta` | number (€, 2 decimales) | sí | sí | lo que no cubre la cuenta; `null` si lo cubre |
 | `upcoming[].tipo_retencion` | string | sí | sí | `type` de la retención |
+| `upcoming[].estado` | string | no | sí | `programada` (aportaciones y transferencias: aún no ha empezado, es lo único que resta en `disponible_tras`) o `en_curso` (órdenes y retenciones: ya fuera del disponible, también en `orders` y `holds`) |
 | `movements` | object | sí | sí | movimientos recientes, base del delta siguiente; `null` si la sección ha fallado (ver `errors`) |
 | `movements.desde` | date `AAAA-MM-DD` | no | sí |  |
 | `movements.hasta` | date `AAAA-MM-DD` | no | sí |  |

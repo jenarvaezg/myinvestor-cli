@@ -74,7 +74,7 @@ myinvestor movements --details [-a …] [--days …]   # + beneficiario e IBAN d
 myinvestor internal-transfers [--from … --to … | --days …] [-a Junior] [--unmatched] [--free-only | --allow-partial]   # traspasos entre tus cuentas: cargo ↔ abono
 myinvestor transfers [-a …] [--from … --to … | --days …] | --scheduled | --ref REF   # transferencias emitidas y programadas
 myinvestor interest [-a …]                        # remuneración: tipo, TAE, intereses brutos, retención y neto de la última liquidación
-myinvestor holds                                  # saldo retenido (p. ej. por órdenes en curso)
+myinvestor holds                                  # saldo retenido (p. ej. por órdenes en curso); importe negativo, como un cargo
 myinvestor balance-history [--from 2026-01-01]    # saldo diario total del efectivo
 myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|year|type|account] [-a …] [--free-only] [--allow-partial]   # intereses, dividendos, retenciones y comisiones
 
@@ -88,7 +88,7 @@ myinvestor fund-transfers [-a ID] [--pension] [--since 2026-01-01 --until …] |
 myinvestor pensions                               # planes de pensiones
 myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year]
 myinvestor contributions [--all] [--new]          # aportaciones periódicas
-myinvestor upcoming [--days 14] [--owner me|junior|other]   # lo que viene: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre
+myinvestor upcoming [--days 14] [--owner me|junior|other] [--future-only]   # lo que viene: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre
 myinvestor snapshot [--save DIR] [--previous FILE] [--no-new] [--no-mark]   # todo lo anterior en un JSON, con el delta (aportado/mercado)
 myinvestor summary [--from-file FILE] [--previous FILE]   # la misma foto, en tablas
 myinvestor fund IE0032126645 [--full]             # ficha del fondo (o del plan: `fund N1234`)
@@ -133,12 +133,14 @@ En la tabla, `movements` muestra `fecha`, `valor_fecha`, `cuenta`, `tipo`, `conc
 | `sentido` | `flowType` | `IN` / `OUT` |
 | `clase` | `operationClass` | |
 | `origen`, `destino` | `operationOriginLabel`, `operationTargetLabel` | tal cual vienen; en un «CARGO POR TRANSFERENCIA» `destino` es el beneficiario |
-| `contraparte` | — | `destino` en cargos y `origen` en abonos; `null` si viene vacío (en los SEPA entrantes muchas veces solo hay concepto) |
+| `contraparte` | — | `destino` en cargos y `origen` en abonos; `null` si viene vacío; en las transferencias recibidas de otros bancos, siempre (ver abajo) |
 | `operacion_ref` | `operationRef` | campo de ancho fijo compartido por el cargo y el abono de una misma transferencia; se exporta sin interpretar (ver [Traspasos internos](#traspasos-internos)) |
 | `fichero_ref` | `fileRef` | |
 | `pareja_id` | — | `id` del otro lado si el movimiento es un traspaso entre tus cuentas; si no, `null` |
 | `traspaso_interno` | — | `true` en los dos lados de un traspaso entre tus cuentas |
 | `beneficiario`, `iban_destino` | `nameDestination`, `ibanDestination` de la [transferencia emitida](#transferencias-emitidas-y-programadas-transfers) | **solo con `--details`**; en un cargo que es una transferencia emitida desde esa cuenta; si no, `null` |
+
+**Transferencias recibidas de otros bancos.** La API no expone el ordenante (ni nombre ni IBAN) de los abonos que llegan de otra entidad, SEPA o inmediatos, así que `origen`, `destino` y `contraparte` van a `null`: no se puede distinguir una transferencia desde una cuenta tuya en otro banco de un ingreso de un tercero. Las transferencias entre tus cuentas de MyInvestor sí se detectan, emparejando los dos lados (`internal-transfers`, `traspaso_interno`).
 
 Lo que la API no trae sale como `null` (vacío en CSV); el CLI no rellena nada por su cuenta.
 
@@ -224,15 +226,24 @@ Con `--include-cash` el saldo de las cuentas de efectivo (todas, como en `positi
 | `transferencia` | transferencias programadas o periódicas que aún se van a ejecutar (ver [`transfers --scheduled`](#transferencias-emitidas-y-programadas-transfers)); `producto` es el beneficiario | `startDate` y las siguientes según `periodicity`, hasta `endDate` (estimadas: sin festivos) |
 | `retencion` | `holds` de cada cuenta de efectivo que no casan con ninguna orden (ver abajo); `producto` es un texto legible («retención por orden de inversión») y el `type` de MyInvestor va en `tipo_retencion` | hoy |
 
-Cada fila lleva `{fecha, tipo, producto, importe, cuenta_cargo, retenido, disponible, disponible_tras, falta, tipo_retencion}` (la tabla no muestra `tipo_retencion`). `importe` va con signo, como en `movements`: lo que sale de la cuenta es negativo (una venta en curso, positiva). La cuenta de cargo de una aportación se busca por su `fromAccountId` y, si no casa, por el alias; la de una orden es la cuenta de efectivo asociada a su cuenta de valores o de pensiones. Si no se encuentra, `cuenta_cargo` muestra el alias que da MyInvestor y las columnas de saldo van vacías.
+Cada fila lleva `{fecha, tipo, producto, importe, cuenta_cargo, retenido, disponible, disponible_tras, falta, tipo_retencion, estado}` (la tabla no muestra `tipo_retencion`). `importe` va con signo, como en `movements`: lo que sale de la cuenta es negativo (una venta en curso, positiva). La cuenta de cargo de una aportación se busca por su `fromAccountId` y, si no casa, por el alias; la de una orden es la cuenta de efectivo asociada a su cuenta de valores o de pensiones. Si no se encuentra, `cuenta_cargo` muestra el alias que da MyInvestor y las columnas de saldo van vacías.
 
 **Órdenes y retenciones.** Una retención solo trae cuenta, `type` e importe, sin referencia a la orden. Por eso cada retención `INVESTMENT_ORDER` se empareja, una a una, con una orden en curso de la misma cuenta de cargo y el mismo importe (`cash` o `amountToBlock`), y las dos salen en una sola fila: la de la orden, con `retenido: true`. Las retenciones que no casan con ninguna orden siguen saliendo como `retencion`.
 
 **Regla del disponible.** `disponible` es el disponible actual de la cuenta de cargo, que MyInvestor ya da descontando lo retenido; y el dinero de una orden en curso queda retenido (o cargado) al darla. Por eso las retenciones y las órdenes se listan pero **no** se restan otra vez: `disponible_tras` solo acumula, por cuenta y en orden de fecha, lo que aún no se ha cargado (las aportaciones y las transferencias programadas). Si baja de cero, `falta` dice cuánto no cubre la cuenta y se avisa en stderr (`-q` lo silencia; el código de salida sigue siendo 0). Con `--owner` solo se ven las filas cargadas a cuentas de ese tipo.
 
+**`estado`: programada o en curso.** Las órdenes en curso suelen tener fecha de hoy o de días pasados, y también salen en `orders` (y en `pending.orders` de `snapshot`). Para que no parezcan eventos futuros, cada fila dice en qué punto está:
+
+| `estado` | Filas | `fecha` | ¿Resta en `disponible_tras`? |
+|---|---|---|---|
+| `programada` | `aportacion` y `transferencia`: todavía no ha pasado nada | hoy o después | sí |
+| `en_curso` | `orden` (con o sin su retención) y `retencion`: ya iniciadas, sin liquidar | la de la orden (hoy o pasada); hoy en las retenciones | no: ya están descontadas del disponible |
+
+No hay estado `vencida`. Una aportación o transferencia con la fecha ya pasada nunca se lista, porque sus ejecuciones estimadas empiezan hoy. Y una orden en curso con fecha de hace unos días es lo normal hasta que se liquida, así que sigue `en_curso`. **`--future-only`** deja solo las `programada`, sin órdenes ni retenciones; `disponible_tras`, `falta` y el aviso no cambian, porque lo que está en curso nunca restaba. Para sumar lo que viene sin contar dos veces lo que ya está en `orders`/`holds`, suma solo las `programada`.
+
 `upcoming` pide además las transferencias emitidas de cada cuenta (una petición por cuenta) para sacar las programadas.
 
-`upcoming` también va, con los próximos 14 días y las transferencias programadas, en la sección `upcoming` de [`snapshot`](#foto-diaria-snapshot-y-summary).
+`upcoming` también va, con los próximos 14 días y las transferencias programadas, en la sección `upcoming` de [`snapshot`](#foto-diaria-snapshot-y-summary), con todas las filas y su `estado`. Allí las `en_curso` son las mismas órdenes y retenciones de `pending`, así que para no contarlas dos veces se suman solo las `programada` (ver [docs/snapshot.md](docs/snapshot.md#lo-que-viene-programada-y-en_curso)).
 
 ### Foto diaria: `snapshot` y `summary`
 

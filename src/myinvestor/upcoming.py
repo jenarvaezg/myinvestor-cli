@@ -16,6 +16,13 @@ same amount, one to one. The pair is a single row: the order's, with `retenido` 
 unpaired keep their own row.
 
 `importe` is signed like a movement: charges are negative, money coming in (a sale) positive.
+
+`estado`. What has not happened yet (contributions due and scheduled transfers, always dated from today
+on) is `programada`; what already started and is not settled (orders in progress and holds, often dated
+in the past) is `en_curso`. Only `programada` rows lower `disponible_tras`, and the `en_curso` ones are
+also what `orders` and `holds` list, so adding up what is to come means adding up `programada` only.
+There is no `vencida`: a contribution or transfer whose date has passed is never listed (its estimated
+executions start today), and an order in progress with a past date is normal until it settles.
 """
 
 from __future__ import annotations
@@ -64,6 +71,13 @@ class Kind(StrEnum):
     contribution = "aportacion"
 
 
+class Status(StrEnum):
+    """`estado` of a row."""
+
+    scheduled = "programada"  # not started: lowers `disponible_tras`
+    in_progress = "en_curso"  # started, not settled: already out of `disponible`
+
+
 # Same day: what is already withheld first, then what is still to come.
 _KIND_RANK = {Kind.hold: 0, Kind.order: 1, Kind.transfer: 2, Kind.contribution: 3}
 
@@ -82,6 +96,11 @@ class Upcoming:
     withheld: bool = False  # a hold covers it (the hold itself, or an order paired with its hold)
     hold_type: str | None = None  # the hold's `type`, on a hold or an order paired with one
     withheld_amounts: tuple[Decimal, ...] = ()  # an order's amounts a hold for it may show (cash, amountToBlock)
+
+    @property
+    def status(self) -> Status:
+        """What is not in `enabledBalance` yet has not started; the rest is in progress."""
+        return Status.scheduled if self.pending else Status.in_progress
 
 
 @dataclass(frozen=True)
@@ -296,9 +315,16 @@ def build_rows(items: Iterable[Upcoming], accounts: Sequence[CashAccount]) -> li
                 "disponible_tras": after,
                 "falta": -after if after is not None and after < 0 else None,
                 "tipo_retencion": item.hold_type,
+                "estado": item.status.value,
             }
         )
     return rows
+
+
+def scheduled_only(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The `programada` rows (`upcoming --future-only`). Their balances stay the same: the `en_curso`
+    ones never lowered them."""
+    return [r for r in rows if r["estado"] == Status.scheduled.value]
 
 
 def shortfalls(rows: Iterable[dict[str, Any]]) -> list[Shortfall]:

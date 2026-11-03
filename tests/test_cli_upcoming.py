@@ -141,3 +141,38 @@ def test_upcoming_table(mock_api: respx.MockRouter, store: MemorySessionStore) -
     assert "2026-11-05" in result.stdout and "40,00 €" in result.stdout
     assert "retenido" in result.stdout and " sí " in result.stdout
     assert "tipo_retencion" not in result.stdout
+
+
+def test_upcoming_json_says_the_estado_of_each_row(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_everything(mock_api)
+
+    result = runner.invoke(app, ["upcoming", "-f", "json"], catch_exceptions=False)
+
+    assert [(r["tipo"], r["estado"]) for r in json.loads(result.stdout)] == [
+        ("orden", "en_curso"),  # dated yesterday, also in `orders`
+        ("orden", "en_curso"),
+        ("aportacion", "programada"),
+    ]
+
+
+def test_upcoming_future_only_leaves_out_what_already_started(
+    mock_api: respx.MockRouter, store: MemorySessionStore
+) -> None:
+    mock_everything(mock_api, contribution_amount=130.0)
+
+    result = runner.invoke(app, ["upcoming", "--future-only", "-f", "json"], catch_exceptions=False)
+
+    rows = json.loads(result.stdout, parse_float=Decimal)
+    assert [(r["tipo"], r["estado"], r["disponible_tras"], r["falta"]) for r in rows] == [
+        ("aportacion", "programada", Decimal("-30.00"), Decimal("30.00")),
+    ]
+    assert "30,00 €" in result.stderr  # the shortfall warning does not change
+    assert result.exit_code == 0
+
+
+def test_upcoming_table_shows_the_estado(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_everything(mock_api)
+
+    result = runner.invoke(app, ["--wide", "upcoming"], catch_exceptions=False)
+
+    assert "estado" in result.stdout and "en_curso" in result.stdout and "programada" in result.stdout

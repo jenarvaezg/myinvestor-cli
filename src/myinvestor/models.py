@@ -208,13 +208,22 @@ def stable_ids(account_uuid: str, flows: Sequence[Flow]) -> list[str]:
 
 
 class Hold(_Model):
-    """Money withheld on a cash account (e.g. for a pending fund order)."""
+    """Money withheld on a cash account (e.g. for a pending fund order).
+
+    `amount` is always negative, like a charge in the movements: it is money out of `enabledBalance`.
+    The API sends it negative; a response with it positive is normalised.
+    """
 
     id: str
     account_id: str | None = None
     type: str | None = None
     amount: Decimal
     currency: str = "EUR"
+
+    @field_validator("amount")
+    @classmethod
+    def _outgoing(cls, value: Decimal) -> Decimal:
+        return -abs(value)
 
 
 class SentTransfer(_Model):
