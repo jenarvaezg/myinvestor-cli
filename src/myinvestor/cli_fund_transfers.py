@@ -27,8 +27,8 @@ DEFAULT_FUND_TRANSFER_DAYS = 60  # what the web asks for
 EXTERNAL, INTERNAL = "externo", "interno"
 FROM_API, FROM_ORDERS, FROM_HISTORY = "api", "orders", "history"
 SAME_TRANSFER_DAYS = MAX_GAP_DAYS  # rows of two sources this close, same account, origin and destination: one
-# Shortest history period that reaches back N days (the API gives no more than a year).
-HISTORY_PERIODS = ((28, Period.month), (89, Period.three_months), (180, Period.six_months))
+# Shortest history period that reaches back N days; past a year, the whole history.
+HISTORY_PERIODS = ((28, Period.month), (89, Period.three_months), (180, Period.six_months), (366, Period.year))
 # The table joins each code with its name and leaves out `moneda`, `fuente` and `ref_destino`;
 # JSON and CSV export every field.
 FUND_TRANSFER_TABLE_COLUMNS = (
@@ -133,7 +133,7 @@ def _alive(orders: Iterable[Order]) -> list[Order]:
 
 def _history_period(start: date) -> Period:
     days = (date.today() - start).days
-    return next((period for reach, period in HISTORY_PERIODS if days <= reach), Period.year)
+    return next((period for reach, period in HISTORY_PERIODS if days <= reach), Period.all)
 
 
 def _same(a: dict[str, Any], b: dict[str, Any]) -> bool:

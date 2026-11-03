@@ -26,6 +26,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 
 ### Añadido
 
+- `history --period all`: la evolución desde el alta de cada posición (`groupType=SINCE_BEGINNING`, el «desde el inicio» de la web), en cuentas de valores y de pensiones. `history --from`/`--days` de más de 366 días atrás ya no es un error: pide esa serie. `fund-transfers --since` de más de un año también la usa para deducir movilizaciones (worthline#1872).
 - `--json-envelope` (o `MYINVESTOR_JSON_ENVELOPE=1`): `{"schema", "cli_version", "as_of", "data"}`; sin la opción la salida no cambia. `myinvestor schema [ORDEN] [--envelope]` imprime el JSON Schema de cada salida, generado de la misma tabla que los tests de contrato (#30).
 - `movements`: id estable de cada movimiento, `--id`, `--owner` y los campos `cuenta_id`, `cuenta_uuid`, `iban`, `sentido`, `clase`, `origen`, `destino`, `contraparte`, `operacion_ref` y `fichero_ref`; `accounts`: `tipo`, `rol`, `titular` y, en JSON, `titulares` (sin DNI) (#35).
 - Formato `-f tsv` y `--wide` (#36).

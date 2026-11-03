@@ -332,7 +332,7 @@ def history(
     account: Annotated[str | None, typer.Option("--account", "-a", help="Cuenta de valores o de pensiones.")] = None,
     period: Annotated[
         str | None,
-        typer.Option(help=f"Rango: {', '.join(PERIODS)} (la API no da más de un año). Por defecto, six_months."),
+        typer.Option(help=f"Rango: {', '.join(PERIODS)} (all: desde el alta de la posición). Por defecto, six_months."),
     ] = None,
     date_from: FromOpt = None,
     date_to: ToOpt = None,
@@ -341,8 +341,8 @@ def history(
 ) -> None:
     """Evolución diaria de cada posición: valor, invertido, rentabilidad y participaciones.
 
-    Con --from/--to/--days se pide el --period más corto que cubre el rango (la API solo da
-    un mes, tres, seis o un año hasta hoy) y se recortan las filas a esas fechas.
+    Con --from/--to/--days se pide el --period más corto que cubre el rango (la API da un mes,
+    tres, seis, un año o todo hasta hoy) y se recortan las filas a esas fechas.
 
     `invertido` es el de MyInvestor: en los fondos ya es el coste heredado en los traspasos, pero en el
     plan destino de una movilización es el dinero recibido. `coste_fiscal` usa el mismo criterio en
@@ -377,20 +377,20 @@ PERIOD_DAYS = ((Period.month, 31), (Period.three_months, 92), (Period.six_months
 
 
 def covering_period(start: date | None, today: date) -> Period:
-    """The shortest period that reaches back to `start` (six months without it)."""
+    """The shortest period that reaches back to `start` (six months without it; past a year, all)."""
     if start is None:
         return Period.six_months
     for period, days in PERIOD_DAYS:
         if (today - start).days <= days:
             return period
-    raise InputError("La API no da más de un año de evolución: --from o --days hasta 366 días atrás.")
+    return Period.all
 
 
 def _plan_history_costs(
     client: MyInvestorClient, account_id: str, series: dict[str, list[PositionPoint]], period: Period
 ) -> PlanCosts:
     """Tax costs over `series`; a shorter period starts from the adjustments the last year already shows."""
-    if period is Period.year or not series:
+    if period in (Period.year, Period.all) or not series:
         return rebuild(series)
     yearly = rebuild(client.position_history(account_id, Period.year, pension=True))
     first = min(p.date for points in series.values() for p in points)

@@ -86,12 +86,17 @@ def seg(value: str) -> str:
 
 
 class Period(StrEnum):
-    """`groupType` of the position-history endpoints. Others (ONE_WEEK, MAX…) answer 400."""
+    """`groupType` of the position-history endpoints. Others (ONE_WEEK, MAX…) answer 400.
+
+    `SINCE_BEGINNING` is the web's «desde el inicio» (its `ALL`): from the day the position opened,
+    weekly in the old part and daily in the last year.
+    """
 
     month = "ONE_MONTH"
     three_months = "THREE_MONTHS"
     six_months = "SIX_MONTHS"
     year = "ONE_YEAR"
+    all = "SINCE_BEGINNING"
 
 
 @dataclass(frozen=True)
