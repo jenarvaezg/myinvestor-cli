@@ -704,7 +704,7 @@ def test_a_self_described_output_is_not_wrapped() -> None:
 def test_every_command_with_json_output_has_a_contract() -> None:
     """A new command with `-f json` must get an entry in json_contract.CONTRACTS (and a case here)."""
     not_stdout = {"export"}  # writes files (CSV/JSON Lines and manifest.json), nothing on stdout
-    always_json = {"raw", "fund", "snapshot"}
+    not_data = {"schema"}  # prints the JSON Schemas themselves
 
     def leaves(command: Any, prefix: str = "") -> Iterator[tuple[str, Any]]:
         for name, sub in getattr(command, "commands", {}).items():
@@ -715,9 +715,32 @@ def test_every_command_with_json_output_has_a_contract() -> None:
     with_format = {
         name
         for name, command in leaves(typer.main.get_command(app))
-        if any(p.name == "fmt" for p in command.params) and name not in not_stdout
+        if any(p.name == "fmt" for p in command.params) and name not in not_stdout | not_data
     }
-    assert with_format | always_json == {c.command for c in CONTRACTS}
+    assert with_format == {c.command for c in CONTRACTS}
+
+
+# Commands without `-f`: they write files or state, or ask for credentials; none prints data on stdout.
+NO_FORMAT = frozenset(
+    {"login", "logout", "xray", "documents get", "documents summary", "state", "state mark"}
+    | {"state reset", "summary"}  # `summary` is the human-readable snapshot, never JSON
+)
+
+
+def test_every_reading_command_takes_format_json() -> None:
+    """`-f json` works everywhere it makes sense, so a script can always pass it (#75)."""
+
+    def leaves(command: Any, prefix: str = "") -> Iterator[tuple[str, Any]]:
+        for name, sub in getattr(command, "commands", {}).items():
+            yield f"{prefix}{name}", sub
+            yield from leaves(sub, f"{prefix}{name} ")
+
+    without = {
+        name
+        for name, command in leaves(typer.main.get_command(app))
+        if not any("--format" in getattr(p, "opts", ()) for p in command.params)
+    }
+    assert without == NO_FORMAT
 
 
 def test_every_variant_has_a_case() -> None:

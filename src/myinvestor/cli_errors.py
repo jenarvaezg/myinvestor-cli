@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 
 import httpx
+from typer.exceptions import TyperException
 
 from myinvestor.errors import (
     EXIT_CORRUPT_STORE,
@@ -53,18 +55,34 @@ def record_format(value: OutputFormat | None) -> OutputFormat | None:
 
 
 def error_kind(exc: BaseException) -> str:
-    """Stable snake_case id of the error (`SignatureRequired` → `signature_required`)."""
+    """Stable snake_case id of the error (`SignatureRequired` → `signature_required`); any bad option is `usage`."""
     if isinstance(exc, httpx.HTTPError):
         return "network"
+    if isinstance(exc, TyperException) and exc.exit_code == EXIT_USAGE:
+        return "usage"
     name = type(exc).__name__.removesuffix("Error") or type(exc).__name__
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
 def exit_code(exc: BaseException) -> int:
-    if isinstance(exc, MyInvestorError):
+    if isinstance(exc, MyInvestorError | TyperException):
         return exc.exit_code
     return EXIT_NETWORK if isinstance(exc, httpx.HTTPError) else EXIT_ERROR
 
 
 def json_error(exc: BaseException, message: str) -> str:
     return json.dumps({"error": error_kind(exc), "exit_code": exit_code(exc), "message": message}, ensure_ascii=False)
+
+
+def wants_json(args: Sequence[str]) -> bool:
+    """Whether the command line asks for `-f json`, read before parsing: a usage error stops the parser
+    before the `--format` callback runs."""
+    for i, arg in enumerate(args):
+        if arg == "--":
+            return False
+        if arg in ("-f", "--format"):
+            if i + 1 < len(args) and args[i + 1] == OutputFormat.json.value:
+                return True
+        elif arg in ("-fjson", "--format=json"):
+            return True
+    return False

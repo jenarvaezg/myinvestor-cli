@@ -75,7 +75,7 @@ myinvestor internal-transfers [--from … --to … | --days …] [-a Junior] [--
 myinvestor transfers [-a …] [--from … --to … | --days …] | --scheduled | --ref REF   # transferencias emitidas y programadas
 myinvestor interest [-a …] [--no-movements]       # remuneración: tipo, TAE, desglose de MyInvestor y última «LIQUIDAC. INTERESES»
 myinvestor holds                                  # saldo retenido (p. ej. por órdenes en curso); importe negativo, como un cargo
-myinvestor balance-history [--from 2026-01-01]    # saldo diario total del efectivo
+myinvestor balance-history [--from 2026-01-01 | --days 90] [--to …]   # saldo diario total del efectivo
 myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|year|type|account] [-a …] [--free-only] [--allow-partial]   # intereses, dividendos, retenciones y comisiones
 
 myinvestor holdings [-a 123456] [--kind fondos|broker] [--ter]   # posiciones: participaciones, coste, VL, valor, rentabilidad y peso
@@ -87,12 +87,12 @@ myinvestor lots [IE0032126645] [-a ID]            # lotes vivos (FIFO) de cada f
 myinvestor gains [IE0032126645] [--year 2025] [-a ID]   # plusvalías y minusvalías realizadas: reembolsos y traspasos de salida
 myinvestor fund-transfers [-a ID] [--pension] [--since 2026-01-01 --until …] | --pending   # traspasos de fondos o de planes (últimos 60 días)
 myinvestor pensions                               # planes de pensiones
-myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year]
+myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year | --days 89 | --from … --to …]
 myinvestor contributions [--all] [--new]          # aportaciones periódicas
 myinvestor upcoming [--days 14] [--owner me|junior|other] [--future-only]   # lo que viene: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre
 myinvestor snapshot [--save DIR] [--previous FILE] [--no-new] [--no-mark]   # todo lo anterior en un JSON, con el delta (aportado/mercado)
 myinvestor summary [--from-file FILE] [--previous FILE]   # la misma foto, en tablas
-myinvestor fund IE0032126645 [--full]             # ficha del fondo (o del plan: `fund N1234`)
+myinvestor fund IE0032126645 [--full] [-f table]  # ficha del fondo (o del plan: `fund N1234`); JSON por defecto
 myinvestor funds "s&p 500" [--sort ter,asc] [-n 20] [--page 0] [--asset-type variable_income --currency usd --max-ter 0.3 --risk 5-6 …]
 myinvestor fund-filters [categories|managers|currencies|asset-types|regions] [--pension]   # valores válidos de los filtros
 myinvestor pension-plans ["indexado"] [--manager …] [--asset-type …] [--max-ter 0.5] [--risk 2-4] [--rating 4] [--sort ter,asc] [-n 20] [--page 1]   # catálogo de planes
@@ -580,7 +580,7 @@ Para que un script distinga qué ha pasado sin leer el texto de error (también 
 
 `snapshot` y `summary` escriben la foto aunque falle alguna sección y salen con el peor código de las secciones, en el orden 13, 1, 2, 12; una sesión inservible (10, 11, 14) aborta sin escribir nada (ver [docs/snapshot.md](docs/snapshot.md#errores-por-sección-y-código-de-salida)).
 
-Con `-f json` el error también sale en JSON, en una sola línea de stderr: `{"error": "signature_required", "exit_code": 13, "message": "…"}` (`error` es el nombre de la excepción en snake_case sin `Error`; `network` para los errores de red).
+Con `-f json` el error también sale en JSON, en una sola línea de stderr: `{"error": "signature_required", "exit_code": 13, "message": "…"}` (`error` es el nombre de la excepción en snake_case sin `Error`; `network` para los errores de red; `usage` para una opción o un argumento mal puestos, código 2). Con `-f json` también se aceptan `fund`, `raw`, `snapshot` y `schema`, que siempre sacan JSON (`fund` admite además `-f table/csv/tsv`: una fila `campo, dato` por cada dato de la ficha). `history` acepta `--from`/`--to`/`--days`: pide el `--period` más corto que llega a esa fecha (la API solo da uno, tres, seis meses o un año hasta hoy) y recorta las filas; más de 366 días atrás es un error (#75).
 
 ### Movimientos antiguos y segundo factor
 

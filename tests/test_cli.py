@@ -364,6 +364,134 @@ def test_fund_summary_adds_price(mock_api: respx.MockRouter, store: MemorySessio
     assert data["lastPrice"]["price"] == 10.5 and data["ter"] == 0.1
 
 
+def pension_history(mock_api: respx.MockRouter, *days: str) -> respx.Route:
+    mock_api.get(f"{CPERF}/v2/pension-accounts/self").respond(200, json=ok([{"accountId": "301"}]))
+    mock_api.get(f"{CPERF}/v2/securities-accounts/self-basic").respond(200, json=ok([]))
+    points = [{"date": d, "marketValue": 1.0, "totalShares": 1.0} for d in days]
+    return mock_api.get(f"{CPERF}/v2/pension-accounts/301/positions").respond(
+        200, json=ok({"positions": {"N0001": points}})
+    )
+
+
+@pytest.mark.parametrize(
+    ("days", "group"), [("20", "ONE_MONTH"), ("89", "THREE_MONTHS"), ("120", "SIX_MONTHS"), ("300", "ONE_YEAR")]
+)
+def test_history_days_asks_for_the_shortest_period_and_trims(
+    mock_api: respx.MockRouter, store: MemorySessionStore, days: str, group: str
+) -> None:
+    """`--days N` (#75): the shortest `groupType` that covers it, and only the rows of those days."""
+    today = date.today()
+    inside, outside = today - timedelta(days=int(days) - 1), today - timedelta(days=int(days) + 1)
+    route = pension_history(mock_api, outside.isoformat(), inside.isoformat())
+
+    rows = json.loads(invoke("history", "N0001", "--days", days, "-f", "json").stdout)
+
+    assert [r["fecha"] for r in rows] == [inside.isoformat()]
+    assert route.calls.last.request.url.params["groupType"] == group
+
+
+def test_history_from_to_trims_and_rejects_period_or_more_than_a_year(
+    mock_api: respx.MockRouter, store: MemorySessionStore
+) -> None:
+    start = date.today() - timedelta(days=60)
+    days = [(start + timedelta(days=n)).isoformat() for n in (-1, 0, 10, 11)]
+    pension_history(mock_api, *days)
+
+    rows = json.loads(invoke("history", "--from", days[1], "--to", days[2], "-f", "json").stdout)
+
+    assert [r["fecha"] for r in rows] == days[1:3]
+    for args in (["--days", "10", "--period", "year"], ["--days", "400"]):
+        assert isinstance(runner.invoke(app, ["history", *args]).exception, InputError), args
+
+
+def test_balance_history_days_and_to(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    today = date.today()
+    days = [(today - timedelta(days=n)).isoformat() for n in (40, 20, 5, 0)]
+    mock_api.get(f"{CPERF}/v2/cash-accounts/historical-balance").respond(
+        200, json=ok([{"date": d, "balance": 10.0} for d in days])
+    )
+
+    last = json.loads(invoke("balance-history", "--days", "30", "-f", "json").stdout)
+    middle = json.loads(invoke("balance-history", "--days", "30", "--to", days[2], "-f", "json").stdout)
+
+    assert [r["fecha"] for r in last] == days[1:]
+    assert [r["fecha"] for r in middle] == days[1:3]
+
+
+@pytest.mark.parametrize("fmt", ["table", "csv"])
+def test_fund_takes_other_formats_as_field_value_rows(
+    mock_api: respx.MockRouter, store: MemorySessionStore, fmt: str
+) -> None:
+    mock_api.get(f"{CPERF}/v2/pension-plans/N5396").respond(
+        200,
+        json=ok({"name": "Indexado Global", "ter": 0.3, "annualizedProfitability": {"ytd": 9.5}}),
+    )
+
+    result = invoke("fund", "N5396", "-f", fmt)
+
+    assert result.exit_code == 0
+    assert "annualizedProfitability.ytd" in result.stdout and "Indexado Global" in result.stdout
+    assert "€" not in result.stdout
+
+
+def test_fund_and_json_only_commands_take_format_json(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    mock_api.get(f"{CPERF}/v2/pension-plans/N5396").respond(200, json=ok({"name": "Indexado Global"}))
+
+    assert json.loads(invoke("fund", "N5396", "-f", "json").stdout) == {"name": "Indexado Global"}
+    assert "movements" in json.loads(invoke("schema", "-f", "json").stdout)
+    assert isinstance(runner.invoke(app, ["schema", "-f", "table"]).exception, InputError)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["history", "--days", "x", "-f", "json"],
+        ["balance-history", "--nope", "-f", "json"],
+        ["--format=json", "orders", "--from"],
+        ["movements", "-fjson", "--days", "0"],
+    ],
+)
+def test_usage_errors_with_format_json_are_a_json_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], store: MemorySessionStore, args: list[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["myinvestor", *args])
+
+    with pytest.raises(SystemExit) as exited:
+        cli.main()
+
+    error = capsys.readouterr().err
+    assert exited.value.code == 2
+    assert error.count("\n") == 1
+    line = json.loads(error)
+    assert line["error"] == "usage" and line["exit_code"] == 2 and line["message"]
+
+
+def test_usage_errors_without_format_json_keep_the_box(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], store: MemorySessionStore
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["myinvestor", "history", "--nope"])
+
+    with pytest.raises(SystemExit) as exited:
+        cli.main()
+
+    assert exited.value.code == 2 and "No such option" in capsys.readouterr().err
+
+
+def test_format_json_success_exits_zero(
+    mock_api: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    store: MemorySessionStore,
+) -> None:
+    pension_history(mock_api, date.today().isoformat())
+    monkeypatch.setattr(sys, "argv", ["myinvestor", "history", "-f", "json"])
+
+    with pytest.raises(SystemExit) as exited:
+        cli.main()
+
+    assert exited.value.code == 0 and len(json.loads(capsys.readouterr().out)) == 1
+
+
 def test_not_logged_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     empty = MemorySessionStore()
     monkeypatch.setattr(cli_common, "get_store", lambda: empty)
