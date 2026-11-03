@@ -386,11 +386,18 @@ def order_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def fund_transfers_api(mock_api: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`full_api` plus a fund transfer, a pension-plan transfer and the pending counter."""
+    """`full_api` plus a fund transfer, a switch between funds, a pension-plan transfer and the pending counter."""
     full_api(mock_api, monkeypatch)
     mock_api.get(f"{CPERF}/v2/securities-accounts/201/transfers").respond(
         200, json=ok([fund_transfer("T1", TODAY.isoformat())])
     )
+    day = TODAY.isoformat()
+    legs = [
+        order("SW1", day, operationType="IIC_SWITCH_DEREGISTRATION"),
+        order("SW2", day, operationType="IIC_SWITCH_REGISTRATION", isin="IE0000000003"),
+    ]
+    mock_api.get(f"{CPERF}/v3/securities-accounts/201/orders").respond(200, json=ok(legs))
+    mock_api.get(f"{CPERF}/v2/pension-accounts/301/orders").respond(200, json=ok([]))
     mock_api.get(f"{CPERF}/v2/securities-accounts/201/transfers/pending").respond(200, json=ok({"pendingTransfers": 1}))
     mock_api.get(f"{CPERF}/v2/pension-accounts/301/transfers").respond(
         200, json=ok([pension_transfer("P1", TODAY.isoformat())])
@@ -489,7 +496,7 @@ CASES = (
         target={"Cartera": 100},
     ),
     Case("order", "", ("order", "R1", "-a", "201"), setup=order_api),
-    # `--pension` fills `origen_nombre`/`destino_nombre` (always `null` in fund transfers)
+    # `--pension` fills `destino_nombre` of the listed transfers; the switch from the orders, `ref_destino`
     Case("fund-transfers", "", ("fund-transfers",), setup=fund_transfers_api, options=("--pension",)),
     Case("fund-transfers", "--pending", ("fund-transfers", "--pending"), setup=fund_transfers_api),
     Case("lots", "", ("lots",), setup=lots_api),

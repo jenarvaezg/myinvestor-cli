@@ -682,6 +682,7 @@
   "myinvestor.fund-transfers/1": {
     "por defecto": {
       "fecha": "date|null",
+      "tipo": "string",
       "cuenta": "string",
       "origen": "string|null",
       "origen_nombre": "string|null",
@@ -692,7 +693,9 @@
       "moneda": "string|null",
       "estado": "string|null",
       "cancelable": "boolean",
-      "ref": "string"
+      "ref": "string",
+      "fuente": "string",
+      "ref_destino": "string|null"
     },
     "--pending": {
       "cuenta": "string",
