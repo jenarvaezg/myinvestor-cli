@@ -26,6 +26,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - `allocation` (reparto, TER medio y `--target`), y `peso`/`--ter` en `holdings` (#45).
 - `--new`, `--since-date`, `--since-id` y `state show|mark|reset`; `export` incremental con `manifest.json` (#47).
 - `snapshot` (un JSON diario, esquema propio `myinvestor.snapshot/1`, con `delta` aportado/mercado frente a la foto anterior, `--save DIR`, `upcoming` y errores por sección) y `summary` (la misma foto en tablas, o una guardada con `--from-file`) (#25, #33).
+- `documents` (las cinco listas de documentos), `documents get` (descarga del PDF por id, nombre o `--fiscal AÑO`, 0600, sin sobrescribir), `documents summary` (extracto de una cuenta) y `xray` (radiografías); esquema `myinvestor.documents/1` (#2).
 
 ### Cambiado
 

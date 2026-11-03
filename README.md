@@ -91,6 +91,11 @@ myinvestor raw /cperf-server/api/v2/cash-accounts/self [-p clave=valor]   # GET 
 
 myinvestor state show|mark|reset                  # estado local de --new
 myinvestor export DIR [--since 2024-01-01] [--format csv|json] [--allow-partial]   # histórico local incremental
+
+myinvestor documents [--kind fiscal|cash|securities|pension|portfolio|all]   # tus documentos en PDF
+myinvestor documents get ID|NOMBRE [-o FICHERO|DIR|-] [--latest] [--force] | --fiscal 2025   # descarga uno
+myinvestor documents summary -a "Mi cuenta" [-o …]    # extracto de una cuenta de efectivo
+myinvestor xray (--account ID | --isin ISIN | --pension ID) [-o …]   # radiografía en PDF (`--pension`, sin verificar)
 myinvestor schema [movements] [--envelope]        # JSON Schema de la salida -f json de una orden
 ```
 
@@ -487,6 +492,28 @@ Con `--format csv` (por defecto) son `.csv` con cabecera; con `--format json`, *
 - `ultimos_tramos`: la comprobación de saldos de cada tramo pedido en esta ejecución (`cuadra: null` si la respuesta no traía saldos).
 - Las cuentas que dejan de aparecer conservan su entrada.
 
+### Documentos en PDF: `documents` y `xray`
+
+```bash
+myinvestor documents                                   # id, tipo, nombre, fecha, cuenta, notificado (más recientes primero)
+myinvestor documents --kind fiscal -f json
+myinvestor documents get --fiscal 2025                 # «INFORMACIÓN FISCAL 2025.pdf» en el directorio actual
+myinvestor documents get "costes y gastos" --latest -o ~/finanzas/   # por nombre, en un directorio
+myinvestor documents get dddddddd-0000-0000-0000-000000000001 -o - | pdftotext - -   # a stdout
+```
+
+`documents` une las cinco listas de la web (`fiscal`, `cash`, `securities`, `pension` y `portfolio`). `documents get` acepta el `id` de la lista (`documentUuid`) o el nombre, sin distinguir mayúsculas ni tildes y con o sin `.pdf`: primero busca el nombre exacto y, si no hay, los que lo contienen; si coincide con varios, falla y los enumera, salvo con `--latest` (el más reciente).
+
+- **Destino**: sin `-o`, el nombre del documento en el directorio actual; con `-o DIR`, ese nombre dentro de `DIR`; con `-o FICHERO`, ese fichero; con `-o -`, stdout (el PDF se escribe entero y solo después de comprobarlo).
+- **Nunca sobrescribe** un fichero existente sin `--force` (se comprueba antes de descargar, y otra vez al final sin carreras: el fichero nuevo se enlaza, no se renombra encima).
+- **Seguridad**: los PDF contienen datos personales y fiscales (nombre, DNI, saldos, IBAN). Se escriben con **permisos 0600**, de forma atómica (temporal en el mismo directorio y enlace/renombrado; si algo falla no queda nada a medias). El nombre que da la API se sanea: sin `/`, `\`, caracteres de control ni puntos iniciales (`..`), y como mucho 200 bytes, así que no puede salirse del directorio de destino.
+- **Comprobaciones de la descarga**: solo `GET`, con las mismas cabeceras, renovación del token, reintento tras `401`, `--retry-blocked` y segundo factor que el resto de órdenes; el cuerpo no se interpreta como JSON. Se exige `content-type` `application/pdf` (o `application/octet-stream`) y que empiece por `%PDF`: una página HTML de error o un JSON nunca se guardan como documento. Se lee en streaming con un **límite de 50 MB**.
+
+**Extracto y radiografías** (rutas sacadas de la web; mismas comprobaciones; verificadas contra la API el 2026-11-03 salvo `xray --pension`):
+
+- `documents summary -a CUENTA`: extracto de una cuenta de efectivo. Pide `…/cash-accounts/{accountId}/documents/summary`, que devuelve `{id, fileName}`, y descarga `…/documents/temporary/{id}`, como hace la web.
+- `xray --account ID` (cuenta de valores), `--pension ID` (cuenta de planes) o `--isin ISIN` (fondo): la «radiografía» que la web genera al momento. Por defecto se guarda como `radiografia-cuenta-ID.pdf`, `radiografia-plan-ID.pdf` o `radiografia-fondo-ISIN.pdf`.
+
 ### Silencio, depuración y ritmo de peticiones
 
 Opciones globales (van antes de la orden: `myinvestor -q position -f json`):
@@ -585,6 +612,10 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/pension-accounts/self` · `/{id}` · `/{id}/orders?order=DATE` | planes y sus aportaciones |
 | GET | `/cperf-server/api/v2/pension-plans/{dgsCode}` | ficha del plan |
 | GET | `/cperf-server/api/v2/automatic-contributions/self` | aportaciones periódicas |
+| GET | `/cperf-server/api/v2/customers/self/documents/fiscal` · `cash-accounts/self/documents` · `securities-accounts/self/documents` · `pension-accounts/self/documents` · `portfolios/self/documents` | listas de documentos, todas con `{documentId, documentUuid, name, extension, isNotified, createDate, signDate, accountId ("" si no es de una cuenta), accountCode, accountAlias, accountType, isCurrentCustomerAnOwner}` |
+| GET | `/cperf-server/api/v2/customers/self/documents/signedes/{documentUuid}` | el PDF tal cual (`application/pdf`, no JSON) |
+| GET | `/cperf-server/api/v2/cash-accounts/{accountId}/documents/summary` | extracto: `{id, fileName}`; el PDF, en `/cperf-server/api/v2/documents/temporary/{id}` |
+| GET | `/cperf-server/api/v2/documents/{securities,pension-plans}/{accountId}/x-ray` · `/documents/funds/{isin}/x-ray` | radiografía en PDF generada al momento (`pension-plans`, sin probar); la web también conoce `/documents/broker/{accountId}/x-ray`, sin uso en la interfaz |
 | GET | `/cperf-server/api/v2/funds?page&limit&sort&mainInputFilter&…` | catálogo paginado; filtros `category`, `region`, `manager`, `assetsType`, `currency`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue`… |
 | GET | `/cperf-server/api/v2/funds/{isin}` · `/prices/last` · `/compositions` · `/graphs/{type}` | ficha, último VL |
 | GET | `/feed/api/feed/self` | `text/event-stream` con un evento `data:{…}` |

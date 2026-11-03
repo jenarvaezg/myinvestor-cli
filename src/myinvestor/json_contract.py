@@ -227,6 +227,14 @@ TRANSFER = (
     Field("match", S, True, "`key`, `heuristic` o `null` (sin pareja, con --unmatched)"),
 )
 
+DOCUMENT = (
+    Field("id", S, note="`documentUuid`: lo que admite `documents get`"),
+    Field("tipo", S, note="lista de origen: `fiscal`, `cash`, `securities`, `pension` o `portfolio`"),
+    Field("nombre", S, note="nombre que da MyInvestor (puede acabar en `.pdf` o no)"),
+    Field("fecha", D, True, "fecha de creación"),
+    Field("cuenta", S, True, "alias, código o id de la cuenta; `null` si el documento no es de una cuenta"),
+    Field("notificado", B, True),
+)
 UPCOMING = (
     Field("fecha", D),
     Field("tipo", S, note="`aportacion`, `orden` o `retencion`"),
@@ -460,6 +468,7 @@ CONTRACTS: tuple[Contract, ...] = (
     Contract("feed", 1, (_rows(*FEED),)),
     Contract("internal-transfers", 1, (_rows(*TRANSFER),)),
     Contract("upcoming", 1, (_rows(*UPCOMING),)),
+    Contract("documents", 1, (_rows(*DOCUMENT),), "Más recientes primero; con `--kind`, las mismas claves."),
     Contract(
         "income",
         1,

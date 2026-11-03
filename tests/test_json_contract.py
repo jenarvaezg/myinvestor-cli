@@ -48,6 +48,7 @@ from myinvestor.stores import MemorySessionStore
 from tests.conftest import API, CASH_UUID, CPERF, cash_account, flow, investment, ok, order, securities_account
 from tests.test_cli_transfers import JUNIOR_UUID, STAMP, junior_flows, own_flows
 from tests.test_cli_upcoming import NOW, mock_everything
+from tests.test_documents import document
 from tests.test_transfers_match import sepa_ref
 
 runner = CliRunner()
@@ -189,6 +190,16 @@ def full_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> No
     mock_api.get(f"{CPERF}/v3/customers/self").respond(200, json=ok({"name": "Ana"}))
 
 
+def documents_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tax document without account and a cash-account report with one."""
+    fiscal = document("dddddddd-0000-0000-0000-000000000001", "INFORMACIÓN FISCAL 2025")
+    report = document("dddddddd-0000-0000-0000-000000000002", "Costes y gastos 2025", accountCode="C101")
+    mock_api.get(f"{CPERF}/v2/customers/self/documents/fiscal").respond(200, json=ok([fiscal]))
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self/documents").respond(200, json=ok([report]))
+    for path in ("securities-accounts", "pension-accounts", "portfolios"):
+        mock_api.get(f"{CPERF}/v2/{path}/self/documents").respond(200, json=ok([]))
+
+
 def upcoming_api(mock_api: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) -> None:
     """A contribution the account cannot cover, so `falta` is filled."""
     monkeypatch.setattr(cli_upcoming, "now_local", lambda: NOW)
@@ -280,6 +291,7 @@ CASES = (
     Case("feed", "", ("feed",)),
     Case("internal-transfers", "", ("internal-transfers", "--unmatched")),
     Case("upcoming", "", ("upcoming",), setup=upcoming_api),
+    Case("documents", "", ("documents",), setup=documents_api),
     Case("income", "--by month | --by year", ("income",)),
     Case("income", "--by type", ("income", "--by", "type")),
     Case("income", "--by account", ("income", "--by", "account")),
@@ -526,7 +538,9 @@ def test_every_command_with_json_output_has_a_contract() -> None:
 
     def leaves(command: Any, prefix: str = "") -> Iterator[tuple[str, Any]]:
         for name, sub in getattr(command, "commands", {}).items():
-            yield from leaves(sub, f"{prefix}{name} ") if hasattr(sub, "commands") else [(f"{prefix}{name}", sub)]
+            yield f"{prefix}{name}", sub  # a group too: `documents` lists from its own callback
+            if hasattr(sub, "commands"):
+                yield from leaves(sub, f"{prefix}{name} ")
 
     with_format = {
         name

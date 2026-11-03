@@ -315,6 +315,21 @@ Salida: lista de objetos.
 | `falta` | number (€, 2 decimales) | sí | sí | lo que no cubre la cuenta; `null` si lo cubre |
 | `tipo_retencion` | string | sí | sí | `type` de la retención |
 
+### `documents` — `myinvestor.documents/1`
+
+Más recientes primero; con `--kind`, las mismas claves.
+
+Salida: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `id` | string | no | sí | `documentUuid`: lo que admite `documents get` |
+| `tipo` | string | no | sí | lista de origen: `fiscal`, `cash`, `securities`, `pension` o `portfolio` |
+| `nombre` | string | no | sí | nombre que da MyInvestor (puede acabar en `.pdf` o no) |
+| `fecha` | date `AAAA-MM-DD` | sí | sí | fecha de creación |
+| `cuenta` | string | sí | sí | alias, código o id de la cuenta; `null` si el documento no es de una cuenta |
+| `notificado` | boolean | sí | sí |  |
+
 ### `income` — `myinvestor.income/1`
 
 La última fila es el total.

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -18,6 +19,7 @@ import httpx
 from myinvestor import envelope
 from myinvestor.auth import Authenticator, Relogin
 from myinvestor.config import API_BASE
+from myinvestor.documents import Document, DocumentKind, TemporaryDocument, XrayTarget
 from myinvestor.errors import (
     ApiError,
     MyInvestorError,
@@ -52,6 +54,13 @@ FUND_PAGE_SIZE = 50
 SIGNATURE_PREFIX = "/signature/api/"
 SIGNER_METHODS = frozenset({"GET", "POST"})
 BLOCKED_BACKOFF = (30.0, 120.0, 300.0)  # waits before each retry after an Imperva block; then the last again
+DOCUMENT_LISTS = {
+    DocumentKind.fiscal: f"{CPERF}/v2/customers/self/documents/fiscal",
+    DocumentKind.cash: f"{CPERF}/v2/cash-accounts/self/documents",
+    DocumentKind.securities: f"{CPERF}/v2/securities-accounts/self/documents",
+    DocumentKind.pension: f"{CPERF}/v2/pension-accounts/self/documents",
+    DocumentKind.portfolio: f"{CPERF}/v2/portfolios/self/documents",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -182,27 +191,36 @@ class MyInvestorClient:
         *,
         headers: Mapping[str, str] | None = None,
         blocked_retries: int = 0,
+        stream: bool = False,
         **kwargs: Any,
     ) -> httpx.Response:
+        """`stream`: a 200 body is left unread for the caller (binary downloads); any other is read."""
         refreshed = False
         if self._session.is_expired():
             logger.debug("token caducado: renovando la sesión")
             self.refresh()
             refreshed = True
         url = f"{API_BASE}/{path.lstrip('/')}"
-        response = self._request(method, url, headers, blocked_retries, **kwargs)
+        response = self._request(method, url, headers, blocked_retries, stream=stream, **kwargs)
         if response.status_code == 401 and not refreshed and (self._session.can_refresh() or self._relogin):
             logger.debug("HTTP 401: renovando la sesión")
             self.refresh()
-            response = self._request(method, url, headers, blocked_retries, **kwargs)
+            response = self._request(method, url, headers, blocked_retries, stream=stream, **kwargs)
         raise_for_response(response)
         return response
 
     def _request(
-        self, method: str, url: str, headers: Mapping[str, str] | None, blocked_retries: int, **kwargs: Any
+        self,
+        method: str,
+        url: str,
+        headers: Mapping[str, str] | None,
+        blocked_retries: int,
+        *,
+        stream: bool = False,
+        **kwargs: Any,
     ) -> httpx.Response:
         """One request; with `blocked_retries`, an Imperva block is waited out and repeated."""
-        response = self._http.request(method, url, headers=self._headers(headers), **kwargs)
+        response = self._fetch(method, url, headers, stream, **kwargs)
         for attempt in range(blocked_retries):
             if not _is_waf_block(response):
                 break
@@ -215,7 +233,18 @@ class MyInvestorClient:
                 wait,
             )
             self._sleep(wait)
-            response = self._http.request(method, url, headers=self._headers(headers), **kwargs)
+            response = self._fetch(method, url, headers, stream, **kwargs)
+        return response
+
+    def _fetch(
+        self, method: str, url: str, headers: Mapping[str, str] | None, stream: bool, **kwargs: Any
+    ) -> httpx.Response:
+        if not stream:
+            return self._http.request(method, url, headers=self._headers(headers), **kwargs)
+        request = self._http.build_request(method, url, headers=self._headers(headers), **kwargs)
+        response = self._http.send(request, stream=True)
+        if response.status_code != 200:
+            response.read()  # errors, Imperva pages and signature requests are small and inspected as text
         return response
 
     def _call(self, method: str, path: str, *, params: Any = None) -> Any:
@@ -241,6 +270,35 @@ class MyInvestorClient:
         if response.status_code == 202:
             raise SignatureError("MyInvestor sigue pidiendo firma tras aprobarla.")
         return body
+
+    def _open_binary(self, method: str, path: str, *, params: Any = None) -> httpx.Response:
+        """Like `_call` (read-only guard, Imperva retries, second factor) but the 200 body stays unread."""
+        if method != "GET":
+            raise MyInvestorError(f"Petición no permitida en un cliente de solo lectura: {method} {path}")
+        response = self._send(method, path, params=params, blocked_retries=self._retry_blocked, stream=True)
+        if response.status_code != 202:
+            return response
+        request = parse_signature_request(envelope.data(envelope.decode(response)))
+        if request is None or not request.is_pending:
+            raise ApiError(202, "respuesta 202 inesperada (sin firma pendiente)", path)
+        self._signer_factory(self._signer_call).complete(request, self._ui)
+        response = self._send(method, path, headers={SIGNATURE_HEADER: request.id}, params=params, stream=True)
+        if response.status_code == 202:
+            raise SignatureError("MyInvestor sigue pidiendo firma tras aprobarla.")
+        return response
+
+    @contextlib.contextmanager
+    def stream(self, path: str, params: Any = None) -> Iterator[httpx.Response]:
+        """GET whose body is not JSON (PDFs): yields the open response, unread and never cached; closed on exit.
+
+        Same headers, token refresh, 401 retry, Imperva retries and second factor as `get`. The caller
+        reads the body (see `documents.pdf_chunks`, which checks it and caps its size).
+        """
+        response = self._open_binary("GET", path, params=params)
+        try:
+            yield response
+        finally:
+            response.close()
 
     def _signer_call(self, method: str, path: str, *, params: Any = None, json: Any = None) -> Any:
         """The only non-GET requests this client sends: starting/validating a second factor."""
@@ -374,6 +432,29 @@ class MyInvestorClient:
             total=pagination.get("totalElements"),
             last=bool(pagination.get("last", True)),
         )
+
+    # ---- documents (PDF) ----------------------------------------------------
+
+    def documents(self, kinds: Iterable[DocumentKind] = tuple(DocumentKind)) -> list[Document]:
+        """The document lists of `kinds` (all five by default), in that order."""
+        return [Document.from_api(row, kind) for kind in kinds for row in self._list(DOCUMENT_LISTS[kind])]
+
+    def document_pdf(self, document_uuid: str) -> contextlib.AbstractContextManager[httpx.Response]:
+        return self.stream(f"{CPERF}/v2/customers/self/documents/signedes/{seg(document_uuid)}")
+
+    def xray_pdf(self, target: XrayTarget, key: str) -> contextlib.AbstractContextManager[httpx.Response]:
+        """Portfolio «x-ray» generated on the fly: account id or fund ISIN (`pension`: unverified)."""
+        return self.stream(f"{CPERF}/v2/documents/{target.value}/{seg(key)}/x-ray")
+
+    def account_summary(self, account_id: str) -> TemporaryDocument:
+        """Asks for a cash-account statement; the PDF is then `temporary_document_pdf(id)`."""
+        data = self.get_data(f"{CPERF}/v2/cash-accounts/{seg(account_id)}/documents/summary")
+        if not isinstance(data, dict) or not data.get("id"):
+            raise ApiError(200, "respuesta de extracto inesperada (sin id)", "documents/summary")
+        return TemporaryDocument.model_validate(data)
+
+    def temporary_document_pdf(self, file_id: str) -> contextlib.AbstractContextManager[httpx.Response]:
+        return self.stream(f"{CPERF}/v2/documents/temporary/{seg(file_id)}")
 
     def feed(self) -> list[FeedItem]:
         data = self.get_data("/feed/api/feed/self")

@@ -12,7 +12,7 @@ import contextlib
 import fcntl
 import os
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 
@@ -47,3 +47,43 @@ def write_atomic(path: Path, text: str, *, prefix: str = ".tmp-") -> None:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp)
         raise
+
+
+def write_new_atomic(path: Path, chunks: Iterable[bytes], *, overwrite: bool = False, prefix: str = ".tmp-") -> int:
+    """Write `chunks` to `path` (0600) through a temporary file; returns the bytes written.
+
+    Without `overwrite` an existing `path` is never replaced, not even one that appears while
+    writing (`FileExistsError`). If `chunks` raises, nothing is left behind.
+    """
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=prefix, suffix=".tmp")  # unique, 0600
+    size = 0
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            for chunk in chunks:
+                fh.write(chunk)
+                size += len(chunk)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if overwrite:
+            os.replace(tmp, path)
+        else:
+            _link_new(tmp, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+        raise
+    return size
+
+
+def _link_new(tmp: str, path: Path) -> None:
+    """Move `tmp` to `path` only if `path` does not exist: a hard link fails instead of clobbering."""
+    try:
+        os.link(tmp, path)
+    except FileExistsError:
+        raise
+    except OSError:  # no hard links here (exFAT, some network mounts): check, then rename
+        if path.exists():
+            raise FileExistsError(path) from None
+        os.replace(tmp, path)
+        return
+    os.unlink(tmp)
