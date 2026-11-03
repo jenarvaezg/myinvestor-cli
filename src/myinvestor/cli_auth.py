@@ -11,7 +11,7 @@ import typer
 
 from myinvestor.auth import Authenticator
 from myinvestor.browser_login import DEFAULT_LOGIN_TIMEOUT, browser_login
-from myinvestor.cli_common import app, build_client, err, get_store, local_time, signature_ui, stdin_is_tty
+from myinvestor.cli_common import app, build_client, err, fatal, get_store, local_time, signature_ui, stdin_is_tty
 from myinvestor.errors import InputError, NotLoggedInError, SessionExpiredError
 from myinvestor.http import build_http_client
 from myinvestor.session import Session, new_device_id
@@ -140,7 +140,7 @@ def status() -> None:
         raise NotLoggedInError()
     remembered = bool(session.customer_id and store.load_password(session.customer_id))
     if not session.can_refresh() and session.is_expired() and not remembered:
-        err.print(f"[yellow]Sesión caducada[/yellow] (dispositivo {session.device_id}). Ejecuta `myinvestor login`.")
+        fatal.print(f"[yellow]Sesión caducada[/yellow] (dispositivo {session.device_id}). Ejecuta `myinvestor login`.")
         raise typer.Exit(SessionExpiredError.exit_code)
     with build_client(store) as client:
         customer = client.customer()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import socket
 from collections.abc import Iterator
@@ -14,6 +15,7 @@ import pytest
 import respx
 
 from myinvestor.http import build_http_client
+from myinvestor.output import notices
 from myinvestor.session import Session
 
 API = "https://api.myinvestor.es"
@@ -173,6 +175,17 @@ def _no_myinvestor_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _isolated_dirs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
         monkeypatch.setenv(var, str(tmp_path / var.lower()))
+
+
+@pytest.fixture(autouse=True)
+def _reset_cli_verbosity() -> Iterator[None]:
+    """`-q`/`-v` configure the process-wide `myinvestor` logger and stderr console: undo it per test."""
+    logger = logging.getLogger("myinvestor")
+    level, handlers = logger.level, list(logger.handlers)
+    yield
+    logger.setLevel(level)
+    logger.handlers[:] = handlers
+    notices.quiet = False
 
 
 @pytest.fixture

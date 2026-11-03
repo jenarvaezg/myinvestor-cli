@@ -18,9 +18,10 @@ from myinvestor.cli_errors import EXIT_CODES_HELP, record_format
 from myinvestor.client import MyInvestorClient, ensure_session
 from myinvestor.errors import InputError, SignatureError
 from myinvestor.http import build_http_client
-from myinvestor.output import OutputFormat, set_wide
+from myinvestor.output import OutputFormat, notices, set_wide
 from myinvestor.signature import DEFAULT_APPROVAL_TIMEOUT, Challenge, SignatureRequest, SignatureUI, Signer
 from myinvestor.stores import SessionStore, StoreKind, resolve_store
+from myinvestor.verbosity import configure as configure_verbosity
 
 # Never render locals in tracebacks: frames hold the password and tokens.
 app = typer.Typer(
@@ -29,7 +30,8 @@ app = typer.Typer(
     epilog=EXIT_CODES_HELP,
     pretty_exceptions_show_locals=False,
 )
-err = Console(stderr=True)
+err = notices  # informative messages: silenced by --quiet
+fatal = Console(stderr=True)  # errors: shown even with --quiet
 
 FormatOpt = Annotated[
     OutputFormat,
@@ -43,6 +45,8 @@ class _GlobalOptions:
     path: Path | None = None
     approval_timeout: float = DEFAULT_APPROVAL_TIMEOUT
     approve: bool = False
+    min_interval: float = 0.0
+    retry_blocked: int = 0
 
 
 options = _GlobalOptions()
@@ -79,8 +83,38 @@ def _global_options(
         bool,
         typer.Option("--wide", envvar="MYINVESTOR_WIDE", help="Tablas a todo lo ancho, una línea por fila."),
     ] = False,
+    quiet: Annotated[
+        bool,
+        typer.Option("--quiet", "-q", envvar="MYINVESTOR_QUIET", help="Solo errores en stderr (para cron)."),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Una línea por petición en stderr (método, ruta, status, ms), sin tokens ni contraseñas.",
+        ),
+    ] = False,
+    min_interval: Annotated[
+        float,
+        typer.Option(min=0, envvar="MYINVESTOR_MIN_INTERVAL", help="Segundos mínimos entre peticiones."),
+    ] = 0.0,
+    retry_blocked: Annotated[
+        int,
+        typer.Option(
+            min=0,
+            envvar="MYINVESTOR_RETRY_BLOCKED",
+            help="Si Imperva bloquea una consulta (GET), esperar (30 s, 2 min, 5 min…) y reintentarla hasta N veces. "
+            "Nunca se repiten login, refresh ni firmas.",
+        ),
+    ] = 0,
 ) -> None:
     set_wide(wide)
+    if quiet and verbose:
+        raise InputError("Usa --quiet o --verbose, no ambos.")
+    configure_verbosity(quiet=quiet, verbose=verbose)
+    options.min_interval = min_interval
+    options.retry_blocked = retry_blocked
     options.kind = store
     options.path = store_path
     options.approval_timeout = approval_timeout
@@ -138,7 +172,7 @@ def build_client(store: SessionStore | None = None) -> MyInvestorClient:
     loaded = store.load()
     can_relogin = bool(loaded and loaded.customer_id and store.load_password(loaded.customer_id))
     session = ensure_session(loaded, can_relogin=can_relogin)
-    http = build_http_client()
+    http = build_http_client(min_interval=options.min_interval)
     ui = signature_ui()
     return MyInvestorClient(
         session,
@@ -147,6 +181,8 @@ def build_client(store: SessionStore | None = None) -> MyInvestorClient:
         signature_ui=ui,
         signer_factory=partial(Signer, timeout=options.approval_timeout),
         relogin=stored_password_relogin(Authenticator(http), store, ui) if can_relogin else None,
+        retry_blocked=options.retry_blocked,
+        cache=True,
     )
 
 

@@ -39,6 +39,9 @@ TEXT_MIN_WIDTH = 6
 UNLIMITED_WIDTH = 10_000
 _LINE_BREAKS = re.compile(r"[\t\r\n]+")
 
+# Informative messages on stderr (never stdout); `--quiet` silences them.
+notices = Console(stderr=True)
+
 
 class OutputFormat(StrEnum):
     table = "table"
@@ -99,7 +102,8 @@ def render(rows: Sequence[dict[str, Any]], fmt: OutputFormat, *, title: str | No
         print(dumps([normalize_row(r) for r in rows]))
         return
     if not rows:
-        Console(stderr=True).print("[dim]Sin resultados[/dim]")
+        if fmt is OutputFormat.table:  # JSON already printed `[]`; empty CSV/TSV is the result
+            notices.print("[dim]Sin resultados[/dim]")
         return
     columns = list(rows[0].keys())
     if fmt is OutputFormat.csv:

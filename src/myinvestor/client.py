@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import copy
 import logging
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -22,6 +24,7 @@ from myinvestor.errors import (
     NotLoggedInError,
     SessionExpiredError,
     SignatureError,
+    _is_waf_block,
     raise_for_response,
 )
 from myinvestor.http import build_http_client
@@ -46,6 +49,7 @@ CPERF = "/cperf-server/api"
 FUND_PAGE_SIZE = 50
 SIGNATURE_PREFIX = "/signature/api/"
 SIGNER_METHODS = frozenset({"GET", "POST"})
+BLOCKED_BACKOFF = (30.0, 120.0, 300.0)  # waits before each retry after an Imperva block; then the last again
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +95,13 @@ class MyInvestorClient:
         signature_ui: SignatureUI | None = None,
         signer_factory: Callable[..., Signer] = Signer,
         relogin: Relogin | None = None,
+        retry_blocked: int = 0,
+        cache: bool = False,
+        sleep: Callable[[float], None] | None = None,
     ) -> None:
+        """`retry_blocked`: times to wait (`BLOCKED_BACKOFF`) and repeat a data GET blocked by Imperva.
+        `cache`: answer identical GETs (same path and params) from memory for the life of this client.
+        """
         if not session.access_token:
             raise NotLoggedInError()
         self._relogin = relogin
@@ -102,6 +112,9 @@ class MyInvestorClient:
         self._auth = Authenticator(self._http)
         self._ui = signature_ui
         self._signer_factory = signer_factory
+        self._retry_blocked = max(retry_blocked, 0)
+        self._sleep = sleep or time.sleep  # resolved per instance, so tests can patch `time`
+        self._cache: dict[tuple[str, str], Any] | None = {} if cache else None
 
     @property
     def session(self) -> Session:
@@ -137,6 +150,7 @@ class MyInvestorClient:
         except SessionExpiredError:
             if self._relogin is None:
                 raise
+            logger.debug("refresh imposible: re-login con la contraseña guardada")
             self._session = self._relogin(self._session)
         if self._store:
             try:
@@ -160,32 +174,67 @@ class MyInvestorClient:
         return {**headers, **(extra or {})}
 
     def _send(
-        self, method: str, path: str, *, headers: Mapping[str, str] | None = None, **kwargs: Any
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        blocked_retries: int = 0,
+        **kwargs: Any,
     ) -> httpx.Response:
         refreshed = False
         if self._session.is_expired():
+            logger.debug("token caducado: renovando la sesión")
             self.refresh()
             refreshed = True
         url = f"{API_BASE}/{path.lstrip('/')}"
-        response = self._http.request(method, url, headers=self._headers(headers), **kwargs)
+        response = self._request(method, url, headers, blocked_retries, **kwargs)
         if response.status_code == 401 and not refreshed and (self._session.can_refresh() or self._relogin):
+            logger.debug("HTTP 401: renovando la sesión")
             self.refresh()
-            response = self._http.request(method, url, headers=self._headers(headers), **kwargs)
+            response = self._request(method, url, headers, blocked_retries, **kwargs)
         raise_for_response(response)
         return response
 
-    def _call(self, method: str, path: str, **kwargs: Any) -> Any:
+    def _request(
+        self, method: str, url: str, headers: Mapping[str, str] | None, blocked_retries: int, **kwargs: Any
+    ) -> httpx.Response:
+        """One request; with `blocked_retries`, an Imperva block is waited out and repeated."""
+        response = self._http.request(method, url, headers=self._headers(headers), **kwargs)
+        for attempt in range(blocked_retries):
+            if not _is_waf_block(response):
+                break
+            wait = BLOCKED_BACKOFF[min(attempt, len(BLOCKED_BACKOFF) - 1)]
+            logger.warning(
+                "Imperva ha bloqueado la petición (HTTP %d): reintento %d/%d dentro de %.0f s.",
+                response.status_code,
+                attempt + 1,
+                blocked_retries,
+                wait,
+            )
+            self._sleep(wait)
+            response = self._http.request(method, url, headers=self._headers(headers), **kwargs)
+        return response
+
+    def _call(self, method: str, path: str, *, params: Any = None) -> Any:
         if method != "GET":
             raise MyInvestorError(f"Petición no permitida en un cliente de solo lectura: {method} {path}")
-        response = self._send(method, path, **kwargs)
+        key = (path, str(httpx.QueryParams(params)))
+        if self._cache is not None and key in self._cache:
+            logger.debug("%s %s (caché)", method, path)
+            return copy.deepcopy(self._cache[key])
+        retries = 0 if path.startswith(SIGNATURE_PREFIX) else self._retry_blocked
+        response = self._send(method, path, params=params, blocked_retries=retries)
         body = envelope.decode(response)
         if response.status_code != 202:
+            if self._cache is not None:
+                self._cache[key] = copy.deepcopy(body)
             return body
         request = parse_signature_request(envelope.data(body))
         if request is None or not request.is_pending:
             raise ApiError(202, "respuesta 202 inesperada (sin firma pendiente)", path)
         self._signer_factory(self._signer_call).complete(request, self._ui)
-        response = self._send(method, path, headers={SIGNATURE_HEADER: request.id}, **kwargs)
+        response = self._send(method, path, headers={SIGNATURE_HEADER: request.id}, params=params)
         body = envelope.decode(response)
         if response.status_code == 202:
             raise SignatureError("MyInvestor sigue pidiendo firma tras aprobarla.")
