@@ -84,10 +84,8 @@ myinvestor orders [--all | --from 2025-01-01 --to …] [--status EXECUTED] [--pe
 myinvestor orders --pension --from 2026-01-01        # aportaciones a planes en el año (límite fiscal: 1.500 € individuales)
 myinvestor order REF [-a ID] [--pension]         # una orden con su ejecución: VL, participaciones, comisiones, retenciones, neto y resultado fiscal
 myinvestor lots [IE0032126645] [-a ID]            # lotes vivos (FIFO) de cada fondo: coste, valor y plusvalía latente
-myinvestor gains [IE0032126645] [--year 2025] [-a ID]   # plusvalías y minusvalías realizadas: reembolsos y traspasos de salida
 myinvestor fund-transfers [-a ID] [--pension] [--since 2026-01-01 --until …] | --pending   # traspasos de fondos o de planes, internos y externos (últimos 60 días)
 myinvestor gains [IE0032126645] [--year 2025] [-a ID]   # plusvalías y minusvalías realizadas: reembolsos, traspasos de salida y ventas del bróker
-myinvestor fund-transfers [-a ID] [--pension] [--since 2026-01-01 --until …] | --pending   # traspasos de fondos o de planes (últimos 60 días)
 myinvestor pensions [--fiscal]                    # planes de pensiones
 myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year | --days 89 | --from … --to …]
 myinvestor contributions [--all] [--new]          # aportaciones periódicas
@@ -767,11 +765,9 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | `pensions` | 1 + P; `--fiscal`: + P |
 | `upcoming` | 4 + 2·C + 2·V + P (C: con `--owner`, solo las de ese tipo; por cuenta, retenciones y transferencias emitidas) |
 | `snapshot`, `summary` | 4 + 3·C + 2·V + 3·P + L (`summary --from-file`: 0) |
-| `fund-transfers` | 1 + V (también con `--pending`); con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
 | `accounts`, `transfers` | 1 + C (`accounts`: C con `--owner`, solo las de ese tipo) |
 | `interest` | 1 + C + R (R: las cuentas con remuneración, sus movimientos de los últimos 90 días); `--no-movements`: 1 + C |
 | `fund-transfers` | 1 + 2V (lista de traspasos y órdenes de cada una); con `-a`: 1 + V + 2 × las elegidas; `--pending`: 1 + V (con `-a`, 1 + V + las elegidas); `--pension`: 1 + 3P (lista, órdenes y evolución de cada una) |
-| `accounts`, `transfers`, `interest` | 1 + C (`accounts`: C con `--owner`, solo las de ese tipo) |
 | `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V. Con un `--period` que no sea `year`, + 1 por cuenta de pensiones (su año, para `coste_fiscal`) |
 | `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
 | `fund-history` | 2 (la serie y la ficha, para la moneda) |
