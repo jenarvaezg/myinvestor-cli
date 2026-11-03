@@ -69,6 +69,7 @@ myinvestor position                               # efectivo + cuentas de valore
 myinvestor accounts [--owner me|junior|other]     # cuentas de efectivo: tipo, tu rol, titular, disponible, retenido, saldo
 myinvestor movements [-a "Mi cuenta"] [--from 2026-10-01 --to 2026-10-31 | --days 60] [-s nómina] [--oldest-first] [--owner me|junior|other] [--free-only] [--allow-partial]
 myinvestor movements --id <id> [--from … | --days …]   # un solo movimiento, con todos sus campos
+myinvestor movements --new [--no-mark] [--state PATH] | --since-date 2026-11-01 | --since-id <id>   # solo lo nuevo
 myinvestor internal-transfers [--from … --to … | --days …] [-a Junior] [--unmatched] [--free-only | --allow-partial]   # traspasos entre tus cuentas: cargo ↔ abono
 myinvestor holds                                  # saldo retenido (p. ej. por órdenes en curso)
 myinvestor balance-history [--from 2026-01-01]    # saldo diario total del efectivo
@@ -76,15 +77,17 @@ myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|ye
 
 myinvestor holdings [-a 123456] [--kind fondos|broker] [--ter]   # posiciones: participaciones, coste, VL, valor, rentabilidad y peso
 myinvestor allocation [--by asset|geo|category|product|account] [--include-cash] [--target objetivo.json]   # reparto de la cartera y TER medio
-myinvestor orders [--all | --from 2025-01-01 --to …] [--status EXECUTED] [--pension]
+myinvestor orders [--all | --from 2025-01-01 --to …] [--status EXECUTED] [--pension] [--new]
 myinvestor pensions                               # planes de pensiones
 myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year]
-myinvestor contributions [--all]                  # aportaciones periódicas
+myinvestor contributions [--all] [--new]          # aportaciones periódicas
 myinvestor upcoming [--days 14] [--owner me|junior|other]   # lo que viene: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre
 myinvestor fund IE0032126645 [--full]             # ficha del fondo (o del plan: `fund N1234`)
 myinvestor funds "s&p 500" [--sort ter,asc] [-n 20] [--page 0]
 myinvestor feed [-n 20]                           # «Actividad» de la web
 myinvestor raw /cperf-server/api/v2/cash-accounts/self [-p clave=valor]   # GET arbitrario
+
+myinvestor state show|mark|reset                  # estado local de --new
 ```
 
 ### Formatos de salida
@@ -115,7 +118,7 @@ En la tabla, `movements` muestra `fecha`, `valor_fecha`, `cuenta`, `tipo`, `conc
 
 Lo que la API no trae sale como `null` (vacío en CSV); el CLI no rellena nada por su cuenta.
 
-**`id`**: no cambia entre ejecuciones ni entre rangos de fechas, así que sirve para saber qué movimientos son nuevos desde la última vez.
+**`id`**: no cambia entre ejecuciones ni entre rangos de fechas, así que sirve para saber qué movimientos son nuevos desde la última vez (ver [Solo lo nuevo](#solo-lo-nuevo---new---since-date-y---since-id)).
 
 - Con `reference` (el caso normal): `{cuenta_uuid}:{reference}`. `reference` es un contador **por cuenta** (se repite entre cuentas), por eso va con el uuid delante.
 - Sin `reference`: `{cuenta_uuid}:h` + los 16 primeros caracteres hexadecimales del sha256 de `cuenta_uuid|fecha|valor_fecha|importe|concepto|tipo|operacion_ref` (sin el saldo).
@@ -362,7 +365,7 @@ Para que un script distinga qué ha pasado sin leer el texto de error (también 
 | 10 | Contraseña rechazada (la guardada se ha borrado) o cambio de contraseña obligatorio | `InvalidCredentialsError`, `StoredPasswordRejectedError`, `PasswordChangeRequired` |
 | 11 | Sin sesión, o caducada sin forma de renovarla (incluido el re-login en pausa) | `NotLoggedInError`, `SessionExpiredError`, `ReloginBlockedError` |
 | 12 | Red, WAF (Imperva) o MyInvestor caído: reintentable | `NetworkBlockedError`, errores de `httpx`, `ApiError` 5xx tras los reintentos |
-| 13 | Hace falta un segundo factor que no se puede dar sin terminal, `login --direct --start` ha enviado el código, o `movements` ha devuelto solo una parte (ver abajo) | `SignatureRequired`, `SignatureCodeRequired`, `WrongCodeError`, `SignatureError`, `PartialResultError` |
+| 13 | Hace falta un segundo factor que no se puede dar sin terminal, `login --direct --start` ha enviado el código, o `movements` o `income` han devuelto solo una parte (ver abajo) | `SignatureRequired`, `SignatureCodeRequired`, `WrongCodeError`, `SignatureError`, `PartialResultError` |
 | 14 | Sesión guardada corrupta | `CorruptStoreError`, `CorruptKeyringError` |
 
 Con `-f json` el error también sale en JSON, en una sola línea de stderr: `{"error": "signature_required", "exit_code": 13, "message": "…"}` (`error` es el nombre de la excepción en snake_case sin `Error`; `network` para los errores de red).
@@ -385,6 +388,39 @@ myinvestor movements --free-only --from 2025-01-01 -f csv                       
 myinvestor --approve movements --from 2025-01-01 -f json                             # todo, aprobando en la app
 ```
 
+### Solo lo nuevo: `--new`, `--since-date` y `--since-id`
+
+Para una revisión diaria (cron, un agente) que solo debe enseñar lo que ha cambiado desde la vez anterior:
+
+```bash
+myinvestor movements --new -f json                 # movimientos que no salieron en el anterior --new
+myinvestor orders --new                            # órdenes nuevas o que han cambiado de estado (IN_PROGRESS → EXECUTED)
+myinvestor orders --pension --new                  # lo mismo con las de planes de pensiones
+myinvestor contributions --new                     # aportaciones nuevas o con otro estado o próxima fecha (= se ha ejecutado)
+myinvestor movements --since-date 2026-11-01       # posteriores al 1 de noviembre (sin incluirlo)
+myinvestor movements --since-id "<id>"             # posteriores a ese movimiento, en su cuenta
+```
+
+**`--new`** guarda un estado local en `$XDG_STATE_HOME/myinvestor/seen.json` (por defecto `~/.local/state/myinvestor/seen.json`; fichero 0600, directorio 0700, escritura atómica con `flock` como la sesión). Otra ruta con `--state PATH` o `MYINVESTOR_STATE`.
+
+- **Movimientos**: por cuenta, el último día consultado y los `id` ya mostrados. La siguiente vez pide desde ese día **menos 3 días** (hay movimientos que aparecen con unos días de retraso) hasta hoy, y solo saca los `id` que no ha visto. Los `id` con fecha anterior a ese inicio ya no se van a volver a pedir, así que se borran del estado: el fichero no crece sin fin. La primera vez (cuenta sin estado) pide los últimos 30 días, o `--from`/`--days`.
+- **Nunca sale de la ventana sin firma**: si el estado de una cuenta es más antiguo que los últimos 90 días (la rutina lleva tiempo sin ejecutarse), se consulta desde el inicio de la ventana y se avisa en stderr de que lo anterior no se ha revisado (pídelo a mano con `--from`). Tampoco la primera vez: un `--from`/`--days` más antiguo se recorta y se avisa.
+- **Órdenes** (`orders --new`, `orders --pension --new`): se guarda `ref → estado`; sale una orden si su `ref` es nueva o su estado ha cambiado. Se aplica a lo que devolvería `orders` con las mismas opciones (sin fechas, las recientes; `--status` filtra antes de comparar).
+- **Aportaciones** (`contributions --new`): se guarda `id → {estado, proxima}`; sale si es nueva o ha cambiado su estado o su próxima fecha (cuando se ejecuta, la próxima fecha avanza).
+- `--new` no se combina con `--to`, `--search`, `--id`, `--since-date` ni `--since-id` en `movements`: el estado avanza hasta hoy y filtrar dejaría movimientos sin enseñar que ya no se volverían a pedir.
+
+**Leer sin perder nada**: por defecto lo mostrado queda marcado como visto (`--mark-seen`). Con `--no-mark` se muestra pero queda **pendiente**, y se confirma después con `myinvestor state mark [movements|orders|pension_orders|contributions]`; así, si la rutina falla a medias, la siguiente ejecución lo vuelve a sacar:
+
+```bash
+myinvestor movements --new --no-mark -f json > nuevos.json && procesar nuevos.json && myinvestor state mark movements
+```
+
+`myinvestor state show` resume el estado (por cuenta: último día, `id` vistos y pendientes; con `-f json`, el fichero completo) y `myinvestor state reset [tipo]` lo borra (todo, o solo un tipo): la siguiente vez con `--new` todo sale como nuevo. `state reset` también sirve si el fichero está corrupto.
+
+**`--since-date AAAA-MM-DD`**: movimientos con `fecha` (de operación) **posterior** a ese día; equivale a `--from` del día siguiente. No se combina con `--from`/`--days`.
+
+**`--since-id ID`**: los movimientos de la cuenta de ese `id` que van **después** de él. «Después» es el orden cronológico del listado: primero por `fecha` (de operación) y, el mismo día, por `ref` (el contador de MyInvestor, por cuenta) y luego por `id`. El movimiento se busca, como con `--id`, en el rango de `--from`/`--days` (por defecto, los últimos 30 días); si no está, error de uso (o 13 si falta un tramo que pide firma). Limitación: un movimiento que se apunte más tarde con una `fecha` anterior no sale; para eso está `--new`, con su margen de 3 días.
+
 ### Silencio, depuración y ritmo de peticiones
 
 Opciones globales (van antes de la orden: `myinvestor -q position -f json`):
@@ -404,7 +440,7 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 |---|---|
 | `accounts`, `balance-history`, `contributions`, `funds`, `feed`, `raw`, `status` | 1 |
 | `position` | 3 + V |
-| `movements`, `holds` | 1 + C |
+| `movements`, `holds` | 1 + C (`movements --new`: igual; `--since-id`: 1 + 1) |
 | `holdings` | 1 + V (también con `-a`: se leen todas para resolverla); `--ter`: + F |
 | `allocation` | 2 + V + P + F; con `--by asset` o `category`: + D; con `--include-cash`: + 1 |
 | `orders` | 1 + V; con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |

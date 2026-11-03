@@ -188,7 +188,7 @@ Un re-login que pide código y falla con 13 no toca la contraseña ni pausa nada
 
 ## Script de ejemplo
 
-`~/bin/myinvestor-diario.sh` (`chmod 700`): guarda en JSON la posición, los movimientos de la última semana y lo que viene en los próximos 14 días (`upcoming`: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre); reintenta los errores de red y avisa según el código de salida. Solo usa lo que ya existe: `status --offline`, `position`, `movements --free-only`, `upcoming` y `doctor`. Ninguna de esas órdenes pide segundo factor (`movements` con `--free-only` no sale de la ventana de 90 días).
+`~/bin/myinvestor-diario.sh` (`chmod 700`): guarda en JSON la posición, los movimientos nuevos desde la ejecución anterior y lo que viene en los próximos 14 días (`upcoming`: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre); reintenta los errores de red y avisa según el código de salida. Usa `status --offline`, `position`, `movements --new`, `state mark`, `upcoming` y `doctor`. Ninguna de esas órdenes pide segundo factor (`movements --new` nunca sale de la ventana de 90 días).
 
 ```bash
 #!/usr/bin/env bash
@@ -262,8 +262,11 @@ fetch position "$DATA/posicion-$day.json" position -f json
 react position $?
 case $first_error in 10 | 11 | 13 | 14) exit "$first_error" ;; esac
 
-fetch movements "$DATA/movimientos-$day.json" movements --free-only --days 7 -f json
-react movements $?
+# Solo lo que no salió la vez anterior; se marca como visto cuando ya está guardado.
+fetch movements "$DATA/movimientos-$(date +%F-%H%M).json" movements --new --no-mark -f json
+rc=$?
+[[ $rc -ne 0 ]] || mi state mark movements || rc=$?
+react movements $rc
 
 fetch upcoming "$DATA/proximo-$day.json" upcoming --days 14 -f json   # sale con 0 aunque falte saldo
 react upcoming $?
@@ -275,7 +278,7 @@ log "fin: código $first_error"
 exit "$first_error"
 ```
 
-Los movimientos de varios días se solapan a propósito: su `id` es estable entre ejecuciones y rangos, así que se pueden juntar sin duplicados (ver [Movimientos: campos e id](../README.md#movimientos-campos-e-id)). En `proximo-*.json`, una fila con `falta` distinto de `null` es una aportación que la cuenta de cargo no cubre: el script puede avisar con ella. Próximamente habrá órdenes pensadas para esto (una foto que se guarda sola, solo los movimientos nuevos, exportación); este script se podrá simplificar entonces.
+Cada `movimientos-*.json` lleva solo lo que no salió en la ejecución anterior (la primera vez, los últimos 30 días). Con `--no-mark` + `state mark movements` se marca como visto solo cuando ya está guardado: si algo falla por el camino, la siguiente ejecución lo vuelve a sacar; y si la máquina pasa unos días apagada, pide desde el último día consultado (menos 3 de margen), sin salir de la ventana de 90 días (ver [Solo lo nuevo](../README.md#solo-lo-nuevo---new---since-date-y---since-id)). El `id` de cada movimiento es estable, así que los ficheros se pueden juntar sin duplicados (ver [Movimientos: campos e id](../README.md#movimientos-campos-e-id)). `orders --new` y `contributions --new` hacen lo mismo con las órdenes que cambian de estado y las aportaciones que se ejecutan. En `proximo-*.json`, una fila con `falta` distinto de `null` es una aportación que la cuenta de cargo no cubre: el script puede avisar con ella.
 
 ## Logs sin secretos y rotación
 
