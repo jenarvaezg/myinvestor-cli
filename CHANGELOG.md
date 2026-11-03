@@ -8,7 +8,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 
 ### Esquemas JSON
 
-- Primera versión del contrato: todas las órdenes con `-f json` pasan a `myinvestor.<orden>/1` con las claves y tipos de [docs/json.md](docs/json.md); `raw` y `fund` (respuesta de la API tal cual) van con `myinvestor.raw/1`, que solo garantiza el envoltorio, y la línea de error de stderr es `myinvestor.error/1`. En 0.1.0 no había contrato.
+- Primera versión del contrato: todas las órdenes con `-f json` pasan a `myinvestor.<orden>/1` con las claves y tipos de [docs/json.md](docs/json.md); `raw` y `fund` (respuesta de la API tal cual) van con `myinvestor.raw/1`, que solo garantiza el envoltorio, y la línea de error de stderr es `myinvestor.error/1`. `snapshot` lleva su propio `schema` (`myinvestor.snapshot/1`) y nunca va en el envoltorio. En 0.1.0 no había contrato.
 
 ### Añadido
 
@@ -25,6 +25,7 @@ Los cambios de cada versión de `myinvestor`. El formato sigue [Keep a Changelog
 - `upcoming`: aportaciones, órdenes en curso y retenciones contra el disponible (#44).
 - `allocation` (reparto, TER medio y `--target`), y `peso`/`--ter` en `holdings` (#45).
 - `--new`, `--since-date`, `--since-id` y `state show|mark|reset`; `export` incremental con `manifest.json` (#47).
+- `snapshot` (un JSON diario, esquema propio `myinvestor.snapshot/1`, con `delta` aportado/mercado frente a la foto anterior, `--save DIR`, `upcoming` y errores por sección) y `summary` (la misma foto en tablas, o una guardada con `--from-file`) (#25, #33).
 
 ### Cambiado
 

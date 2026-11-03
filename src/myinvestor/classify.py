@@ -44,6 +44,10 @@ class Category(StrEnum):
     otros = "otros"
 
 
+# What a cash account earns or pays for holding money and securities (not money moved in or out).
+INCOME_CATEGORIES = frozenset({Category.intereses, Category.dividendos, Category.retencion, Category.comision})
+
+
 @dataclass(frozen=True)
 class KeywordRule:
     category: Category

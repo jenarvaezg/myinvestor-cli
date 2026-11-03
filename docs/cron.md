@@ -1,6 +1,6 @@
 # Uso desatendido: cron y systemd
 
-Cómo montar una rutina diaria fiable (una foto de la posición, los movimientos recientes…) en un Linux sin escritorio. Todo lo que aparece aquí existe en el CLI actual; los detalles de cada opción están en el [README](../README.md).
+Cómo montar una rutina diaria fiable (una foto diaria con `snapshot --save`, el histórico con `export`…) en un Linux sin escritorio. Todo lo que aparece aquí existe en el CLI actual; los detalles de cada opción están en el [README](../README.md).
 
 Resumen:
 
@@ -86,7 +86,7 @@ Por qué no:
 
 ## Zona horaria
 
-El CLI usa la zona del proceso para «hoy»: el final por defecto de los rangos (`--to`), `--days`, la ventana de 90 días sin firma (`--free-only` recorta a hoy − 89) y la hora de `consultado_en` en `position`/`holdings`. Si el servidor está en UTC, una ejecución a las 00:30 en Madrid cree que todavía es ayer. Pon `TZ=Europe/Madrid` en el entorno del job.
+El CLI usa la zona del proceso para «hoy»: el final por defecto de los rangos (`--to`), `--days`, la ventana de 90 días sin firma (`--free-only` recorta a hoy − 89) la hora de `consultado_en` en `position`/`holdings` y la de `as_of` en `snapshot`, que decide también el nombre de su fichero (`AAAA-MM-DD.json`). Si el servidor está en UTC, una ejecución a las 00:30 en Madrid cree que todavía es ayer. Pon `TZ=Europe/Madrid` en el entorno del job.
 
 Ojo: en un crontab, `TZ=…` llega al entorno del comando, pero que el **horario** de la línea se interprete en esa zona depende de la implementación de cron (cronie, por ejemplo, admite `CRON_TZ=`). Si no estás seguro, escribe la hora en la zona del sistema o usa el timer de systemd, que admite la zona en `OnCalendar`.
 
@@ -177,6 +177,8 @@ Con `-f json`, además del código, el error sale en **una línea JSON en stderr
 | 13 | `signature_required`, `partial_result`, `signature`… | hace falta un segundo factor que no se puede dar sin terminal (sin SMS enviado ni notificación), o `movements`/`income`/`internal-transfers` han devuelto solo una parte | si fallaba el re-login: avisar para hacer `myinvestor login --direct --start` y luego `--code` (o el login en una terminal). Si es `partial_result`: lo de stdout está incompleto; usa `--free-only` en el cron |
 | 14 | `corrupt_store`, `corrupt_keyring` | sesión guardada corrupta | avisar; `myinvestor doctor`, borrar el fichero y repetir el login |
 
+`snapshot` tiene su propia regla: escribe la foto aunque falle alguna sección (la sección va a `errors`) y sale con el peor código de las secciones (13, 1, 2, 12, en ese orden); un problema de sesión (10, 11, 14, o 13 al entrar) aborta sin escribir nada. Ver [docs/snapshot.md](snapshot.md#errores-por-sección-y-código-de-salida).
+
 Un re-login que pide código y falla con 13 no toca la contraseña ni pausa nada: cada ejecución volverá a intentarlo (un login sin SMS) y saldrá con 13 hasta que lo resuelvas.
 
 ## Qué esperar de la sesión
@@ -188,7 +190,7 @@ Un re-login que pide código y falla con 13 no toca la contraseña ni pausa nada
 
 ## Script de ejemplo
 
-`~/bin/myinvestor-diario.sh` (`chmod 700`): guarda en JSON la posición, los movimientos nuevos desde la ejecución anterior y lo que viene en los próximos 14 días (`upcoming`: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre); reintenta los errores de red y avisa según el código de salida. Usa `status --offline`, `position`, `movements --new`, `state mark`, `upcoming`, `export` y `doctor`. Ninguna de esas órdenes pide segundo factor (`movements --new` nunca sale de la ventana de 90 días, y `export` sin firma deja anotado lo que falte).
+`~/bin/myinvestor-diario.sh` (`chmod 700`): guarda la foto del día con `snapshot --save` (posición, cartera, planes, órdenes en curso, retenciones, lo que viene en 14 días, lo nuevo desde la ejecución anterior y la variación frente a la foto anterior, separando aportado y mercado: ver [docs/snapshot.md](snapshot.md)), reintenta los errores de red, marca lo nuevo como visto solo cuando ya está guardado, deja un resumen en texto, avisa si una aportación no tiene saldo y según el código de salida. Usa `status --offline`, `snapshot`, `state mark`, `summary`, `export` y `doctor`. Ninguna de esas órdenes pide segundo factor (`snapshot` nunca sale de la ventana de 90 días, y `export` sin firma deja anotado lo que falte).
 
 ```bash
 #!/usr/bin/env bash
@@ -212,27 +214,6 @@ day=$(date +%F)
 first_error=0
 mkdir -p "$DATA"
 
-# fetch NOMBRE DESTINO ARGS…: deja stdout en DESTINO solo si sale con 0; reintenta 12 dos veces.
-fetch() {
-  local name=$1 dest=$2 rc attempt
-  shift 2
-  for attempt in 1 2 3; do
-    mi --retry-blocked 2 "$@" >"$dest.tmp" 2>"$dest.err"
-    rc=$?
-    [[ $rc -eq 12 && $attempt -lt 3 ]] || break
-    log "$name: red, Imperva o MyInvestor no disponible (12); reintento en 5 min"
-    sleep 300
-  done
-  if [[ $rc -eq 0 ]]; then
-    mv "$dest.tmp" "$dest"
-  else
-    rm -f "$dest.tmp"
-    log "$name: código $rc: $(tail -n 1 "$dest.err")"   # con -f json, la línea JSON del error
-  fi
-  rm -f "$dest.err"
-  return "$rc"
-}
-
 # react NOMBRE CÓDIGO: qué hacer con cada código de salida.
 react() {
   local name=$1 rc=$2
@@ -241,7 +222,7 @@ react() {
     10) notify "$name: MyInvestor ha rechazado la contraseña guardada (ya borrada) o exige cambiarla. Repite 'myinvestor login --direct --remember' en una terminal." ;;
     11) notify "$name: sin sesión renovable (¿re-login en pausa? mira 'myinvestor status --offline'). Repite 'myinvestor login --direct --remember'." ;;
     12) notify "$name: red, Imperva o MyInvestor caído tras los reintentos; lo intentará la próxima ejecución." ;;
-    13) notify "$name: MyInvestor pide un segundo factor. En una terminal: 'myinvestor login --direct --start' y luego 'myinvestor login --direct --code <código>'." ;;
+    13) notify "$name: MyInvestor pide un segundo factor (para entrar, o en alguna sección de la foto: mira su 'errors'). Si es el login, en una terminal: 'myinvestor login --direct --start' y luego 'myinvestor login --direct --code <código>'." ;;
     14) notify "$name: sesión guardada corrupta: 'myinvestor doctor', bórrala y repite el login." ;;
     *) notify "$name: error $rc; 'myinvestor doctor' para diagnosticar." ;;
   esac
@@ -257,34 +238,48 @@ if [[ $rc -ne 0 ]]; then
   exit "$first_error"
 fi
 
-# 2. Datos. Si falla la sesión (10, 11, 13, 14), no sigue: el resto fallaría igual.
-fetch position "$DATA/posicion-$day.json" position -f json
-react position $?
-case $first_error in 10 | 11 | 13 | 14) exit "$first_error" ;; esac
+# 2. La foto del día: $DATA/fotos/AAAA-MM-DD.json, con el delta frente a la última anterior.
+#    Si falla una sección, el resto se guarda igual y el código es el peor de las secciones.
+#    Reintenta dos veces si el peor es un error de red (12); con --no-mark, lo nuevo vuelve a salir.
+out="$DATA/.snapshot.json"
+for attempt in 1 2 3; do
+  mi --retry-blocked 2 snapshot --save "$DATA/fotos" --no-mark >"$out" 2>"$out.err"
+  rc=$?
+  [[ $rc -eq 12 && $attempt -lt 3 ]] || break
+  log "snapshot: red, Imperva o MyInvestor no disponible (12); reintento en 5 min"
+  sleep 300
+done
+[[ $rc -eq 0 ]] || log "snapshot: código $rc: $(tail -n 1 "$out.err")"   # una línea JSON con el error
+saved=0
+if [[ -s $out ]]; then             # con algo en stdout, la foto ya está guardada (aunque falle una sección)
+  saved=1
+  mi state mark || log "state mark: no se ha podido marcar lo nuevo; saldrá otra vez en la próxima foto"
+  mi --wide summary --from-file "$DATA/fotos/$day.json" >"$DATA/resumen-$day.txt" 2>&1
+  # notify "$(cat "$DATA/resumen-$day.txt")"   # o envía el resumen por tu canal
+  if command -v jq >/dev/null; then  # aportaciones que la cuenta de cargo no cubre
+    jq -r '.upcoming[]? | select(.falta != null) | "falta \(.falta) € en \(.cuenta_cargo) para \(.producto) el \(.fecha)"' "$out" |
+      while read -r line; do notify "$line"; done
+  fi
+fi
+rm -f "$out" "$out.err"
+react snapshot "$rc"
+# Sin foto por un problema de sesión (10, 11, 13 al entrar, 14), lo demás fallaría igual.
+case $rc in 10 | 11 | 14) exit "$first_error" ;; 13) [[ $saved -eq 1 ]] || exit "$first_error" ;; esac
 
-# Solo lo que no salió la vez anterior; se marca como visto cuando ya está guardado.
-fetch movements "$DATA/movimientos-$(date +%F-%H%M).json" movements --new --no-mark -f json
-rc=$?
-[[ $rc -ne 0 ]] || mi state mark movements || rc=$?
-react movements $rc
-
-fetch upcoming "$DATA/proximo-$day.json" upcoming --days 14 -f json   # sale con 0 aunque falte saldo
-react upcoming $?
-
-# Histórico local en CSV: solo añade lo nuevo (la primera vez, hazla a mano en una terminal).
+# 3. Histórico local en CSV: solo añade lo nuevo (la primera vez, hazla a mano en una terminal).
 mi --retry-blocked 2 export "$DATA/historico" --allow-partial
 react export $?
 
-# 3. Un error sin clasificar: deja el diagnóstico en el log.
+# 4. Un error sin clasificar: deja el diagnóstico en el log.
 [[ $first_error -ne 1 ]] || mi doctor >&2
 
 log "fin: código $first_error"
 exit "$first_error"
 ```
 
-Cada `movimientos-*.json` lleva solo lo que no salió en la ejecución anterior (la primera vez, los últimos 30 días). Con `--no-mark` + `state mark movements` se marca como visto solo cuando ya está guardado: si algo falla por el camino, la siguiente ejecución lo vuelve a sacar; y si la máquina pasa unos días apagada, pide desde el último día consultado (menos 3 de margen), sin salir de la ventana de 90 días (ver [Solo lo nuevo](../README.md#solo-lo-nuevo---new---since-date-y---since-id)). El `id` de cada movimiento es estable, así que los ficheros se pueden juntar sin duplicados (ver [Movimientos: campos e id](../README.md#movimientos-campos-e-id)). `orders --new` y `contributions --new` hacen lo mismo con las órdenes que cambian de estado y las aportaciones que se ejecutan.
+Cada `fotos/AAAA-MM-DD.json` es una foto completa (esquema `myinvestor.snapshot/1`) y lleva en `delta` la variación frente a la anterior: `total`, `aportado` (dinero que ha entrado o salido de MyInvestor) y `mercado`, también por producto. Si la máquina pasa unos días apagada, el delta de la siguiente ejecución es frente a la última foto que haya, sea de cuando sea (el del efectivo, solo si es de los últimos 89 días). En `new` va solo lo que no salió en la ejecución anterior: movimientos (la primera vez, los últimos 30 días), órdenes nuevas o con otro estado y órdenes de planes. Con `--no-mark` + `state mark` se marca como visto solo cuando ya está guardado: si algo falla por el camino, la siguiente ejecución lo vuelve a sacar (ver [Solo lo nuevo](../README.md#solo-lo-nuevo---new---since-date-y---since-id)). El `id` de cada movimiento es estable, así que las fotos se pueden juntar sin duplicados (ver [Movimientos: campos e id](../README.md#movimientos-campos-e-id)). Para leer una sin `jq`: `myinvestor summary --from-file fotos/2026-11-04.json`.
 
-`export` mantiene en `$DATA/historico` un histórico completo (movimientos, órdenes, aportaciones, cartera y cuentas) al que cada ejecución solo añade filas nuevas. La primera vez pide todo lo anterior a los últimos 90 días, con una aprobación en la app por cuenta: hazla una vez a mano en una terminal (`myinvestor export ~/myinvestor-datos/historico`). Desde cron, con `MYINVESTOR_NO_SIGNATURE=1`, nunca pide firma: si un día falta algo que la necesita (p. ej. tras más de 90 días sin ejecutarse), queda como hueco en `historico/manifest.json` y `--allow-partial` evita que salga con 13 (ver [Exportar el histórico](../README.md#exportar-el-histórico-export)). En `proximo-*.json`, una fila con `falta` distinto de `null` es una aportación que la cuenta de cargo no cubre: el script puede avisar con ella.
+`export` mantiene en `$DATA/historico` un histórico completo (movimientos, órdenes, aportaciones, cartera y cuentas) al que cada ejecución solo añade filas nuevas. La primera vez pide todo lo anterior a los últimos 90 días, con una aprobación en la app por cuenta: hazla una vez a mano en una terminal (`myinvestor export ~/myinvestor-datos/historico`). Desde cron, con `MYINVESTOR_NO_SIGNATURE=1`, nunca pide firma: si un día falta algo que la necesita (p. ej. tras más de 90 días sin ejecutarse), queda como hueco en `historico/manifest.json` y `--allow-partial` evita que salga con 13 (ver [Exportar el histórico](../README.md#exportar-el-histórico-export)).
 
 ## Logs sin secretos y rotación
 

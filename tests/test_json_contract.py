@@ -16,7 +16,7 @@ import re
 import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -195,6 +195,51 @@ def upcoming_api(mock_api: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) ->
     mock_everything(mock_api, contribution_amount=130.0)
 
 
+TODAY = date.today()
+YESTERDAY = TODAY - timedelta(days=1)
+# a saved snapshot of yesterday that saw none of today's movements, so every key of `delta` is filled
+PREVIOUS_SNAPSHOT = {
+    "schema": "myinvestor.snapshot/1",
+    "as_of": f"{YESTERDAY.isoformat()}T09:00:00+01:00",
+    "total": 2000.0,
+    "cash": [{"id": "101", "alias": "Mi cuenta", "saldo": 500.0}, {"id": "102", "alias": "Junior", "saldo": 50.0}],
+    "securities": [{"id": "201", "nombre": "Cartera", "valor": 800.0, "invertido": 750.0}],
+    "pensions": [{"id": "301", "nombre": "P301", "valor": 650.0, "invertido": 600.0}],
+    "movements": {"desde": (YESTERDAY - timedelta(days=3)).isoformat(), "huecos": [], "movimientos": []},
+}
+
+
+def snapshot_api(mock_api: respx.MockRouter, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`full_api` plus a pension order in progress paired with the hold and a contribution the account cannot cover."""
+    full_api(mock_api, monkeypatch)
+    pension = {"accountId": "301", "externalAccountCode": "P301", "cashAccountId": "101", "marketValue": 700.0}
+    mock_api.get(f"{CPERF}/v2/pension-accounts/self").respond(
+        200, json=ok([{**pension, "totalInvested": 600.0, "profit": 100.0, "totalReturn": 16.67}])
+    )
+    in_progress = order(
+        "p1",
+        TODAY.isoformat(),
+        securitiesAccountId=None,
+        pensionAccountId="301",
+        isin=None,
+        dgsCode="N0001",
+        fundName="Plan",
+        status="IN_PROGRESS",
+        cash=25.0,
+    )
+    mock_api.get(f"{CPERF}/v2/pension-accounts/301/orders").respond(200, json=ok([in_progress]))
+    due = {
+        **CONTRIBUTION,
+        "amount": 5000,
+        "fromAccountId": "101",
+        "contributionTimeFrame": {
+            "recurrence": "ONE_MONTH",
+            "nextExecutionDate": (TODAY + timedelta(days=2)).isoformat(),
+        },
+    }
+    mock_api.get(f"{CPERF}/v2/automatic-contributions/self").respond(200, json=ok([due]))
+
+
 # ---- one case per variant of every contract ------------------------------------------------------
 
 
@@ -205,7 +250,7 @@ class Case:
     argv: tuple[str, ...]
     setup: Callable[[respx.MockRouter, pytest.MonkeyPatch], None] = full_api
     options: tuple[str, ...] = ()  # what adds the `only_with` keys (`{target}`: a target file)
-    target: dict[str, int] = field(default_factory=dict)
+    target: dict[str, Any] = field(default_factory=dict)
     always_null: frozenset[str] = frozenset()  # nullable keys the synthetic data cannot fill
     with_format: bool = True  # append `-f json`
 
@@ -274,6 +319,19 @@ CASES = (
     ),
     Case("doctor", "", ("doctor", "--offline")),
     Case("state show", "", ("state", "show", "--state", "{tmp}/seen.json")),
+    Case(
+        "snapshot",
+        "",
+        ("snapshot", "--previous", "{target}"),
+        setup=snapshot_api,
+        target=PREVIOUS_SNAPSHOT,
+        with_format=False,
+        # a successful snapshot has no gaps nor errors
+        always_null=frozenset(
+            {f"movements.huecos[].{k}" for k in ("cuenta_id", "cuenta", "desde", "hasta")}
+            | {f"errors[].{k}" for k in ("section", "error", "exit_code", "message")}
+        ),
+    ),
     Case("raw", "", ("raw", "/feed/api/x"), with_format=False),
     Case("fund", "", ("fund", FUND), with_format=False),
 )
@@ -413,6 +471,10 @@ def test_envelope_wraps_the_output_with_its_schema(
 
     doc = run_json(argv(case, tmp_path, options=False, envelope=True))
 
+    if not contract.enveloped:  # it already carries its own `schema`
+        assert doc["schema"] == contract.schema_id
+        check_data(doc, contract, variant_of(contract, case.variant), set(), set())
+        return
     assert list(doc) == [f.name for f in ENVELOPE]
     assert doc["schema"] == contract.schema_id
     assert doc["cli_version"] == package_version()
@@ -452,7 +514,7 @@ def test_error_line_follows_its_contract_and_is_never_wrapped(
 
 
 def test_a_self_described_output_is_not_wrapped() -> None:
-    """Outputs that carry their own `schema` (`error`, and e.g. a future `snapshot`) stay as they are."""
+    """Outputs that carry their own `schema` (`error`, `snapshot`) stay as they are."""
     json_envelope.configure(enabled=True, command=ERROR_LINE.command)
     assert json_envelope.wrap({"error": "x"}) == {"error": "x"}
 
@@ -460,7 +522,7 @@ def test_a_self_described_output_is_not_wrapped() -> None:
 def test_every_command_with_json_output_has_a_contract() -> None:
     """A new command with `-f json` must get an entry in json_contract.CONTRACTS (and a case here)."""
     not_stdout = {"export"}  # writes files (CSV/JSON Lines and manifest.json), nothing on stdout
-    always_json = {"raw", "fund"}
+    always_json = {"raw", "fund", "snapshot"}
 
     def leaves(command: Any, prefix: str = "") -> Iterator[tuple[str, Any]]:
         for name, sub in getattr(command, "commands", {}).items():

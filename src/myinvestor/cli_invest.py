@@ -15,7 +15,7 @@ from myinvestor.cli_common import FormatOpt, app, build_client, iso_moment, now_
 from myinvestor.cli_state import MarkOpt, StateOpt, record, state_file
 from myinvestor.client import MyInvestorClient, Period
 from myinvestor.errors import InputError
-from myinvestor.models import Contribution, Investment, Order, SecuritiesAccount
+from myinvestor.models import Contribution, Investment, Order, PensionAccount, PensionPlanPosition, SecuritiesAccount
 from myinvestor.output import OutputFormat, print_json, render
 from myinvestor.state import StateKind, changed, snapshot_marks
 
@@ -180,24 +180,24 @@ def orders(
 def pensions(fmt: FormatOpt = OutputFormat.table) -> None:
     """Planes de pensiones: participaciones, coste, valor y rentabilidad."""
     with build_client() as client:
-        rows = [
-            {
-                "cuenta": acc.account_id,
-                "codigo": p.dgs_code,
-                "nombre": p.name,
-                "participaciones": p.shares,
-                "coste_medio": p.average_cost,
-                "vl": p.liquidation_value,
-                "fecha_vl": p.liquidation_value_date.isoformat() if p.liquidation_value_date else None,
-                "invertido": p.total_invested,
-                "valor": p.market_value,
-                "ganancia": p.profit,
-                "rentab": p.total_return,
-            }
-            for acc in client.pension_accounts()
-            for p in client.pension_plans(acc.account_id)
-        ]
+        rows = [pension_row(acc, p) for acc in client.pension_accounts() for p in client.pension_plans(acc.account_id)]
     render(rows, fmt, title="Planes de pensiones")
+
+
+def pension_row(acc: PensionAccount, p: PensionPlanPosition) -> dict[str, Any]:
+    return {
+        "cuenta": acc.account_id,
+        "codigo": p.dgs_code,
+        "nombre": p.name,
+        "participaciones": p.shares,
+        "coste_medio": p.average_cost,
+        "vl": p.liquidation_value,
+        "fecha_vl": p.liquidation_value_date.isoformat() if p.liquidation_value_date else None,
+        "invertido": p.total_invested,
+        "valor": p.market_value,
+        "ganancia": p.profit,
+        "rentab": p.total_return,
+    }
 
 
 PERIODS = {p.name: p for p in Period}

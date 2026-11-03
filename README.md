@@ -82,6 +82,8 @@ myinvestor pensions                               # planes de pensiones
 myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year]
 myinvestor contributions [--all] [--new]          # aportaciones periódicas
 myinvestor upcoming [--days 14] [--owner me|junior|other]   # lo que viene: aportaciones, órdenes en curso, retenciones y si el disponible lo cubre
+myinvestor snapshot [--save DIR] [--previous FILE] [--no-new] [--no-mark]   # todo lo anterior en un JSON, con el delta (aportado/mercado)
+myinvestor summary [--from-file FILE] [--previous FILE]   # la misma foto, en tablas
 myinvestor fund IE0032126645 [--full]             # ficha del fondo (o del plan: `fund N1234`)
 myinvestor funds "s&p 500" [--sort ter,asc] [-n 20] [--page 0]
 myinvestor feed [-n 20]                           # «Actividad» de la web
@@ -97,7 +99,7 @@ myinvestor schema [movements] [--envelope]        # JSON Schema de la salida -f 
 Todas las órdenes de listado aceptan `-f table|json|csv|tsv`:
 
 - **`table`** (por defecto): importes en formato español (`-12,50 €`). Las fechas y los importes nunca se cortan ni se parten; los textos largos (conceptos, nombres) se parten en varias líneas para caber en la terminal. Si ni así cabe, la tabla se sale del ancho antes que recortar un dato. Se respeta `COLUMNS`, y si la salida no es una terminal (cron, una tubería, el `!` de Claude Code, un agente) la tabla ocupa lo que necesite en vez de limitarse a 80 columnas. Con `--wide` (o `MYINVESTOR_WIDE=1`) cada fila va en una sola línea: `myinvestor --wide movements | less -S`.
-- **`json`**: los importes son **números** JSON, no texto (`"importe": -12.50`), escritos con el valor exacto del `Decimal`, sin pasar por coma flotante. Importes y saldos (`importe`, `saldo`, `disponible`, `retenido`, `valor`, `invertido`, `ganancia`, `total`, las columnas de `income` y `disponible_tras`/`falta` de `upcoming`) van redondeados a 2 decimales; participaciones, VL, coste medio y porcentajes conservan la precisión de la API. `raw` y `fund` también devuelven números. En Python, `json.loads(texto, parse_float=Decimal)` los recupera sin pérdida.
+- **`json`**: los importes son **números** JSON, no texto (`"importe": -12.50`), escritos con el valor exacto del `Decimal`, sin pasar por coma flotante. Importes y saldos (`importe`, `saldo`, `disponible`, `retenido`, `valor`, `invertido`, `ganancia`, `total`, las columnas de `income` y `disponible_tras`/`falta` de `upcoming`, `aportado`/`mercado` del `delta` de `snapshot`) van redondeados a 2 decimales; participaciones, VL, coste medio y porcentajes conservan la precisión de la API. `raw` y `fund` también devuelven números. En Python, `json.loads(texto, parse_float=Decimal)` los recupera sin pérdida.
 
   **Contrato:** las claves y tipos de cada orden, cuáles son estables y qué cuenta como cambio incompatible están en [docs/json.md](docs/json.md); los cambios, en el [CHANGELOG](CHANGELOG.md). Con la opción global `--json-envelope` (o `MYINVESTOR_JSON_ENVELOPE=1`) la salida va envuelta con su versión de esquema: `{"schema": "myinvestor.movements/1", "cli_version": "0.2.0", "as_of": "…", "data": [...]}`, para que un script detecte un cambio en vez de fallar en silencio. Sin la opción, la salida es la de siempre. `myinvestor schema ORDEN` da el JSON Schema.
 - **`csv`**: los mismos valores sin formatear (`-12.50`).
@@ -208,6 +210,21 @@ Cada fila lleva `{fecha, tipo, producto, importe, cuenta_cargo, retenido, dispon
 **Regla del disponible.** `disponible` es el disponible actual de la cuenta de cargo, que MyInvestor ya da descontando lo retenido; y el dinero de una orden en curso queda retenido (o cargado) al darla. Por eso las retenciones y las órdenes se listan pero **no** se restan otra vez: `disponible_tras` solo acumula, por cuenta y en orden de fecha, lo que aún no se ha cargado (las aportaciones). Si baja de cero, `falta` dice cuánto no cubre la cuenta y se avisa en stderr (`-q` lo silencia; el código de salida sigue siendo 0). Con `--owner` solo se ven las filas cargadas a cuentas de ese tipo.
 
 Las transferencias programadas aún no se leen (#4); cuando existan entrarán como `tipo: transferencia` y sí restarán del disponible.
+
+`upcoming` también va, con los próximos 14 días, en la sección `upcoming` de [`snapshot`](#foto-diaria-snapshot-y-summary).
+
+### Foto diaria: `snapshot` y `summary`
+
+`snapshot` junta en **un solo JSON** lo que una rutina diaria necesita, con un solo login/refresh: `total`, efectivo (`cash`, como `accounts`), cuentas de valores con sus posiciones y `peso` (`securities`), planes (`pensions`), órdenes en curso y retenciones (`pending`), lo que viene (`upcoming`), los movimientos recientes (`movements`), lo nuevo desde la vez anterior con el estado de `--new` (`new`) y la variación frente a la foto anterior (`delta`), separando el dinero **aportado** del efecto **mercado**:
+
+```bash
+myinvestor -q snapshot --save ~/myinvestor-datos/fotos      # stdout y fotos/AAAA-MM-DD.json (0600), delta frente a la última anterior a hoy
+myinvestor snapshot --previous fotos/2026-11-01.json        # delta frente a otra
+myinvestor summary                                          # en tablas (no marca lo nuevo como visto)
+myinvestor summary --from-file fotos/2026-11-04.json        # una guardada, sin conexión
+```
+
+Si una sección falla (un 5xx en pensiones, un tramo de movimientos que pide firma), el resto sale igual, el fallo va a `errors: [{section, error, exit_code, message}]` y el CLI sale con el peor código de las secciones. Esquema completo, fórmula del delta y sus límites (ventas, dividendos…): **[docs/snapshot.md](docs/snapshot.md)**.
 
 ### Ingresos: intereses, dividendos, retenciones y comisiones
 
@@ -372,6 +389,8 @@ Para que un script distinga qué ha pasado sin leer el texto de error (también 
 | 13 | Hace falta un segundo factor que no se puede dar sin terminal, `login --direct --start` ha enviado el código, o `movements`, `income` o `export` han devuelto solo una parte (ver abajo) | `SignatureRequired`, `SignatureCodeRequired`, `WrongCodeError`, `SignatureError`, `PartialResultError` |
 | 14 | Sesión guardada corrupta | `CorruptStoreError`, `CorruptKeyringError` |
 
+`snapshot` y `summary` escriben la foto aunque falle alguna sección y salen con el peor código de las secciones, en el orden 13, 1, 2, 12; una sesión inservible (10, 11, 14) aborta sin escribir nada (ver [docs/snapshot.md](docs/snapshot.md#errores-por-sección-y-código-de-salida)).
+
 Con `-f json` el error también sale en JSON, en una sola línea de stderr: `{"error": "signature_required", "exit_code": 13, "message": "…"}` (`error` es el nombre de la excepción en snake_case sin `Error`; `network` para los errores de red).
 
 ### Movimientos antiguos y segundo factor
@@ -495,6 +514,7 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | `orders` | 1 + V; con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
 | `pensions` | 1 + P |
 | `upcoming` | 4 + C + 2·V + P (C: con `--owner`, solo las de ese tipo) |
+| `snapshot`, `summary` | 4 + 2·C + 2·V + 2·P (`summary --from-file`: 0) |
 | `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V |
 | `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
 | `login` | `--direct` o `--refresh-token-stdin`: 1 |

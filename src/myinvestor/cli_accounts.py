@@ -29,6 +29,7 @@ from myinvestor.errors import InputError, PartialResultError, SignatureError, Si
 from myinvestor.models import (
     CashAccount,
     Flow,
+    Hold,
     Ownership,
     PensionAccount,
     PensionPlanPosition,
@@ -576,11 +577,15 @@ def holds(account: AccountOpt = None, fmt: FormatOpt = OutputFormat.table) -> No
     """Retenciones de saldo (p. ej. dinero bloqueado por órdenes de fondos en curso)."""
     with build_client() as client:
         rows = [
-            {"cuenta": acc.alias or acc.account_id, "id": h.id, "tipo": h.type, "importe": h.amount}
+            hold_row(acc, h)
             for acc in match_cash_accounts(client.cash_accounts(), account)
             for h in client.holds(acc.account_uuid)
         ]
     render(rows, fmt, title="Retenciones")
+
+
+def hold_row(acc: CashAccount, h: Hold) -> dict[str, Any]:
+    return {"cuenta": acc.alias or acc.account_id, "id": h.id, "tipo": h.type, "importe": h.amount}
 
 
 @app.command("balance-history")

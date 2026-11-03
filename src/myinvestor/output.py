@@ -27,6 +27,7 @@ MONEY_COLUMNS = frozenset(
     | {"intereses", "dividendos", "bruto", "retenciones", "neto", "comisiones"}
     | {"disponible_tras", "falta"}
     | {"aportar"}
+    | {"aportado", "mercado"}
 )
 PRICE_COLUMNS = frozenset({"vl", "coste_medio"})
 AMOUNT_COLUMNS = MONEY_COLUMNS - PRICE_COLUMNS
