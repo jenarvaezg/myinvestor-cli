@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from myinvestor.auth import Authenticator, stored_password_relogin
+from myinvestor.cli_errors import EXIT_CODES_HELP, record_format
 from myinvestor.client import MyInvestorClient, ensure_session
 from myinvestor.errors import InputError, SignatureError
 from myinvestor.http import build_http_client
@@ -25,11 +26,15 @@ from myinvestor.stores import SessionStore, StoreKind, resolve_store
 app = typer.Typer(
     no_args_is_help=True,
     help="CLI no oficial (solo lectura) para MyInvestor.",
+    epilog=EXIT_CODES_HELP,
     pretty_exceptions_show_locals=False,
 )
 err = Console(stderr=True)
 
-FormatOpt = Annotated[OutputFormat, typer.Option("--format", "-f", help="Formato de salida.")]
+FormatOpt = Annotated[
+    OutputFormat,
+    typer.Option("--format", "-f", help="Formato de salida (con json, los errores también).", callback=record_format),
+]
 
 
 @dataclass

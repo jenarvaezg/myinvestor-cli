@@ -2,6 +2,10 @@
 
 Every response uses the envelope `{"payload": {"data": ...}, "status": {"code", "message", "timestamp"}}`;
 errors keep it (`status.code` = `BAD_REQUEST`, `ERROR`…) and login errors add `payload.data.errCode`.
+
+Every class carries the `exit_code` the CLI ends with (documented in the README and in `--help`):
+1 other errors, 2 bad input, 10 credentials rejected (stored password deleted), 11 no session,
+12 network/WAF/5xx (retryable), 13 second factor needed, 14 corrupt session store.
 """
 
 from __future__ import annotations
@@ -11,9 +15,19 @@ from pathlib import Path
 
 import httpx
 
+EXIT_ERROR = 1
+EXIT_USAGE = 2
+EXIT_CREDENTIALS = 10
+EXIT_NO_SESSION = 11
+EXIT_NETWORK = 12
+EXIT_SIGNATURE = 13
+EXIT_CORRUPT_STORE = 14
+
 
 class MyInvestorError(Exception):
     """Base class for every error raised by this library."""
+
+    exit_code: int = EXIT_ERROR
 
 
 class ApiError(MyInvestorError):
@@ -22,19 +36,26 @@ class ApiError(MyInvestorError):
         self.message = message
         self.path = path
         self.code = code
+        self.exit_code = EXIT_NETWORK if status >= 500 else EXIT_ERROR  # 5xx survived the retries
         super().__init__(f"HTTP {status} en {path or '?'}: {message}")
 
 
 class InputError(MyInvestorError, ValueError):
     """Invalid user input (unknown account, bad date range...)."""
 
+    exit_code = EXIT_USAGE
+
 
 class CorruptStoreError(MyInvestorError):
+    exit_code = EXIT_CORRUPT_STORE
+
     def __init__(self, path: Path) -> None:
         super().__init__(f"El fichero de sesión {path} está corrupto. Bórralo y vuelve a ejecutar `myinvestor login`.")
 
 
 class CorruptKeyringError(MyInvestorError):
+    exit_code = EXIT_CORRUPT_STORE
+
     def __init__(self, service: str) -> None:
         super().__init__(
             f"La sesión guardada en el llavero ({service}) está corrupta. "
@@ -43,6 +64,8 @@ class CorruptKeyringError(MyInvestorError):
 
 
 class NetworkBlockedError(MyInvestorError):
+    exit_code = EXIT_NETWORK
+
     def __init__(self, status: int) -> None:
         self.status = status
         super().__init__(
@@ -56,21 +79,62 @@ class AuthError(MyInvestorError):
 
 
 class InvalidCredentialsError(AuthError):
+    """MyInvestor says the customer id or password is wrong (`errCode` `UNAUTHORIZED`)."""
+
+    exit_code = EXIT_CREDENTIALS
+
     def __init__(self, detail: str | None = None) -> None:
         super().__init__(f"Login rechazado{f' ({detail})' if detail else ''}.")
 
 
+class StoredPasswordRejectedError(AuthError):
+    """The unattended re-login was refused for good, so the saved password has been deleted."""
+
+    exit_code = EXIT_CREDENTIALS
+
+
+class LoginRejectedError(AuthError):
+    """MyInvestor refused the login for a reason other than a wrong password (reCAPTCHA, rate limit...)."""
+
+    def __init__(self, status: int, err_code: str | None) -> None:
+        self.status = status
+        self.err_code = err_code
+        super().__init__(
+            f"MyInvestor ha rechazado el login ({self.summary}). No parece una contraseña incorrecta: puede "
+            "que exija reCAPTCHA o que haya bloqueado el acceso un rato. Prueba `myinvestor login` (navegador)."
+        )
+
+    @property
+    def summary(self) -> str:
+        return f"{f'errCode {self.err_code}' if self.err_code else 'sin errCode'}, HTTP {self.status}"
+
+
+class ReloginBlockedError(AuthError):
+    """The unattended re-login is paused after an unexplained rejection; the password is kept.
+
+    Same exit code as an expired session: until a manual `login` there is no way to renew it.
+    """
+
+    exit_code = EXIT_NO_SESSION
+
+
 class PasswordChangeRequired(AuthError):
+    exit_code = EXIT_CREDENTIALS
+
     def __init__(self) -> None:
         super().__init__("MyInvestor exige cambiar la contraseña. Hazlo en la web o la app y vuelve a entrar.")
 
 
 class NotLoggedInError(AuthError):
+    exit_code = EXIT_NO_SESSION
+
     def __init__(self) -> None:
         super().__init__("No hay sesión. Ejecuta `myinvestor login`.")
 
 
 class SessionExpiredError(AuthError):
+    exit_code = EXIT_NO_SESSION
+
     def __init__(self) -> None:
         super().__init__(
             "La sesión ha caducado (el refresh token dura 30 min sin uso). Ejecuta `myinvestor login` de nuevo."
@@ -79,6 +143,8 @@ class SessionExpiredError(AuthError):
 
 class SignatureError(MyInvestorError):
     """A second-factor approval was rejected, expired or cannot be done from the CLI."""
+
+    exit_code = EXIT_SIGNATURE
 
 
 class SignatureRequired(SignatureError):

@@ -3,18 +3,37 @@ from __future__ import annotations
 import csv
 import io
 import json
+import sys
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 import respx
 from typer.testing import CliRunner
 
-from myinvestor import cli_auth, cli_common
+from myinvestor import cli, cli_accounts, cli_auth, cli_common
 from myinvestor.auth import REFRESH_PATH
 from myinvestor.cli import app
+from myinvestor.errors import (
+    ApiError,
+    AuthError,
+    CorruptKeyringError,
+    CorruptStoreError,
+    InputError,
+    InvalidCredentialsError,
+    LoginRejectedError,
+    NetworkBlockedError,
+    NotLoggedInError,
+    PasswordChangeRequired,
+    ReloginBlockedError,
+    SessionExpiredError,
+    SignatureError,
+    SignatureRequired,
+    StoredPasswordRejectedError,
+)
 from myinvestor.session import Session
 from myinvestor.stores import MemorySessionStore
 from tests.conftest import (
@@ -255,7 +274,7 @@ def test_status_when_expired(store: MemorySessionStore) -> None:
     old = make_jwt(timedelta(minutes=-5))
     store.session = Session(device_id=DEVICE, access_token=old, refresh_token=old)
     result = runner.invoke(app, ["status"])
-    assert result.exit_code == 1 and "caducada" in result.stderr
+    assert result.exit_code == 11 and "caducada" in result.stderr
 
 
 def test_raw_rejects_bad_param(store: MemorySessionStore) -> None:
@@ -319,3 +338,99 @@ def test_contributions_hide_cancelled(mock_api: respx.MockRouter, store: MemoryS
     )
     rows = json.loads(invoke("contributions", "-f", "json").stdout)
     assert [r["id"] for r in rows] == ["c1"]
+
+
+# ---- exit codes ----------------------------------------------------------------------
+
+EXIT_CASES = [
+    (AuthError("x"), 1),
+    (ApiError(404, "x", "/p"), 1),
+    (LoginRejectedError(400, "NEW_CODE"), 1),
+    (InputError("x"), 2),
+    (InvalidCredentialsError(), 10),
+    (StoredPasswordRejectedError("x"), 10),
+    (PasswordChangeRequired(), 10),
+    (NotLoggedInError(), 11),
+    (SessionExpiredError(), 11),
+    (ReloginBlockedError("x"), 11),
+    (NetworkBlockedError(403), 12),
+    (ApiError(503, "x", "/p"), 12),
+    (httpx.ConnectError("boom"), 12),
+    (SignatureRequired(["OTP_SMS"]), 13),
+    (SignatureError("x"), 13),
+    (CorruptStoreError(Path("session.json")), 14),
+    (CorruptKeyringError("svc"), 14),
+]
+
+
+def run_main(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], *args: str) -> tuple[Any, str]:
+    monkeypatch.setattr(sys, "argv", ["myinvestor", *args])
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+    return exit_info.value.code, capsys.readouterr().err
+
+
+def failing_client(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
+    def boom(*_args: Any) -> Any:
+        raise exc
+
+    monkeypatch.setattr(cli_accounts, "build_client", boom)
+
+
+@pytest.mark.parametrize(("exc", "code"), EXIT_CASES, ids=[f"{type(e).__name__}-{c}" for e, c in EXIT_CASES])
+def test_exit_code_per_error_type(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], exc: Exception, code: int
+) -> None:
+    failing_client(monkeypatch, exc)
+    status, stderr = run_main(monkeypatch, capsys, "accounts")
+    assert status == code
+    assert stderr.startswith("Error")  # human message without -f json
+
+
+def test_expired_session_exits_11(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], store: MemorySessionStore
+) -> None:
+    old = make_jwt(timedelta(minutes=-5))
+    store.session = Session(device_id=DEVICE, access_token=old, refresh_token=old)
+    status, stderr = run_main(monkeypatch, capsys, "accounts")
+    assert status == 11 and "caducado" in stderr
+
+
+def test_usage_error_exits_2(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    status, _ = run_main(monkeypatch, capsys, "accounts", "--no-such-option")
+    assert status == 2
+
+
+def test_success_exits_0(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], mock_api: respx.MockRouter, store: Any
+) -> None:
+    mock_api.get(f"{CPERF}/v2/cash-accounts/self").respond(200, json=ok([]))
+    status, _ = run_main(monkeypatch, capsys, "accounts", "-f", "json")
+    assert status == 0
+
+
+def test_json_format_reports_error_as_json_on_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exc = SignatureRequired(["OTP_SMS"])
+    failing_client(monkeypatch, exc)
+    status, stderr = run_main(monkeypatch, capsys, "accounts", "-f", "json")
+    assert status == 13
+    assert json.loads(stderr) == {"error": "signature_required", "exit_code": 13, "message": str(exc)}
+
+
+def test_json_format_reports_network_error_as_json(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    failing_client(monkeypatch, httpx.ReadTimeout("slow"))
+    status, stderr = run_main(monkeypatch, capsys, "accounts", "--format=json")
+    body = json.loads(stderr)
+    assert status == 12 and body["error"] == "network" and body["exit_code"] == 12
+    assert "ReadTimeout" in body["message"]
+
+
+def test_help_documents_exit_codes() -> None:
+    text = " ".join(runner.invoke(app, ["--help"]).output.split())
+    assert "Códigos de salida" in text
+    for code in (10, 11, 12, 13, 14):
+        assert f" {code} " in text

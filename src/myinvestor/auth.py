@@ -7,11 +7,21 @@
   and the call is repeated with `x-signature-id`.
 - `POST /login/api/v1/auth/token/refresh` `{refreshToken}` (no Authorization header) returns a
   new access/refresh pair. Access tokens live 15 min, refresh tokens 30 min.
+
+Rejected logins answer 400/401/403 with `payload.data.errCode`. The web (bundle of 2026-11) knows:
+
+- `UNAUTHORIZED`: wrong customer id or password. The form shows «¡Ups! Parece que algo no funciona.
+  Si no recuerdas la contraseña…» with a link to reset it. The web also assumes it when there is no
+  `errCode`; here a missing code is not proof enough to delete a saved password.
+- `UPDATE_PASSWORD_REQUIRED`: the password must be changed (the web opens that flow); a 200 can also
+  say so with `isPasswordChangeRequired`.
+- anything else: the web only shows a generic «oops» toast, so its meaning is unknown.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -22,19 +32,34 @@ from myinvestor.errors import (
     ApiError,
     AuthError,
     InvalidCredentialsError,
+    LoginRejectedError,
     PasswordChangeRequired,
+    ReloginBlockedError,
     SessionExpiredError,
+    StoredPasswordRejectedError,
     error_code,
     raise_for_response,
 )
 from myinvestor.session import Session
 from myinvestor.signature import SIGNATURE_HEADER, SignatureUI, Signer, parse_signature_request
-from myinvestor.stores import SessionStore
+from myinvestor.stores import ReloginBlock, SessionStore
 
 Relogin = Callable[[Session], Session]
 
 LOGIN_PATH = "/login/api/v2/auth/token"
 REFRESH_PATH = "/login/api/v1/auth/token/refresh"
+
+CREDENTIALS_ERR_CODES = frozenset({"UNAUTHORIZED"})
+PASSWORD_CHANGE_ERR_CODES = frozenset({"UPDATE_PASSWORD_REQUIRED"})
+RELOGIN_PAUSE = timedelta(hours=24)
+
+
+def _login_rejection(status: int, err_code: str | None) -> AuthError:
+    if err_code in CREDENTIALS_ERR_CODES:
+        return InvalidCredentialsError(f"{err_code}: usuario o contraseña incorrectos")
+    if err_code in PASSWORD_CHANGE_ERR_CODES:
+        return PasswordChangeRequired()
+    return LoginRejectedError(status, err_code)
 
 
 def _tokens(data: Any) -> tuple[str, str | None]:
@@ -80,8 +105,7 @@ class Authenticator:
     def _login_payload(self, response: httpx.Response) -> Any:
         if response.status_code in (400, 401, 403) and "text/html" not in response.headers.get("content-type", ""):
             body = envelope.decode(response) if response.content else None
-            code = error_code(body)
-            raise InvalidCredentialsError(code or "MyInvestor no acepta el login sin reCAPTCHA o la contraseña")
+            raise _login_rejection(response.status_code, error_code(body))
         raise_for_response(response)
         return envelope.data(envelope.decode(response))
 
@@ -94,23 +118,50 @@ class Authenticator:
         return call
 
 
+def _when(moment: datetime) -> str:
+    return moment.astimezone().strftime("%d/%m %H:%M")
+
+
 def stored_password_relogin(auth: Authenticator, store: SessionStore, ui: SignatureUI | None) -> Relogin:
     """Callback that logs in again with the password saved by `login --direct --remember`.
 
-    A rejected password is deleted on the spot: retrying it on every cron run would lock the account.
+    Retrying a bad password on every cron run would lock the account, so:
+    - wrong password (or a forced change): the saved password is deleted on the spot;
+    - any other rejection: the password is kept, but the re-login pauses for `RELOGIN_PAUSE` or until a
+      manual `login`, so it is tried at most once a day;
+    - a second factor that cannot be given (no terminal) or a network error: nothing changes.
     """
 
     def relogin(current: Session) -> Session:
-        password = store.load_password(current.customer_id) if current.customer_id else None
-        if not current.customer_id or not password:
+        customer_id = current.customer_id
+        password = store.load_password(customer_id) if customer_id else None
+        if not customer_id or not password:
             raise SessionExpiredError()
+        block = store.load_relogin_block(customer_id)
+        if block is not None and block.is_active():
+            raise ReloginBlockedError(
+                f"El re-login automático está en pausa hasta el {_when(block.until)} porque MyInvestor lo "
+                f"rechazó ({block.error}). La contraseña guardada sigue ahí; para reanudarlo ya, ejecuta "
+                "`myinvestor login --direct --remember`."
+            )
         try:
-            return auth.login_direct(current.customer_id, password, current, ui)
+            session = auth.login_direct(customer_id, password, current, ui)
         except (InvalidCredentialsError, PasswordChangeRequired) as exc:
-            store.delete_password(current.customer_id)
-            raise AuthError(
-                f"El re-login automático ha fallado ({exc}). He borrado la contraseña guardada para no "
-                "bloquear la cuenta; ejecuta `myinvestor login --direct --remember`."
+            store.delete_password(customer_id)
+            raise StoredPasswordRejectedError(
+                f"El re-login automático ha fallado ({str(exc).rstrip('.')}). He borrado la contraseña guardada "
+                "para no bloquear la cuenta; ejecuta `myinvestor login --direct --remember`."
             ) from exc
+        except LoginRejectedError as exc:
+            paused = ReloginBlock(until=datetime.now(tz=UTC) + RELOGIN_PAUSE, error=exc.summary)
+            store.save_relogin_block(customer_id, paused)
+            raise ReloginBlockedError(
+                f"MyInvestor ha rechazado el re-login automático ({exc.summary}), pero no parece una contraseña "
+                f"incorrecta: no he borrado la contraseña guardada. No reintentaré hasta el {_when(paused.until)} "
+                "o hasta que ejecutes `myinvestor login --direct --remember`."
+            ) from exc
+        if block is not None:
+            store.clear_relogin_block(customer_id)
+        return session
 
     return relogin

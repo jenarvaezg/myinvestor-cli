@@ -27,7 +27,7 @@ myinvestor logout [--forget-device]
 ```
 
 - El **access token dura 15 min y el refresh token 30 min**. Cada petición renueva el par si hace falta, así que la sesión vive mientras la uses al menos cada media hora; si no, hay que repetir el login.
-- Con `--remember` (solo con `--direct`), la contraseña se guarda en el Keychain (o en `~/.config/myinvestor/session.json`, 0600, con `--store file`) y, cuando el refresh token ha caducado, el CLI vuelve a entrar solo, como la app de Fintonic con el PIN. Se guarda solo si MyInvestor la acepta, se borra con `logout` y **se borra al primer rechazo**, para no bloquear la cuenta repitiéndola en cada ejecución. Sin `--remember` la contraseña no se guarda nunca: en el almacén solo van los tokens y el id de dispositivo.
+- Con `--remember` (solo con `--direct`), la contraseña se guarda en el Keychain (o en `~/.config/myinvestor/session.json`, 0600, con `--store file`) y, cuando el refresh token ha caducado, el CLI vuelve a entrar solo, como la app de Fintonic con el PIN. Se guarda solo si MyInvestor la acepta y se borra con `logout`. Si el re-login automático falla, depende del `errCode` del rechazo: con `UNAUTHORIZED` (contraseña incorrecta) o `UPDATE_PASSWORD_REQUIRED` **se borra en el acto**, para no bloquear la cuenta repitiéndola en cada ejecución; con cualquier otro código, o sin él (reCAPTCHA obligatorio, demasiados intentos, cambios de la API…), **no se borra**, pero el re-login queda en pausa 24 h (o hasta el siguiente `myinvestor login`), así que se intenta como mucho una vez al día. Si lo que falta es un código SMS, falla sin tocar la contraseña. Sin `--remember` la contraseña no se guarda nunca: en el almacén solo van los tokens y el id de dispositivo.
 - El navegador usa un perfil propio (`~/.local/share/myinvestor/browser`) para que MyInvestor reconozca el dispositivo y solo pida el SMS la primera vez. Al terminar se borran los tokens de ese perfil: la sesión pasa a ser del CLI.
 - `--refresh-token-stdin`: el token está en el localStorage de la web (`myinvestor-app:REFRESH_TOKEN`) y el id de dispositivo en `_capuid`. Cuidado: es una credencial.
 
@@ -111,6 +111,23 @@ myinvestor position -f json                        # semanas después: re-login 
 
 El primer login desde un dispositivo nuevo pide SMS o aprobación en la app: hazlo una vez en una terminal interactiva con el mismo `--store`.
 
+#### Códigos de salida
+
+Para que un script distinga qué ha pasado sin leer el texto de error (también salen en `myinvestor --help`):
+
+| Código | Caso | Excepciones |
+|---|---|---|
+| 0 | OK | |
+| 1 | Otros errores | `ApiError` (4xx), `LoginRejectedError` (login manual rechazado por otro motivo), `AuthError`… |
+| 2 | Uso o datos de entrada incorrectos | opciones de Typer, `InputError` |
+| 10 | Contraseña rechazada (la guardada se ha borrado) o cambio de contraseña obligatorio | `InvalidCredentialsError`, `StoredPasswordRejectedError`, `PasswordChangeRequired` |
+| 11 | Sin sesión, o caducada sin forma de renovarla (incluido el re-login en pausa) | `NotLoggedInError`, `SessionExpiredError`, `ReloginBlockedError` |
+| 12 | Red, WAF (Imperva) o MyInvestor caído: reintentable | `NetworkBlockedError`, errores de `httpx`, `ApiError` 5xx tras los reintentos |
+| 13 | Hace falta un segundo factor que no se puede dar sin terminal | `SignatureRequired`, `SignatureError` |
+| 14 | Sesión guardada corrupta | `CorruptStoreError`, `CorruptKeyringError` |
+
+Con `-f json` el error también sale en JSON, en una sola línea de stderr: `{"error": "signature_required", "exit_code": 13, "message": "…"}` (`error` es el nombre de la excepción en snake_case sin `Error`; `network` para los errores de red).
+
 ### Movimientos antiguos y segundo factor
 
 La consulta de movimientos solo sale directa para los últimos ~90 días (PSD2). Para rangos más antiguos MyInvestor responde `202` con una petición de firma y pide **aprobarla en la app del móvil**. En una terminal interactiva el CLI lo avisa y espera (`--approval-timeout`, 300 s por defecto) y después repite la consulta firmada. Sin terminal (cron, CI, el `!` de Claude Code) falla con un mensaje claro y **no** te manda la notificación, salvo que pases `--approve` (o `MYINVESTOR_APPROVE=1`): `myinvestor --approve movements --from 2025-01-01`. Lo mismo ocurre con el SMS del login `--direct` en un dispositivo nuevo.
@@ -144,7 +161,7 @@ Base `https://api.myinvestor.es`. Todas las respuestas usan el sobre `{"payload"
 
 | Método | Ruta | Notas |
 |---|---|---|
-| POST | `/login/api/v2/auth/token` | `{customerId, password}` + `x-device-id`; la web añade `x-recaptcha-token` y `x-recaptcha-action: LOGIN_V2`. → `{accessToken, refreshToken, expiresIn: 900, refreshExpiresIn: 1800}`, o `202` con petición de firma (dispositivo nuevo); se repite con `x-signature-id`. `isPasswordChangeRequired`, `errCode` en errores |
+| POST | `/login/api/v2/auth/token` | `{customerId, password}` + `x-device-id`; la web añade `x-recaptcha-token` y `x-recaptcha-action: LOGIN_V2`. → `{accessToken, refreshToken, expiresIn: 900, refreshExpiresIn: 1800}`, o `202` con petición de firma (dispositivo nuevo); se repite con `x-signature-id`. `isPasswordChangeRequired`, `errCode` en errores (la web conoce `UNAUTHORIZED` = contraseña incorrecta y `UPDATE_PASSWORD_REQUIRED`) |
 | POST | `/login/api/v1/auth/token/refresh` | `{refreshToken}`, sin `authorization` → par nuevo |
 | GET | `/login/api/v1/features[/self]` | flags (`SIGNIN_CHECK_DEVICE_ID`…) |
 

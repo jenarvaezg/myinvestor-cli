@@ -6,12 +6,15 @@ from myinvestor.errors import (
     ApiError,
     AuthError,
     InvalidCredentialsError,
+    LoginRejectedError,
     MyInvestorError,
     NetworkBlockedError,
     NotLoggedInError,
+    ReloginBlockedError,
     SessionExpiredError,
     SignatureError,
     SignatureRequired,
+    StoredPasswordRejectedError,
 )
 from myinvestor.models import CashAccount, Flow, Investment, Order, PensionPlanPosition, SecuritiesAccount
 from myinvestor.session import Session
@@ -27,6 +30,7 @@ __all__ = [
     "InvalidCredentialsError",
     "Investment",
     "KeyringSessionStore",
+    "LoginRejectedError",
     "MemorySessionStore",
     "MyInvestorClient",
     "MyInvestorError",
@@ -35,11 +39,13 @@ __all__ = [
     "Order",
     "PensionPlanPosition",
     "Period",
+    "ReloginBlockedError",
     "SecuritiesAccount",
     "Session",
     "SessionExpiredError",
     "SignatureError",
     "SignatureRequired",
     "Statement",
+    "StoredPasswordRejectedError",
     "resolve_store",
 ]
