@@ -611,7 +611,11 @@
       "neto": "amount|null",
       "remuneracion": "string|null",
       "promocion": "string|null",
-      "fin_promocion": "date|null"
+      "fin_promocion": "date|null",
+      "liquidacion_fecha": "date|null",
+      "liquidacion_importe": "amount|null",
+      "liquidacion_desde": "date|null",
+      "liquidacion_hasta": "date|null"
     }
   },
   "myinvestor.order/1": {

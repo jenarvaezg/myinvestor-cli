@@ -12,9 +12,12 @@ from rich.markup import escape
 from myinvestor.cli_accounts import DEFAULT_MOVEMENT_DAYS, NOT_FOUND, AccountOpt, _range, match_cash_accounts
 from myinvestor.cli_common import FormatOpt, app, build_client, err, now_local
 from myinvestor.client import MyInvestorClient
-from myinvestor.errors import ApiError, InputError
+from myinvestor.config import FREE_FLOWS_DAYS
+from myinvestor.errors import ApiError, InputError, SignatureError
+from myinvestor.interest_settlements import Settlement, credited_on, settlements
 from myinvestor.models import CashAccount, Remuneration, SentTransfer
 from myinvestor.output import OutputFormat, render
+from myinvestor.psd2 import free_start
 from myinvestor.sent_transfers import is_scheduled, transfer_row
 
 # The tables leave some columns out; JSON and CSV export every field.
@@ -29,6 +32,8 @@ INTEREST_TABLE_COLUMNS = (
     "bruto",
     "retencion",
     "neto",
+    "liquidacion_fecha",
+    "liquidacion_importe",
 )
 
 
@@ -94,15 +99,33 @@ def _transfer_order(row: dict[str, Any]) -> tuple[str, str, str]:
 
 
 @app.command()
-def interest(account: AccountOpt = None, fmt: FormatOpt = OutputFormat.table) -> None:
-    """Remuneración de cada cuenta de efectivo: la última liquidación de intereses.
+def interest(
+    account: AccountOpt = None,
+    movements: Annotated[
+        bool,
+        typer.Option(
+            "--movements/--no-movements",
+            help=f"Cruzar con la última «LIQUIDAC. INTERESES» de los movimientos de los últimos {FREE_FLOWS_DAYS} "
+            "días (una petición más por cuenta, nunca pide segundo factor).",
+        ),
+    ] = True,
+    fmt: FormatOpt = OutputFormat.table,
+) -> None:
+    """Remuneración de cada cuenta de efectivo: la ficha de MyInvestor y la última liquidación de intereses.
 
     Tipo aplicado (base y promocional), TAE, saldo remunerado, intereses brutos, retención y neto, con
-    el periodo liquidado y la fecha de abono. Los tipos van en % (`2.5` es un 2,5 %).
+    el mes de la ficha (`periodo`) y la fecha de abono. Los tipos van en % (`2.5` es un 2,5 %). Si
+    MyInvestor manda la ficha sin desglose (saldos e intereses a 0, lo normal sin promoción), esos
+    campos salen vacíos (`null`), no a 0. Las columnas `liquidacion_*` son el abono real
+    «LIQUIDAC. INTERESES» de los movimientos, con el periodo que dice su concepto (p. ej. del 18/09 al
+    18/10: sin promoción no va por mes natural).
     """
+    today = now_local().date()
     with build_client() as client:
-        found = [(acc, _remuneration(client, acc)) for acc in match_cash_accounts(client.cash_accounts(), account)]
-    rows = [_interest_row(acc, r) for acc, r in found if r is not None]
+        chosen = match_cash_accounts(client.cash_accounts(), account)
+        found = [(acc, r) for acc in chosen if (r := _remuneration(client, acc)) is not None]
+        settled = {acc.account_id: _settlements(client, acc, today) for acc, _ in found} if movements else {}
+    rows = [_interest_row(acc, r, _settlement_for(acc, r, settled.get(acc.account_id), today)) for acc, r in found]
     if fmt is OutputFormat.table:
         rows = [{c: r[c] for c in INTEREST_TABLE_COLUMNS} for r in rows]
     render(rows, fmt, title="Remuneración de las cuentas")
@@ -121,33 +144,85 @@ def _remuneration(client: MyInvestorClient, acc: CashAccount) -> Remuneration | 
     return found
 
 
-def _interest_row(acc: CashAccount, r: Remuneration) -> dict[str, Any]:
-    """`retencion` is negative and `neto` = `bruto` + `retencion`, as in `income`."""
-    withheld = -abs(r.tax_charge_amount) if r.tax_charge_amount is not None else None
-    net = r.final_result + (withheld or Decimal(0)) if r.final_result is not None else None
+def _settlements(client: MyInvestorClient, acc: CashAccount, today: date) -> list[Settlement] | None:
+    """Interest credits of the account in the window served without a second factor; None (warned) on error."""
+    try:
+        statement = client.statement(acc.account_uuid, free_start(today), today)
+    except (ApiError, SignatureError) as exc:
+        err.print(
+            f"[yellow]{escape(acc.alias or acc.account_id)}:[/yellow] sin cruzar con movimientos, "
+            f"falló su consulta ({escape(str(exc))})."
+        )
+        return None
+    return settlements(statement.flows)
+
+
+def _settlement_for(
+    acc: CashAccount, r: Remuneration, found: list[Settlement] | None, today: date
+) -> Settlement | None:
+    """The credit matching the row: the one on its `paymentDate` if the row has a breakdown, else the last one.
+
+    Says so on stderr when they do not match: a breakdown paid inside the window but absent from
+    the movements, or no interest credit at all in the window.
+    """
+    if found is None:
+        return None
+    name = escape(acc.alias or acc.account_id)
+    if not found:
+        err.print(
+            f"[dim]{name}: sin «LIQUIDAC. INTERESES» en los movimientos de los últimos {FREE_FLOWS_DAYS} días.[/dim]"
+        )
+        return None
+    paid = r.payment_date if r.has_breakdown else None
+    same = credited_on(found, paid) if paid else None
+    if paid and same is None and paid >= free_start(today):
+        err.print(
+            f"[yellow]{name}:[/yellow] MyInvestor da un abono de intereses el {paid} que no está en los "
+            f"movimientos; `liquidacion_*` es la última liquidación ({found[0].day})."
+        )
+    return same or found[0]
+
+
+def _interest_row(acc: CashAccount, r: Remuneration, settled: Settlement | None) -> dict[str, Any]:
+    """`retencion` is negative and `neto` = `bruto` + `retencion`, as in `income`.
+
+    A row without breakdown (`has_breakdown`) gives null balances, results and `fecha_pago`, not
+    zeros. Rates of 0 that the web hides (`e !== 0 ? e : undefined`) are null too.
+    """
+    real = r.has_breakdown
+    withheld = -abs(r.tax_charge_amount) if real and r.tax_charge_amount is not None else None
+    net = r.final_result + (withheld or Decimal(0)) if real and r.final_result is not None else None
     return {
         "cuenta": acc.alias or acc.account_id,
         "cuenta_id": acc.account_id,
         "periodo": f"{r.remuneration_date:%Y-%m}" if r.remuneration_date else None,
-        "fecha_pago": _iso(r.payment_date),
+        "fecha_pago": _iso(r.payment_date) if real else None,
         "fecha_oficial": _iso(r.official_remuneration_date),
-        "saldo_base": r.applicable_base_balance,
-        "saldo_promo": r.balance_promo,
-        "saldo_total": r.total_balance,
+        "saldo_base": _if(real, r.applicable_base_balance),
+        "saldo_promo": _if(real, r.balance_promo),
+        "saldo_total": _if(real, r.total_balance),
         "tipo_pct": r.remuneration_percentage,
-        "tipo_base_pct": r.base_remuneration_percentage,
-        "tipo_promo_pct": r.promotion_remuneration_percentage,
-        "tae_pct": r.calculate_tae_average,
-        "tae_promo_pct": r.tae_promotion,
-        "intereses_base": r.base_results,
-        "intereses_promo": r.promo_results,
-        "bruto": r.final_result,
+        "tipo_base_pct": r.base_remuneration_percentage or None,
+        "tipo_promo_pct": r.promotion_remuneration_percentage or None,
+        "tae_pct": r.calculate_tae_average or None,
+        "tae_promo_pct": r.tae_promotion or None,
+        "intereses_base": _if(real, r.base_results),
+        "intereses_promo": _if(real, r.promo_results),
+        "bruto": _if(real, r.final_result),
         "retencion": withheld,
         "neto": net,
         "remuneracion": r.remuneration_type,
         "promocion": r.promotion_code,
         "fin_promocion": _iso(r.end_date_remuneration),
+        "liquidacion_fecha": _iso(settled.day) if settled else None,
+        "liquidacion_importe": settled.amount if settled else None,
+        "liquidacion_desde": _iso(settled.start) if settled else None,
+        "liquidacion_hasta": _iso(settled.end) if settled else None,
     }
+
+
+def _if(real: bool, amount: Decimal | None) -> Decimal | None:
+    return amount if real else None
 
 
 def _iso(day: date | None) -> str | None:

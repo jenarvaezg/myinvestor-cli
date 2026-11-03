@@ -30,6 +30,7 @@ MONEY_COLUMNS = frozenset(
     | {"aportado", "mercado"}
     | {"efectivo"}
     | {"saldo_base", "saldo_promo", "saldo_total", "intereses_base", "intereses_promo", "retencion"}
+    | {"liquidacion_importe"}
     | {"coste", "plusvalia", "resultado", "vl_compra"}
 )
 PRICE_COLUMNS = frozenset({"vl", "coste_medio", "vl_compra"})
@@ -47,6 +48,7 @@ DATE_COLUMNS = frozenset(
     | {"fecha_pago", "fecha_oficial", "fin_promocion", "inicio", "fin"}
     | {"fecha_fiscal", "vencimiento"}
     | {"rentab_desde", "rentab_hasta"}
+    | {"liquidacion_fecha", "liquidacion_desde", "liquidacion_hasta"}
 )
 MAX_QUANTITY_DECIMALS = 6
 # A row with this key is in that currency: its money and price columns are formatted with it.

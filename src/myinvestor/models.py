@@ -293,6 +293,25 @@ class Remuneration(_Model):
         mode="before",
     )(_day_or_none)
 
+    @property
+    def has_breakdown(self) -> bool:
+        """False for the «empty» row: every balance and result 0 or missing.
+
+        The web only paints balances and interests («Tu remuneración») for promotion types
+        (`BALANCE_INCREASE`, `…_PROMOTION`); a `DEFAULT` account gets the row with zeros, which is
+        not its settlement (that one is in the movements, «LIQUIDAC. INTERESES»).
+        """
+        amounts = (
+            self.applicable_base_balance,
+            self.balance_promo,
+            self.total_balance,
+            self.base_results,
+            self.promo_results,
+            self.final_result,
+            self.tax_charge_amount,
+        )
+        return any(a for a in amounts)
+
 
 class Investment(_Model):
     """A fund, ETF or stock held in a securities account."""
