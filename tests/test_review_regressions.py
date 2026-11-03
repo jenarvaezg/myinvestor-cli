@@ -14,7 +14,7 @@ import respx
 from typer.testing import CliRunner
 
 from myinvestor import browser_login as bl
-from myinvestor import cli_auth, cli_common
+from myinvestor import cli_common
 from myinvestor.auth import REFRESH_PATH
 from myinvestor.cli import app
 from myinvestor.client import MyInvestorClient
@@ -210,7 +210,6 @@ def test_corrupt_keyring_entry(monkeypatch: pytest.MonkeyPatch) -> None:
 def store(monkeypatch: pytest.MonkeyPatch, session: Session) -> MemorySessionStore:
     memory = MemorySessionStore(session)
     monkeypatch.setattr(cli_common, "get_store", lambda: memory)
-    monkeypatch.setattr(cli_auth, "get_store", lambda: memory)
     return memory
 
 

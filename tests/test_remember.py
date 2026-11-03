@@ -41,7 +41,6 @@ def dead_session() -> Session:
 def store(monkeypatch: pytest.MonkeyPatch) -> MemorySessionStore:
     memory = MemorySessionStore(dead_session())
     monkeypatch.setattr(cli_common, "get_store", lambda: memory)
-    monkeypatch.setattr(cli_auth, "get_store", lambda: memory)
     monkeypatch.setattr(cli_common, "stdin_is_tty", lambda: False)
     monkeypatch.setattr(cli_auth, "stdin_is_tty", lambda: False)
     return memory
@@ -225,7 +224,7 @@ def test_logout_clears_the_relogin_pause_in_the_file_store(tmp_path: Path, monke
     file_store = FileSessionStore(tmp_path / "session.json")
     file_store.save(dead_session())
     file_store.save_relogin_block("00000000T", ReloginBlock(datetime.now(tz=UTC) + RELOGIN_PAUSE, "errCode X"))
-    monkeypatch.setattr(cli_auth, "get_store", lambda: file_store)
+    monkeypatch.setattr(cli_common, "get_store", lambda: file_store)
 
     runner.invoke(app, ["logout", "--forget-device"], catch_exceptions=False)
 

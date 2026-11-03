@@ -734,6 +734,7 @@ with MyInvestorClient(store.load(), store=store) as client:
 - **Log**: cada petición se registra en `DEBUG` en el logger `myinvestor.http` (método, ruta, status, ms), nunca con query, cabeceras ni cuerpos.
 - **Cabeceras como la web**: `authorization: Bearer`, `x-device-id`, `x-myinvestor-app: version=3.134.0,platform=web`, y `origin`/`referer`/`user-agent` de Chrome, porque Imperva está delante.
 - **Fechas**: la API manda medianoches ISO (`2026-11-02T00:00:00.000+0000`); se usan como día natural.
+- **Tests aislados**: la suite bloquea la red, limpia las `MYINVESTOR_*` y las variables de terminal (`FORCE_COLOR`, `NO_COLOR`, `TERM`, `COLUMNS`, `CI`…), apunta `HOME` y `XDG_*` a un directorio temporal y falla si algún test toca el llavero o el fichero de sesión reales. Las órdenes piden el almacén con `cli_common.get_store()`, el único punto que parchean los tests.
 
 ## API observada
 

@@ -26,7 +26,7 @@ import respx
 import typer
 from typer.testing import CliRunner
 
-from myinvestor import cli, cli_auth, cli_common, cli_upcoming, json_envelope
+from myinvestor import cli, cli_common, cli_upcoming, json_envelope
 from myinvestor.cli import app
 from myinvestor.cli_common import package_version
 from myinvestor.errors import InputError
@@ -455,7 +455,6 @@ IDS = [c.id for c in CASES]
 def store(monkeypatch: pytest.MonkeyPatch, session: Session) -> MemorySessionStore:
     memory = MemorySessionStore(session)
     monkeypatch.setattr(cli_common, "get_store", lambda: memory)
-    monkeypatch.setattr(cli_auth, "get_store", lambda: memory)
     return memory
 
 

@@ -10,7 +10,7 @@ import pytest
 import respx
 from typer.testing import CliRunner
 
-from myinvestor import cli_auth, cli_common
+from myinvestor import cli_common
 from myinvestor.auth import LOGIN_PATH, REFRESH_PATH, Authenticator
 from myinvestor.cli import app, main
 from myinvestor.client import MyInvestorClient
@@ -46,7 +46,6 @@ SIGNATURE_ID = "sigid-1e1e1e1e"
 def store(monkeypatch: pytest.MonkeyPatch, session: Session) -> MemorySessionStore:
     memory = MemorySessionStore(session)
     monkeypatch.setattr(cli_common, "get_store", lambda: memory)
-    monkeypatch.setattr(cli_auth, "get_store", lambda: memory)
     return memory
 
 

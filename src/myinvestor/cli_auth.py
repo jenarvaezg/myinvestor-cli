@@ -9,9 +9,10 @@ from typing import Annotated, Any
 
 import typer
 
+from myinvestor import cli_common
 from myinvestor.auth import Authenticator
 from myinvestor.browser_login import DEFAULT_LOGIN_TIMEOUT, browser_login
-from myinvestor.cli_common import FormatOpt, app, build_client, err, fatal, get_store, local_time, stdin_is_tty
+from myinvestor.cli_common import FormatOpt, app, build_client, err, fatal, local_time, stdin_is_tty
 from myinvestor.cli_direct_login import DirectLogin, direct_login
 from myinvestor.code_input import CodeSource, fd_codes, line_codes
 from myinvestor.errors import InputError, NotLoggedInError, SessionExpiredError
@@ -115,7 +116,7 @@ def login(
         raise InputError("--remember solo tiene sentido con --direct (los otros logins no usan la contraseña).")
     how = DirectLogin(remember=remember, start=start, code=code, code_source=_code_source(code_stdin, code_fd))
     _check_direct_options(direct, how)
-    store = get_store()
+    store = cli_common.get_store()
     previous = store.load()
     device = device_id or (previous.device_id if previous else None) or new_device_id()
     base = Session(device_id=device, customer_id=customer_id or (previous.customer_id if previous else None))
@@ -175,7 +176,7 @@ def logout(
 
     Los tokens ya emitidos caducan solos (≤ 30 min).
     """
-    store = get_store()
+    store = cli_common.get_store()
     session = store.load()
     store.clear_pending_login()
     if session and session.customer_id:
@@ -197,7 +198,7 @@ def status(
     ] = False,
 ) -> None:
     """Estado de la sesión. Sin --offline la confirma con MyInvestor, y eso la renueva si hace falta."""
-    store = get_store()
+    store = cli_common.get_store()
     info = SessionInfo.read(store)
     session = info.session
     if session is None or not session.refresh_token:
