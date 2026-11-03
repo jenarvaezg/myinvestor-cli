@@ -12,7 +12,7 @@ import typer
 from myinvestor.auth import Authenticator
 from myinvestor.browser_login import DEFAULT_LOGIN_TIMEOUT, browser_login
 from myinvestor.cli_common import app, build_client, err, get_store, local_time, signature_ui, stdin_is_tty
-from myinvestor.errors import InputError, NotLoggedInError
+from myinvestor.errors import InputError, NotLoggedInError, SessionExpiredError
 from myinvestor.http import build_http_client
 from myinvestor.session import Session, new_device_id
 
@@ -105,6 +105,8 @@ def login(
     if previous and previous.customer_id and previous.customer_id != session.customer_id:
         store.delete_password(previous.customer_id)
     store.save(session)
+    if session.customer_id:  # a manual login resumes a paused unattended re-login
+        store.clear_relogin_block(session.customer_id)
     err.print(
         f"[green]Sesión iniciada[/green] (token hasta las {local_time(session.expires_at)}, "
         f"renovable hasta las {local_time(session.refresh_expires_at)} si no se usa)."
@@ -139,7 +141,7 @@ def status() -> None:
     remembered = bool(session.customer_id and store.load_password(session.customer_id))
     if not session.can_refresh() and session.is_expired() and not remembered:
         err.print(f"[yellow]Sesión caducada[/yellow] (dispositivo {session.device_id}). Ejecuta `myinvestor login`.")
-        raise typer.Exit(1)
+        raise typer.Exit(SessionExpiredError.exit_code)
     with build_client(store) as client:
         customer = client.customer()
         session = client.session

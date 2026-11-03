@@ -8,7 +8,13 @@ import pytest
 import respx
 
 from myinvestor.auth import LOGIN_PATH, REFRESH_PATH, Authenticator
-from myinvestor.errors import InvalidCredentialsError, NetworkBlockedError, PasswordChangeRequired, SessionExpiredError
+from myinvestor.errors import (
+    InvalidCredentialsError,
+    LoginRejectedError,
+    NetworkBlockedError,
+    PasswordChangeRequired,
+    SessionExpiredError,
+)
 from myinvestor.session import Session
 from tests.conftest import API, DEVICE, make_jwt, ok, signature_pending, tokens
 from tests.test_signature import FakeUI
@@ -81,18 +87,33 @@ def test_login_new_device_asks_sms_and_retries_signed(mock_api: respx.MockRouter
     assert login.calls.last.request.headers["x-signature-id"] == "r9"
 
 
-def test_login_rejected(mock_api: respx.MockRouter, http: httpx.Client) -> None:
-    mock_api.post(f"{API}{LOGIN_PATH}").respond(
-        400, json={"payload": {"data": {"errCode": "INVALID_CREDENTIALS"}}, "status": {"code": "BAD_REQUEST"}}
-    )
-    with pytest.raises(InvalidCredentialsError, match="INVALID_CREDENTIALS"):
+def rejection(err_code: str | None, status: int = 400) -> httpx.Response:
+    data = {"payload": {"data": {"errCode": err_code}}} if err_code else {}
+    return httpx.Response(status, json={**data, "status": {"code": "BAD_REQUEST"}})
+
+
+def test_login_rejected_with_bad_password(mock_api: respx.MockRouter, http: httpx.Client) -> None:
+    mock_api.post(f"{API}{LOGIN_PATH}").mock(return_value=rejection("UNAUTHORIZED", 401))
+    with pytest.raises(InvalidCredentialsError, match="UNAUTHORIZED"):
         Authenticator(http).login_direct("00000000T", "bad", Session(device_id=DEVICE), None)
 
 
-def test_login_rejected_without_code_hints_recaptcha(mock_api: respx.MockRouter, http: httpx.Client) -> None:
-    mock_api.post(f"{API}{LOGIN_PATH}").respond(400, json={"status": {"code": "BAD_REQUEST"}})
-    with pytest.raises(InvalidCredentialsError, match="reCAPTCHA"):
+def test_login_rejected_with_password_change_code(mock_api: respx.MockRouter, http: httpx.Client) -> None:
+    mock_api.post(f"{API}{LOGIN_PATH}").mock(return_value=rejection("UPDATE_PASSWORD_REQUIRED"))
+    with pytest.raises(PasswordChangeRequired):
         Authenticator(http).login_direct("00000000T", "x", Session(device_id=DEVICE), None)
+
+
+@pytest.mark.parametrize("err_code", ["TOO_MANY_REQUESTS", None])
+def test_login_rejected_for_other_reasons_is_not_bad_credentials(
+    mock_api: respx.MockRouter, http: httpx.Client, err_code: str | None
+) -> None:
+    mock_api.post(f"{API}{LOGIN_PATH}").mock(return_value=rejection(err_code, 403))
+    with pytest.raises(LoginRejectedError, match="reCAPTCHA") as exc:
+        Authenticator(http).login_direct("00000000T", "x", Session(device_id=DEVICE), None)
+    assert not isinstance(exc.value, InvalidCredentialsError)
+    assert (exc.value.status, exc.value.err_code) == (403, err_code)
+    assert exc.value.summary == (f"errCode {err_code}, HTTP 403" if err_code else "sin errCode, HTTP 403")
 
 
 def test_login_password_change_required(mock_api: respx.MockRouter, http: httpx.Client) -> None:

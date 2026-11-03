@@ -1,7 +1,9 @@
 """Where the session lives: OS keyring, a 0600 file, or memory.
 
 The password is stored only after `login --direct --remember`, keyed by customer id, so an expired
-session can log in again unattended (cron). It is deleted on logout and on the first rejection.
+session can log in again unattended (cron). It is deleted on logout and when MyInvestor says it is
+wrong. Any other rejection keeps it but pauses the re-login (`ReloginBlock`) so cron does not retry it
+on every run.
 """
 
 from __future__ import annotations
@@ -12,7 +14,8 @@ import json
 import os
 import tempfile
 from collections.abc import Callable, Iterator
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
@@ -24,6 +27,28 @@ from myinvestor.errors import CorruptKeyringError, CorruptStoreError
 from myinvestor.session import Session
 
 _NO_KEYRING_MODULES = {"keyring.backends.fail", "keyring.backends.null"}
+
+
+@dataclass(frozen=True)
+class ReloginBlock:
+    """No unattended re-login before `until` (UTC); `error` is the rejection that caused it."""
+
+    until: datetime
+    error: str
+
+    def is_active(self, now: datetime | None = None) -> bool:
+        return (now or datetime.now(tz=UTC)) < self.until
+
+    def to_dict(self) -> dict[str, str]:
+        return {"relogin_blocked_until": self.until.isoformat(), "last_relogin_error": self.error}
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> ReloginBlock:
+        """Raises ValueError/TypeError/KeyError on malformed data."""
+        until = datetime.fromisoformat(raw["relogin_blocked_until"])
+        if until.tzinfo is None:
+            raise ValueError("relogin_blocked_until without timezone")
+        return cls(until=until, error=str(raw["last_relogin_error"]))
 
 
 class StoreKind(StrEnum):
@@ -39,6 +64,9 @@ class SessionStore(Protocol):
     def load_password(self, customer_id: str) -> str | None: ...
     def save_password(self, customer_id: str, password: str) -> None: ...
     def delete_password(self, customer_id: str) -> None: ...
+    def load_relogin_block(self, customer_id: str) -> ReloginBlock | None: ...
+    def save_relogin_block(self, customer_id: str, block: ReloginBlock) -> None: ...
+    def clear_relogin_block(self, customer_id: str) -> None: ...
 
 
 class KeyringSessionStore:
@@ -72,6 +100,22 @@ class KeyringSessionStore:
     def delete_password(self, customer_id: str) -> None:
         if self.load_password(customer_id) is not None:
             keyring.delete_password(self._service, f"password:{customer_id}")
+
+    def load_relogin_block(self, customer_id: str) -> ReloginBlock | None:
+        raw = keyring.get_password(self._service, f"relogin-block:{customer_id}")
+        if not raw:
+            return None
+        try:
+            return ReloginBlock.from_dict(json.loads(raw))
+        except (ValueError, TypeError, KeyError) as exc:
+            raise CorruptKeyringError(self._service) from exc
+
+    def save_relogin_block(self, customer_id: str, block: ReloginBlock) -> None:
+        keyring.set_password(self._service, f"relogin-block:{customer_id}", json.dumps(block.to_dict()))
+
+    def clear_relogin_block(self, customer_id: str) -> None:
+        if keyring.get_password(self._service, f"relogin-block:{customer_id}") is not None:
+            keyring.delete_password(self._service, f"relogin-block:{customer_id}")
 
 
 class FileSessionStore:
@@ -146,6 +190,30 @@ class FileSessionStore:
             lambda data: {**data, "passwords": {k: v for k, v in data.get("passwords", {}).items() if k != customer_id}}
         )
 
+    def load_relogin_block(self, customer_id: str) -> ReloginBlock | None:
+        raw = self._read().get("relogin_blocks", {}).get(customer_id)
+        if raw is None:
+            return None
+        try:
+            return ReloginBlock.from_dict(raw)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise CorruptStoreError(self.path) from exc
+
+    def save_relogin_block(self, customer_id: str, block: ReloginBlock) -> None:
+        self._update(
+            lambda data: {**data, "relogin_blocks": {**data.get("relogin_blocks", {}), customer_id: block.to_dict()}}
+        )
+
+    def clear_relogin_block(self, customer_id: str) -> None:
+        if self.load_relogin_block(customer_id) is None:
+            return  # don't rewrite the file on every successful login
+        self._update(
+            lambda data: {
+                **data,
+                "relogin_blocks": {k: v for k, v in data.get("relogin_blocks", {}).items() if k != customer_id},
+            }
+        )
+
 
 class MemorySessionStore:
     """In-memory store for tests and library users who manage persistence themselves."""
@@ -153,6 +221,7 @@ class MemorySessionStore:
     def __init__(self, session: Session | None = None) -> None:
         self.session = session
         self.passwords: dict[str, str] = {}
+        self.relogin_blocks: dict[str, ReloginBlock] = {}
 
     def load(self) -> Session | None:
         return self.session
@@ -171,6 +240,15 @@ class MemorySessionStore:
 
     def delete_password(self, customer_id: str) -> None:
         self.passwords.pop(customer_id, None)
+
+    def load_relogin_block(self, customer_id: str) -> ReloginBlock | None:
+        return self.relogin_blocks.get(customer_id)
+
+    def save_relogin_block(self, customer_id: str, block: ReloginBlock) -> None:
+        self.relogin_blocks[customer_id] = block
+
+    def clear_relogin_block(self, customer_id: str) -> None:
+        self.relogin_blocks.pop(customer_id, None)
 
 
 def default_store_path() -> Path:
