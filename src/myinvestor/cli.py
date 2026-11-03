@@ -11,6 +11,7 @@ from rich.markup import escape
 # Importing the command modules registers their commands on `app`.
 from myinvestor import (  # noqa: F401
     cli_accounts,
+    cli_allocation,
     cli_auth,
     cli_doctor,
     cli_income,

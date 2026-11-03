@@ -47,7 +47,8 @@ myinvestor holds                                  # saldo retenido (p. ej. por �
 myinvestor balance-history [--from 2026-01-01]    # saldo diario total del efectivo
 myinvestor income [--year 2026 | --from … --to … | --days 60] [--by month|year|type|account] [-a …] [--free-only] [--allow-partial]   # intereses, dividendos, retenciones y comisiones
 
-myinvestor holdings [-a 123456] [--kind fondos|broker]   # posiciones: participaciones, coste, VL, valor, rentabilidad
+myinvestor holdings [-a 123456] [--kind fondos|broker] [--ter]   # posiciones: participaciones, coste, VL, valor, rentabilidad y peso
+myinvestor allocation [--by asset|geo|category|product|account] [--include-cash] [--target objetivo.json]   # reparto de la cartera y TER medio
 myinvestor orders [--all | --from 2025-01-01 --to …] [--status EXECUTED] [--pension]
 myinvestor pensions                               # planes de pensiones
 myinvestor history [IE0032126645|N1234] [-a ID] [--period month|three_months|six_months|year]
@@ -109,6 +110,28 @@ Las órdenes (`orders`) usan como `ref` el `reference` de MyInvestor, que según
 | `pensiones` | el `liquidationValueDate` más reciente de sus planes (una petición más por cuenta de pensiones) |
 
 Los fondos suelen ir con el VL de uno o dos días hábiles antes, así que comparar el valor de un lunes con el del viernes puede no reflejar ningún cambio real: mira `fecha_valor` antes de calcular la variación. La última fila es el total, también en JSON/CSV/TSV, con `producto: "total"` (`TOTAL` en la tabla), `valor` = suma de los productos y `fecha_valor: null`. La salida sigue siendo una lista de filas, compatible con lo que había. En `holdings`, la fecha del VL de cada posición ya iba en `fecha_vl`.
+
+`holdings` lleva además `peso`: el % de cada posición sobre el valor de **las posiciones listadas** (todas las cuentas de valores, o las elegidas con `-a` y `--kind`), así que la columna siempre suma 100. Con `--ter` añade `ter`, el de la ficha de cada fondo (`null` en acciones y ETF); cuesta una petición más por fondo distinto, por eso no va por defecto.
+
+### Reparto de la cartera: `allocation`
+
+`allocation` junta los fondos, ETF y acciones de todas las cuentas de valores (también las carteras gestionadas) y los planes de pensiones, los clasifica y los suma por la clave de `--by`:
+
+| `--by` | `clave` | De dónde sale |
+|---|---|---|
+| `asset` (por defecto) | tipo de activo: `VARIABLE_INCOME`, `FIXED_INCOME`, `MONEY_MARKET`, `COMMODITIES`, `MIXED`, `ALTERNATIVES`… | fondos: `assetType` de su ficha; acciones: `VARIABLE_INCOME`; ETF: su tipo de producto (`ETF`); planes: `activeType` de su ficha, tal cual |
+| `geo` | zona: `GLOBAL`, `EUROPE`, `UNITED_STATES`, `EMERGENT_MARKETS`… | fondos: `geoZone` de su ficha; acciones, ETF y planes: «sin clasificar» |
+| `category` | categoría | fondos y planes: `category` de su ficha; si no, el `myInvestorCategory` de la posición |
+| `product` | ISIN (o código del plan, o ticker), con `nombre` | la posición |
+| `account` | nombre de la cuenta (el de la cartera gestionada, p. ej. `METAL`, o el código), con `cuenta_id` y `tipo` (`valores`, `cartera`, `pensiones`, `efectivo`) | la cuenta |
+
+Cada fila trae `valor`, `peso_pct` (% sobre el total), `invertido`, `ganancia` y `ter`, la media ponderada por valor de las posiciones con TER conocido (solo los fondos: acciones, ETF, planes y efectivo no lo tienen y no lo diluyen). La última fila es el total (`clave: "total"`, `TOTAL` en la tabla) y su `ter` es el **TER medio ponderado de la cartera**. Lo que no tiene clasificación va a `sin clasificar`. En JSON/CSV/TSV cada fila lleva `consultado_en`, como `holdings`.
+
+La clasificación sale de la ficha de cada fondo (`/funds/{isin}`, una petición por ISIN distinto aunque esté en varias cuentas). El catálogo (`/funds`) trae lo mismo, pero solo se puede buscar de uno en uno (costaría igual) o recorrer entero (miles de fondos); la ficha, además, responde también por fondos que ya no se comercializan. Las acciones y ETF no piden nada: se clasifican con el tipo de producto que trae la posición. La ficha del plan de pensiones solo se pide con `--by asset` o `--by category`, que son las que la usan.
+
+Con `--include-cash` el saldo de las cuentas de efectivo (todas, como en `position`) entra como la clase `efectivo` (con `invertido` = saldo y `ganancia` = 0). En `--by account`, la cuenta de efectivo propia de una cartera gestionada (su `cashAccountId`) se suma a esa cartera en vez de salir como otra cuenta.
+
+`--target objetivo.json` compara con unos pesos objetivo, un objeto JSON `{clave: %}` que sume 100, con las mismas claves que `--by` (por ejemplo `{"VARIABLE_INCOME": 80, "FIXED_INCOME": 15, "COMMODITIES": 5}`). Añade `objetivo_pct`, `desviacion_pct` (peso actual − objetivo) y `aportar`, cuánto meter en cada clave para llegar al objetivo **sin vender**: el total final es el menor en el que ninguna clave queda por encima de su objetivo, y la fila total suma lo que hay que aportar. Las claves del objetivo que no tienes salen con `valor` 0. Las que tienes pero no están en el objetivo (o con 0) no se pueden reducir sin vender, así que quedan fuera del cálculo (se avisa en stderr): el peso actual y `aportar` se calculan solo sobre las claves con objetivo.
 
 ### Lo que viene: `upcoming`
 
@@ -320,14 +343,15 @@ stdout solo lleva el resultado: con `-f json` y sin datos sale `[]`, con `-f csv
 
 Dentro de una misma orden, las consultas `GET` idénticas (misma ruta y parámetros) se responden de memoria; las firmadas y las `202` no se guardan, y nada se guarda en disco.
 
-Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de pensiones, C = cuentas de efectivo elegidas, por defecto todas):
+Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de pensiones, C = cuentas de efectivo elegidas, por defecto todas, F = fondos distintos en cartera, cuya ficha se pide una vez, D = planes de pensiones distintos):
 
 | Orden | Peticiones |
 |---|---|
 | `accounts`, `balance-history`, `contributions`, `funds`, `feed`, `raw`, `status` | 1 |
 | `position` | 3 + V |
 | `movements`, `holds` | 1 + C |
-| `holdings` | 1 + V (también con `-a`: se leen todas para resolverla) |
+| `holdings` | 1 + V (también con `-a`: se leen todas para resolverla); `--ter`: + F |
+| `allocation` | 2 + V + P + F; con `--by asset` o `category`: + D; con `--include-cash`: + 1 |
 | `orders` | 1 + V; con `-a`: 1 + V + las elegidas; `--pension`: 1 + P |
 | `pensions` | 1 + P |
 | `upcoming` | 4 + C + 2·V + P (C: con `--owner`, solo las de ese tipo) |

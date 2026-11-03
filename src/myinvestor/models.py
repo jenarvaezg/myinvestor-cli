@@ -205,6 +205,7 @@ class Investment(_Model):
 
     account_id: str | None = None
     investment_product_type: str | None = None  # INDEXED_FUND | BROKER | …
+    broker_product_type: str | None = None  # on BROKER positions: ETF | STOCK | …
     isin: str | None = None
     ticker: str | None = None
     investment_name: str | None = None
@@ -385,6 +386,29 @@ class FundSummary(_Model):
     annualized_profitability: Profitability | None = None
 
     _days = field_validator("liquidation_value_date", mode="before")(_day)
+
+
+class FundSheet(_Model):
+    """The part of a fund's detail (`/cperf-server/api/v2/funds/{isin}`) that classifies it."""
+
+    isin_code: str | None = None
+    name: str | None = None
+    product_type: str | None = None
+    asset_type: str | None = None  # VARIABLE_INCOME | FIXED_INCOME | MONEY_MARKET | COMMODITIES | MIXED | …
+    geo_zone: str | None = None  # GLOBAL | EUROPE | UNITED_STATES | EMERGENT_MARKETS | …
+    category: str | None = None
+    myinvestor_category: str | None = None
+    ter: Decimal | None = None  # percent
+
+
+class PensionPlanSheet(_Model):
+    """The part of a pension plan's detail (`/cperf-server/api/v2/pension-plans/{dgs}`) that classifies it."""
+
+    dgs_code: str | None = None
+    name: str | None = None
+    category: str | None = None
+    plan_type: str | None = None
+    active_type: str | None = None  # "Tipo de activo" on the web
 
 
 class FeedItem(_Model):

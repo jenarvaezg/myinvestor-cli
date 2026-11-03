@@ -25,10 +25,13 @@ MONEY_COLUMNS = frozenset(
     {"importe", "saldo", "retenido", "disponible", "valor", "invertido", "ganancia", "vl", "coste_medio", "total"}
     | {"intereses", "dividendos", "bruto", "retenciones", "neto", "comisiones"}
     | {"disponible_tras", "falta"}
+    | {"aportar"}
 )
 PRICE_COLUMNS = frozenset({"vl", "coste_medio"})
 AMOUNT_COLUMNS = MONEY_COLUMNS - PRICE_COLUMNS
-PERCENT_COLUMNS = frozenset({"rentab", "rentab_ytd", "ter", "1a", "3a", "5a", "ytd"})
+PERCENT_COLUMNS = frozenset(
+    {"rentab", "rentab_ytd", "ter", "1a", "3a", "5a", "ytd"} | {"peso", "peso_pct", "objetivo_pct", "desviacion_pct"}
+)
 QUANTITY_COLUMNS = frozenset({"participaciones", "movimientos"})
 NUMERIC_COLUMNS = MONEY_COLUMNS | PERCENT_COLUMNS | QUANTITY_COLUMNS
 DATE_COLUMNS = frozenset({"fecha", "valor_fecha", "fecha_vl", "fecha_valor", "proxima", "consultado_en", "periodo"})
