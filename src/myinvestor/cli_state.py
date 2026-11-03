@@ -8,6 +8,7 @@ from typing import Annotated, Any
 import typer
 
 from myinvestor.cli_common import FormatOpt, app, err
+from myinvestor.json_envelope import set_command as set_envelope_command
 from myinvestor.output import OutputFormat, print_json, render
 from myinvestor.state import Marks, SeenState, StateFile, StateKind, default_state_path, state_to_dict
 
@@ -37,6 +38,11 @@ KindArg = Annotated[
 
 state_app = typer.Typer(no_args_is_help=True, help="Estado local de --new: qué se ha mostrado ya.")
 app.add_typer(state_app, name="state")
+
+
+@state_app.callback()
+def _state_command(ctx: typer.Context) -> None:
+    set_envelope_command(f"state {ctx.invoked_subcommand}")
 
 
 def state_file(path: Path | None) -> StateFile:

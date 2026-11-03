@@ -1,0 +1,360 @@
+{
+  "envelope": {
+    "por defecto": {
+      "schema": "string",
+      "cli_version": "string",
+      "as_of": "datetime",
+      "data": "any"
+    }
+  },
+  "myinvestor.position/1": {
+    "por defecto": {
+      "producto": "string",
+      "id": "string",
+      "nombre": "string|null",
+      "valor": "amount|null",
+      "invertido": "amount|null",
+      "ganancia": "amount|null",
+      "rentab": "number|null",
+      "fecha_valor": "date|null",
+      "consultado_en": "datetime"
+    }
+  },
+  "myinvestor.accounts/1": {
+    "por defecto": {
+      "id": "string",
+      "uuid": "string",
+      "alias": "string|null",
+      "iban": "string|null",
+      "tipo": "string|null",
+      "rol": "string|null",
+      "titular": "string|null",
+      "estado": "string|null",
+      "disponible": "amount",
+      "retenido": "amount",
+      "saldo": "amount",
+      "titulares": "array",
+      "titulares[].nombre": "string|null",
+      "titulares[].rol": "string|null",
+      "titulares[].yo": "boolean"
+    }
+  },
+  "myinvestor.movements/1": {
+    "por defecto": {
+      "id": "string",
+      "fecha": "date",
+      "valor_fecha": "date|null",
+      "cuenta": "string",
+      "cuenta_id": "string",
+      "cuenta_uuid": "string",
+      "iban": "string|null",
+      "sentido": "string|null",
+      "tipo": "string|null",
+      "clase": "string|null",
+      "concepto": "string|null",
+      "importe": "amount",
+      "saldo": "amount|null",
+      "origen": "string|null",
+      "destino": "string|null",
+      "contraparte": "string|null",
+      "ref": "string|null",
+      "operacion_ref": "string|null",
+      "fichero_ref": "string|null",
+      "pareja_id": "string|null",
+      "traspaso_interno": "boolean"
+    },
+    "--id": {
+      "id": "string",
+      "fecha": "date",
+      "valor_fecha": "date|null",
+      "cuenta": "string",
+      "cuenta_id": "string",
+      "cuenta_uuid": "string",
+      "iban": "string|null",
+      "sentido": "string|null",
+      "tipo": "string|null",
+      "clase": "string|null",
+      "concepto": "string|null",
+      "importe": "amount",
+      "saldo": "amount|null",
+      "origen": "string|null",
+      "destino": "string|null",
+      "contraparte": "string|null",
+      "ref": "string|null",
+      "operacion_ref": "string|null",
+      "fichero_ref": "string|null",
+      "pareja_id": "string|null",
+      "traspaso_interno": "boolean"
+    }
+  },
+  "myinvestor.holds/1": {
+    "por defecto": {
+      "cuenta": "string",
+      "id": "string",
+      "tipo": "string|null",
+      "importe": "amount"
+    }
+  },
+  "myinvestor.balance-history/1": {
+    "por defecto": {
+      "fecha": "date",
+      "saldo": "amount"
+    }
+  },
+  "myinvestor.holdings/1": {
+    "por defecto": {
+      "cuenta": "string",
+      "tipo": "string|null",
+      "isin": "string|null",
+      "nombre": "string|null",
+      "participaciones": "number|null",
+      "coste_medio": "number|null",
+      "vl": "number|null",
+      "fecha_vl": "date|null",
+      "invertido": "amount|null",
+      "valor": "amount|null",
+      "ganancia": "amount|null",
+      "rentab": "number|null",
+      "peso": "number|null",
+      "ter": "number|null (solo con --ter)",
+      "consultado_en": "datetime"
+    }
+  },
+  "myinvestor.orders/1": {
+    "por defecto": {
+      "fecha": "date",
+      "cuenta": "string|null",
+      "ref": "string",
+      "producto": "string|null",
+      "nombre": "string|null",
+      "operacion": "string|null",
+      "estado": "string|null",
+      "importe": "amount|null",
+      "participaciones": "number|null"
+    }
+  },
+  "myinvestor.pensions/1": {
+    "por defecto": {
+      "cuenta": "string",
+      "codigo": "string",
+      "nombre": "string|null",
+      "participaciones": "number|null",
+      "coste_medio": "number|null",
+      "vl": "number|null",
+      "fecha_vl": "date|null",
+      "invertido": "amount|null",
+      "valor": "amount|null",
+      "ganancia": "amount|null",
+      "rentab": "number|null"
+    }
+  },
+  "myinvestor.history/1": {
+    "por defecto": {
+      "fecha": "date",
+      "cuenta": "string",
+      "producto": "string",
+      "valor": "amount|null",
+      "invertido": "amount|null",
+      "rentab": "number|null",
+      "participaciones": "number|null",
+      "coste_medio": "number|null"
+    }
+  },
+  "myinvestor.contributions/1": {
+    "por defecto": {
+      "id": "string",
+      "estado": "string|null",
+      "producto": "string|null",
+      "nombre": "string|null",
+      "importe": "amount",
+      "frecuencia": "string|null",
+      "proxima": "date|null",
+      "destino": "string|null"
+    }
+  },
+  "myinvestor.funds/1": {
+    "por defecto": {
+      "isin": "string",
+      "nombre": "string|null",
+      "gestora": "string|null",
+      "categoria": "string|null",
+      "ter": "number|null",
+      "riesgo": "integer|null",
+      "vl": "number|null",
+      "ytd": "number|null",
+      "1a": "number|null"
+    }
+  },
+  "myinvestor.feed/1": {
+    "por defecto": {
+      "fecha": "date|null",
+      "producto": "string|null",
+      "tipo": "string|null",
+      "titulo": "string|null",
+      "detalle": "string|null"
+    }
+  },
+  "myinvestor.internal-transfers/1": {
+    "por defecto": {
+      "fecha": "date",
+      "importe": "amount",
+      "desde_cuenta": "string|null",
+      "desde_id": "string|null",
+      "hacia_cuenta": "string|null",
+      "hacia_id": "string|null",
+      "concepto": "string|null",
+      "clave": "string|null",
+      "match": "string|null"
+    }
+  },
+  "myinvestor.upcoming/1": {
+    "por defecto": {
+      "fecha": "date",
+      "tipo": "string",
+      "producto": "string|null",
+      "importe": "amount|null",
+      "cuenta_cargo": "string|null",
+      "retenido": "boolean",
+      "disponible": "amount|null",
+      "disponible_tras": "amount|null",
+      "falta": "amount|null",
+      "tipo_retencion": "string|null"
+    }
+  },
+  "myinvestor.income/1": {
+    "--by month | --by year": {
+      "periodo": "string",
+      "intereses": "amount",
+      "dividendos": "amount",
+      "bruto": "amount",
+      "retenciones": "amount",
+      "neto": "amount",
+      "comisiones": "amount",
+      "movimientos": "integer"
+    },
+    "--by type": {
+      "categoria": "string",
+      "tipo": "string|null",
+      "regla": "string|null",
+      "movimientos": "integer",
+      "importe": "amount"
+    },
+    "--by account": {
+      "cuenta": "string",
+      "cuenta_id": "string|null",
+      "intereses": "amount",
+      "dividendos": "amount",
+      "bruto": "amount",
+      "retenciones": "amount",
+      "neto": "amount",
+      "comisiones": "amount",
+      "movimientos": "integer"
+    }
+  },
+  "myinvestor.allocation/1": {
+    "--by asset": {
+      "clave": "string",
+      "origen": "string|null",
+      "valor": "amount",
+      "peso_pct": "number|null",
+      "invertido": "amount|null",
+      "ganancia": "amount|null",
+      "ter": "number|null",
+      "objetivo_pct": "number|null (solo con --target)",
+      "desviacion_pct": "number|null (solo con --target)",
+      "aportar": "amount|null (solo con --target)",
+      "consultado_en": "datetime"
+    },
+    "--by geo | --by category": {
+      "clave": "string",
+      "valor": "amount",
+      "peso_pct": "number|null",
+      "invertido": "amount|null",
+      "ganancia": "amount|null",
+      "ter": "number|null",
+      "objetivo_pct": "number|null (solo con --target)",
+      "desviacion_pct": "number|null (solo con --target)",
+      "aportar": "amount|null (solo con --target)",
+      "consultado_en": "datetime"
+    },
+    "--by product": {
+      "clave": "string",
+      "nombre": "string|null",
+      "valor": "amount",
+      "peso_pct": "number|null",
+      "invertido": "amount|null",
+      "ganancia": "amount|null",
+      "ter": "number|null",
+      "objetivo_pct": "number|null (solo con --target)",
+      "desviacion_pct": "number|null (solo con --target)",
+      "aportar": "amount|null (solo con --target)",
+      "consultado_en": "datetime"
+    },
+    "--by account": {
+      "clave": "string",
+      "cuenta_id": "string|null",
+      "tipo": "string|null",
+      "valor": "amount",
+      "peso_pct": "number|null",
+      "invertido": "amount|null",
+      "ganancia": "amount|null",
+      "ter": "number|null",
+      "objetivo_pct": "number|null (solo con --target)",
+      "desviacion_pct": "number|null (solo con --target)",
+      "aportar": "amount|null (solo con --target)",
+      "consultado_en": "datetime"
+    }
+  },
+  "myinvestor.status/1": {
+    "por defecto": {
+      "logged_in": "boolean",
+      "name": "string|null",
+      "customer_id_masked": "string|null",
+      "device_id": "string|null",
+      "store": "string",
+      "store_path": "string|null",
+      "access_expires_at": "datetime|null",
+      "refresh_expires_at": "datetime|null",
+      "password_remembered": "boolean",
+      "can_refresh": "boolean",
+      "can_relogin": "boolean",
+      "relogin_blocked_until": "datetime|null",
+      "last_relogin_error": "string|null",
+      "verified_online": "boolean"
+    }
+  },
+  "myinvestor.doctor/1": {
+    "por defecto": {
+      "ok": "boolean",
+      "cli_version": "string",
+      "checks": "array",
+      "checks[].check": "string",
+      "checks[].status": "string",
+      "checks[].message": "string",
+      "checks[].data": "object"
+    }
+  },
+  "myinvestor.state-show/1": {
+    "por defecto": {
+      "path": "string",
+      "version": "integer",
+      "movements": "object",
+      "orders": "object",
+      "pension_orders": "object",
+      "contributions": "object",
+      "pending": "object"
+    }
+  },
+  "myinvestor.raw/1": {
+    "por defecto": {
+      "*": "any"
+    }
+  },
+  "myinvestor.error/1": {
+    "por defecto": {
+      "error": "string",
+      "exit_code": "integer",
+      "message": "string"
+    }
+  }
+}

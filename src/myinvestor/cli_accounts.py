@@ -35,7 +35,7 @@ from myinvestor.models import (
     SecuritiesAccount,
     stable_ids,
 )
-from myinvestor.output import OutputFormat, print_json, render
+from myinvestor.output import OutputFormat, normalize_row, print_json, render
 from myinvestor.psd2 import Span, free_start, split_range
 from myinvestor.signature import INAPP, can_start
 from myinvestor.state import AccountCursor, StateKind, movement_marks, unseen_movements
@@ -468,7 +468,7 @@ def _show_movement(rows: list[dict[str, Any]], movement_id: str, start: date, en
             "Si es de otra fecha, indica el rango con --from/--to o --days."
         )
     if fmt is OutputFormat.json:
-        print_json(row)
+        print_json(normalize_row(row))  # amounts to cents, as in the list
     elif fmt is OutputFormat.csv:
         render([row], fmt)
     else:

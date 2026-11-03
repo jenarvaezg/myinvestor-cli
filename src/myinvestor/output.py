@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.table import Column, Table
 from rich.text import Text
 
+from myinvestor.json_envelope import wrap
 from myinvestor.json_output import decimal_literal, dumps
 
 # Column roles. The table formats them the Spanish way; JSON/CSV/TSV keep raw numbers, with
@@ -104,7 +105,7 @@ def normalize_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def render(rows: Sequence[dict[str, Any]], fmt: OutputFormat, *, title: str | None = None) -> None:
     if fmt is OutputFormat.json:
-        print(dumps([normalize_row(r) for r in rows]))
+        print_json([normalize_row(r) for r in rows])
         return
     if not rows:
         if fmt is OutputFormat.table:  # JSON already printed `[]`; empty CSV/TSV is the result
@@ -223,4 +224,5 @@ def format_cell(column: str, value: Any) -> str:
 
 
 def print_json(data: Any) -> None:
-    print(dumps(data))
+    """JSON on stdout, inside the `--json-envelope` envelope when it is on."""
+    print(dumps(wrap(data)))

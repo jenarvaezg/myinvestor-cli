@@ -14,7 +14,7 @@ import httpx
 import pytest
 import respx
 
-from myinvestor import cli_common
+from myinvestor import cli_common, json_envelope
 from myinvestor.http import build_http_client
 from myinvestor.output import notices
 from myinvestor.session import Session
@@ -193,6 +193,13 @@ def _reset_cli_verbosity() -> Iterator[None]:
     logger.setLevel(level)
     logger.handlers[:] = handlers
     notices.quiet = False
+
+
+@pytest.fixture(autouse=True)
+def _reset_json_envelope() -> Iterator[None]:
+    """`--json-envelope` is process-wide too: a direct `render` after a CLI test must not be wrapped."""
+    yield
+    json_envelope.configure(enabled=False)
 
 
 @pytest.fixture
