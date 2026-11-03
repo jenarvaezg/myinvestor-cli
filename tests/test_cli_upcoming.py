@@ -34,7 +34,8 @@ def mock_everything(mock_api: respx.MockRouter, *, contribution_amount: float = 
         200, json=ok([cash_account(1, enabledBalance=100.0, withheldBalance=25.0)])
     )
     mock_api.get(f"{API}/account/api/v3/account/{CASH_UUID}/holds").respond(
-        200, json=ok([{"id": "h1", "type": "FUND_ORDER", "amount": 25.0}])
+        200,
+        json=ok([{"id": "h1", "accountId": CASH_UUID, "type": "INVESTMENT_ORDER", "amount": 25.0, "currency": "EUR"}]),
     )
     mock_api.get(f"{CPERF}/v2/automatic-contributions/self").respond(
         200,
@@ -78,6 +79,7 @@ def mock_everything(mock_api: respx.MockRouter, *, contribution_amount: float = 
                     fundName="Plan de pensiones",
                     status="IN_PROGRESS",
                     cash=10.0,
+                    effectiveDate="2027-11-04T00:00:00.000+0000",  # a year later: not the execution day
                 )
             ]
         ),
@@ -92,12 +94,14 @@ def test_upcoming_json_joins_holds_orders_and_contributions(
     result = runner.invoke(app, ["upcoming", "-f", "json"], catch_exceptions=False)
 
     rows: list[dict[str, Any]] = json.loads(result.stdout, parse_float=Decimal)
-    assert [(r["fecha"], r["tipo"], r["producto"], r["importe"], r["disponible_tras"]) for r in rows] == [
-        ("2026-11-02", "orden", "Fondo indexado", Decimal("-25.00"), Decimal("100.00")),
-        ("2026-11-03", "retencion", "FUND_ORDER", Decimal("-25.00"), Decimal("100.00")),
-        ("2026-11-03", "orden", "Plan de pensiones", Decimal("-10.00"), Decimal("100.00")),
-        ("2026-11-05", "aportacion", "Fondo mensual", Decimal("-60.00"), Decimal("40.00")),
+    assert [
+        (r["fecha"], r["tipo"], r["producto"], r["importe"], r["retenido"], r["disponible_tras"]) for r in rows
+    ] == [
+        ("2026-11-02", "orden", "Fondo indexado", Decimal("-25.00"), True, Decimal("100.00")),
+        ("2026-11-03", "orden", "Plan de pensiones", Decimal("-10.00"), False, Decimal("100.00")),
+        ("2026-11-05", "aportacion", "Fondo mensual", Decimal("-60.00"), False, Decimal("40.00")),
     ]
+    assert rows[0]["tipo_retencion"] == "INVESTMENT_ORDER"
     assert {r["cuenta_cargo"] for r in rows} == {"Cuenta 1"}
     assert '"disponible_tras": 40.00' in result.stdout
     assert result.stderr == ""
@@ -132,3 +136,5 @@ def test_upcoming_table(mock_api: respx.MockRouter, store: MemorySessionStore) -
 
     assert "Próximos 14 días" in result.stdout
     assert "2026-11-05" in result.stdout and "40,00 €" in result.stdout
+    assert "retenido" in result.stdout and " sí " in result.stdout
+    assert "tipo_retencion" not in result.stdout

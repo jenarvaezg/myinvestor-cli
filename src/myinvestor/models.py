@@ -305,6 +305,7 @@ class Order(_Model):
     effective_date: dt.date | None = None
     expiration_date: dt.date | None = None
     is_cancelable: bool | None = None
+    amount_to_block: Decimal | None = None  # what a fund buy withholds on the cash account
 
     _days = field_validator("order_date", "effective_date", "expiration_date", mode="before")(_day)
 

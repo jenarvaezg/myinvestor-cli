@@ -38,8 +38,10 @@ def contribution(cid: str, amount: float, next_day: str, **overrides: Any) -> Co
     return Contribution.model_validate({**base, **overrides})
 
 
-def hold(hid: str, amount: float) -> Hold:
-    return Hold.model_validate({"id": hid, "type": "FUND_ORDER", "amount": amount})
+def hold(hid: str, amount: float, kind: str = "INVESTMENT_ORDER") -> Hold:
+    return Hold.model_validate(
+        {"id": hid, "accountId": "aaaaaaaa-0000-0000-0000-000000000001", "type": kind, "amount": amount}
+    )
 
 
 def an_order(ref: str, status: str, **overrides: Any) -> Order:
@@ -68,9 +70,11 @@ def test_contribution_within_window_charges_its_account() -> None:
             "producto": "Fondo c1",
             "importe": Decimal("-30"),
             "cuenta_cargo": "Cuenta 1",
+            "retenido": False,
             "disponible": Decimal("100"),
             "disponible_tras": Decimal("70"),
             "falta": None,
+            "tipo_retencion": None,
         }
     ]
 
@@ -119,14 +123,61 @@ def test_holds_are_shown_but_not_subtracted_again() -> None:
         ("retencion", "2026-11-03", Decimal(-50), Decimal(100), None),
         ("aportacion", "2026-11-05", Decimal(-80), Decimal(20), None),
     ]
-    assert rows[0]["producto"] == "FUND_ORDER"
+    assert rows[0]["producto"] == "retención por orden de inversión"
+    assert rows[0]["retenido"] is True and rows[0]["tipo_retencion"] == "INVESTMENT_ORDER"
+
+
+def test_hold_of_an_unknown_type_keeps_it_in_its_own_column() -> None:
+    [row] = rows_for(holds={"101": [hold("h1", 5, kind="CARD")]})
+    assert (row["producto"], row["tipo_retencion"]) == ("retención", "CARD")
+
+
+def test_each_order_hold_merges_with_its_order_one_to_one() -> None:
+    """The hold only says account, type and amount: pair it with an order of the same account and amount."""
+    orders = [
+        (an_order("f1", "PENDING", cash=129.08), "101"),
+        (an_order("f2", "PENDING", cash=250.0), "101"),
+        (an_order("f3", "IN_PROGRESS", cash=50.0, amountToBlock=50.0), "101"),
+        (an_order("f4", "PENDING", cash=50.0), "102"),  # same amount, other account
+        (an_order("p1", "IN_PROGRESS", cash=125.0, fundName="Plan", securitiesAccountId=None), "101"),
+        (an_order("f5", "PENDING", cash=99.0, amountToBlock=99.5), "101"),  # withholds amountToBlock
+        (an_order("f6", "PENDING", cash=30.0), "101"),  # no hold
+    ]
+    holds = {
+        "101": [
+            hold("h1", 50.0),
+            hold("h2", 250.0),
+            hold("h3", 129.08),
+            hold("h4", 125.0),
+            hold("h5", 50.0),  # a second 50: only one order of 50 on this account
+            hold("h6", 99.5),
+            hold("h7", 30.0, kind="CARD"),  # not an order hold
+        ]
+    }
+
+    rows = rows_for(accounts=[account(1, 100), account(2, 100)], orders=orders, holds=holds)
+
+    assert sorted((r["tipo"], r["producto"], r["importe"], r["cuenta_cargo"], r["retenido"]) for r in rows) == sorted(
+        [
+            ("orden", "Fondo indexado", Decimal("-129.08"), "Cuenta 1", True),
+            ("orden", "Fondo indexado", Decimal(-250), "Cuenta 1", True),
+            ("orden", "Fondo indexado", Decimal(-50), "Cuenta 1", True),
+            ("orden", "Fondo indexado", Decimal(-50), "Cuenta 2", False),
+            ("orden", "Plan", Decimal(-125), "Cuenta 1", True),
+            ("orden", "Fondo indexado", Decimal(-99), "Cuenta 1", True),
+            ("orden", "Fondo indexado", Decimal(-30), "Cuenta 1", False),
+            ("retencion", "retención por orden de inversión", Decimal(-50), "Cuenta 1", True),
+            ("retencion", "retención", Decimal(-30), "Cuenta 1", True),
+        ]
+    )
+    assert {r["disponible_tras"] for r in rows if r["cuenta_cargo"] == "Cuenta 1"} == {Decimal(100)}
 
 
 def test_in_progress_orders_are_listed_with_their_cash_account_but_not_subtracted() -> None:
     orders = [
         (an_order("o1", "PENDING"), "101"),
         (an_order("o2", "IN_PROGRESS", operationType="INVESTMENT_FUND_REIMBURSEMENT", cash=40.0), "101"),
-        (an_order("o3", "INITIAL", effectiveDate="2026-11-06T00:00:00.000+0000"), "101"),
+        (an_order("o3", "INITIAL", effectiveDate="2027-11-04T00:00:00.000+0000"), "101"),  # not the execution day
         (an_order("o4", "COMPLETE"), "101"),
         (an_order("o5", "EXECUTED"), "101"),
         (an_order("o6", "REJECTED"), "101"),
@@ -137,9 +188,14 @@ def test_in_progress_orders_are_listed_with_their_cash_account_but_not_subtracte
     assert [(r["fecha"], r["tipo"], r["importe"], r["disponible_tras"]) for r in rows] == [
         ("2026-11-02", "orden", Decimal(-150), Decimal(100)),
         ("2026-11-02", "orden", Decimal(40), Decimal(100)),
-        ("2026-11-06", "orden", Decimal(-150), Decimal(100)),
+        ("2026-11-02", "orden", Decimal(-150), Decimal(100)),
     ]
-    assert rows[0]["producto"] == "Fondo indexado"
+    assert rows[0]["producto"] == "Fondo indexado" and rows[0]["retenido"] is False
+
+
+def test_an_order_in_progress_never_falls_beyond_the_window() -> None:
+    [row] = rows_for(days=3, orders=[(an_order("o1", "PENDING", orderDate="2026-12-01T00:00:00.000+0000"), "101")])
+    assert row["fecha"] == "2026-11-06"
 
 
 def test_order_without_cash_amount_or_known_account() -> None:
