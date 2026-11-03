@@ -275,6 +275,7 @@ Salida: lista de objetos.
 | `vl` | number (exacto) | sí | sí |  |
 | `ytd` | number (exacto) | sí | sí | rentabilidad en el año, en % |
 | `1a` | number (exacto) | sí | sí | rentabilidad a 1 año, en % |
+| `moneda` | string | sí | sí | divisa del fondo (`currency`): la de `vl` |
 
 ### `fund-filters` — `myinvestor.fund-filters/1`
 
@@ -305,6 +306,18 @@ Salida: lista de objetos.
 | `1a` | number (exacto) | sí | sí | rentabilidad anualizada a 1 año, en % |
 | `3a` | number (exacto) | sí | sí | rentabilidad anualizada a 3 años, en % |
 | `5a` | number (exacto) | sí | sí | rentabilidad anualizada a 5 años, en % |
+
+### `fund-history` — `myinvestor.fund-history/1`
+
+Más antiguas primero, desde el inicio del fondo. Con `--every week|month`, el último punto de cada semana o mes. La `variacion_pct` de la tabla no va en JSON/CSV/TSV.
+
+Salida: lista de objetos.
+
+| Clave | Tipo | `null` | Estable | Notas |
+|---|---|---|---|---|
+| `fecha` | date `AAAA-MM-DD` | no | sí |  |
+| `vl` | number (exacto) | no | sí | valor liquidativo (`marketValue`), en `moneda` |
+| `moneda` | string | sí | sí | divisa del fondo, de su ficha; `null` si no se ha podido leer |
 
 ### `feed` — `myinvestor.feed/1`
 

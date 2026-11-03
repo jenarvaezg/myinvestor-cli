@@ -93,8 +93,9 @@ myinvestor snapshot [--save DIR] [--previous FILE] [--no-new] [--no-mark]   # to
 myinvestor summary [--from-file FILE] [--previous FILE]   # la misma foto, en tablas
 myinvestor fund IE0032126645 [--full]             # ficha del fondo (o del plan: `fund N1234`)
 myinvestor funds "s&p 500" [--sort ter,asc] [-n 20] [--page 0] [--asset-type variable_income --currency usd --max-ter 0.3 --risk 5-6 …]
-myinvestor fund-filters [categories|managers|currencies|asset-types|regions|types] [--pension]   # valores válidos de los filtros
+myinvestor fund-filters [categories|managers|currencies|asset-types|regions] [--pension]   # valores válidos de los filtros
 myinvestor pension-plans ["indexado"] [--manager …] [--asset-type …] [--max-ter 0.5] [--risk 2-4] [--rating 4] [--sort ter,asc] [-n 20] [--page 1]   # catálogo de planes
+myinvestor fund-history IE0032126645 [--since 2024-01-01] [--until …] [--every day|week|month]   # VL de cualquier fondo del catálogo, desde su inicio
 myinvestor feed [-n 20]                           # «Actividad» de la web
 myinvestor raw /cperf-server/api/v2/cash-accounts/self [-p clave=valor]   # GET arbitrario
 
@@ -109,6 +110,8 @@ myinvestor schema [movements] [--envelope]        # JSON Schema de la salida -f 
 ```
 
 ### Formatos de salida
+
+En la tabla, si una fila trae `moneda` (`funds`, `fund-history`), sus importes y precios salen en esa moneda (`29,88 USD`); sin ella, en euros.
 
 Todas las órdenes de listado aceptan `-f table|json|csv|tsv`:
 
@@ -316,6 +319,22 @@ Los traspasos entre fondos difieren la tributación, así que salen en la lista 
 La tabla muestra `fecha`, `cuenta`, `origen` y `destino` (código y nombre juntos), `participaciones`, `importe`, `estado`, `cancelable` y `ref`; JSON y CSV, todo. **`--pending`** solo da el contador de traspasos de fondos en curso de cada cuenta de valores (`cuenta`, `pendientes`); no se combina con `--pension` ni con fechas.
 
 **Los cambios entre fondos dentro de MyInvestor no salen aquí**: un «ALTA IIC SWITCH» (o una «Baja switch») es una orden, y se ve en `orders`, `order REF`, `lots` y `gains`. En las cuentas observadas estos endpoints respondieron siempre `[]`: los campos salen del bundle de la web, por eso todos son opcionales salvo `reference` y los desconocidos se ignoran. Fuera de alcance: simular, solicitar o cancelar traspasos, y el detalle de uno (`…/transfers/{reference}`).
+### Histórico del VL de un fondo: `fund-history`
+
+`history` solo da la evolución de **tus** posiciones y como mucho un año. **`fund-history ISIN`** da el valor liquidativo de **cualquier fondo o ETF del catálogo**, lo tengas o no, **desde el inicio del fondo**, con `/cperf-server/api/v2/funds/{isin}/graphs/INIT_GRAPH` (la misma petición que la gráfica de la ficha en la web) más la ficha del fondo, para saber su moneda. Sirve para comparar fondos antes de comprar o para ver más de un año de uno que ya tienes.
+
+```bash
+myinvestor fund-history IE0032126645 --since 2025-01-01 --every month   # cierre de cada mes, con la variación
+myinvestor fund-history IE0032126645 -f csv > vl.csv                    # toda la serie: fecha,vl
+```
+
+- Filas `fecha`, `vl` y `moneda`, más antiguas primero. En la tabla, además, `variacion_pct`: la variación frente al **primer punto mostrado** (tras `--since`, `--until` y `--every`), que sale a 0 %. En JSON/CSV/TSV, `fecha`, `vl` y `moneda` en cada fila (`myinvestor.fund-history/1`, ver [docs/json.md](docs/json.md)).
+- El **espaciado es irregular**: semanal en lo antiguo y diario en lo reciente, con huecos de varias semanas en algunos tramos. `--every week` (semana ISO, de lunes a domingo) o `--every month` se queda con el último punto de cada semana o mes; `day` (por defecto) deja todos.
+- `vl` va en la divisa del fondo (`moneda`, sacada de su ficha porque `INIT_GRAPH` no la trae; si la ficha falla, `moneda` va a `null`, se avisa en stderr y la tabla lo muestra en €), con la precisión de la API (la tabla lo redondea a 2 decimales). La API manda también un `profit` que en todos los puntos observados es igual al VL: no es un beneficio y el CLI no lo usa.
+- `--since`/`--until` filtran en local: la API siempre da la serie entera. Si el rango no tiene puntos, sale vacío (`[]` en JSON) y en stderr se dice de qué fecha a qué fecha hay histórico.
+- Un ISIN mal formado o un código de plan (`N1234`) fallan antes de pedir nada, con código 2. Si MyInvestor no tiene histórico de ese ISIN (respuesta vacía, 400 o 404), también sale con código 2 y un mensaje que sugiere buscarlo con `myinvestor funds ISIN`.
+- **`graphType`**: el único que acepta la API es `INIT_GRAPH`; `ONE_YEAR`, `MAX`, `THREE_YEARS` y `FIVE_YEARS` dan 400 (la web solo usa `INIT_GRAPH`).
+- **Tus posiciones, más de un año**: no se ha encontrado ningún endpoint ni paginación que lo dé. `…/positions?groupType=` acepta `ONE_MONTH`, `THREE_MONTHS`, `SIX_MONTHS` y `ONE_YEAR`; `ONE_WEEK`, `THREE_YEAR` y `MAX` dan 400. Para ver el VL de un fondo propio más atrás, usa `fund-history`; el valor de tu posición (participaciones × VL) más allá de un año no lo da la API.
 
 ### Traspasos internos
 
@@ -677,6 +696,7 @@ Peticiones que hace cada orden (V = cuentas de valores activas, P = cuentas de p
 | `accounts`, `transfers`, `interest` | 1 + C (`accounts`: C con `--owner`, solo las de ese tipo) |
 | `history` | sin argumentos: 2 + V + P; con ISIN: 2 + V; con `N1234`: 1 + P; con `-a` de pensiones: 2; con `-a` de valores: 3 + V |
 | `fund` | ISIN: 2 (1 con `--full`); plan `N1234`: 1 |
+| `fund-history` | 2 (la serie y la ficha, para la moneda) |
 | `login` | `--direct` o `--refresh-token-stdin`: 1 |
 
 Además: +1 `POST` de refresh si el token (15 min) ha caducado o MyInvestor responde 401, y +1 `POST` de login si hay que hacer re-login con la contraseña guardada. Cada segundo factor suma 1 `POST` para iniciarlo, la validación del código o una consulta de estado cada 3 s mientras esperas en la app, y la repetición firmada. Los reintentos ante `429/5xx` (hasta 4) y los de `--retry-blocked` van aparte.
@@ -742,7 +762,7 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/securities-accounts/self-basic` | ids de cuentas de valores |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}` | totales + `securitiesAccountInvestments` por tipo (`INDEXED_FUND`, `BROKER`…) con `investmentList` |
 | GET | `/cperf-server/api/v3/securities-accounts/{id}/orders[?dateFrom&dateTo]` | sin fechas, solo recientes; con fechas, el histórico (la v2 con fechas da 500) |
-| GET | `/cperf-server/api/v2/{securities,pension}-accounts/{id}/positions?groupType=` | serie diaria por ISIN/código; `ONE_WEEK`, `ONE_MONTH`, `THREE_MONTHS`, `SIX_MONTHS`, `ONE_YEAR`, `THREE_YEAR`, `MAX` |
+| GET | `/cperf-server/api/v2/{securities,pension}-accounts/{id}/positions?groupType=` | serie diaria por ISIN/código; `ONE_MONTH`, `THREE_MONTHS`, `SIX_MONTHS`, `ONE_YEAR` (`ONE_WEEK`, `THREE_YEAR` y `MAX` → 400: no hay más de un año) |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/investment-summary` | totales fondos/acciones |
 | GET | `/cperf-server/api/v2/pension-accounts/self` · `/{id}` · `/{id}/orders?order=DATE` | planes y sus aportaciones |
 | GET | `/cperf-server/api/v2/securities-accounts/{id}/orders/{reference}` | detalle de una orden: `orderReference`, `isin`, `orderStatus` (`INITIAL`, `PENDING`, `IN_PROGRESS`, `COMPLETE`, `CANCEL`, `REJECTED`), `orderDate`, `orderTypeName`, `orderClass`, `operationType`, `grossAmountEUR`, `grossAmountFundCurrency`, `cash`, `shares`, `fundName`, `currency`, `expirationDate`, `periodicityCode`, `accountNumber`, `ordererCustomer` (el DNI: no se lee) y `relatedOperations: [{operationNumber, executionDate, executedShares, liquidationValue, grossAmountOperationFundCurrency, commissions, originRetention, destinyRetention, netAmountFundCurrency, exchangeRate, netAmountEUR, netAmountAccountCurrency, taxResult}]` |
@@ -757,9 +777,10 @@ Métodos que existen pero no se soportan: `PERSONAL_SIGNATURE`, `FACE_AUTH`, `SM
 | GET | `/cperf-server/api/v2/cash-accounts/{accountId}/documents/summary` | extracto: `{id, fileName}`; el PDF, en `/cperf-server/api/v2/documents/temporary/{id}` |
 | GET | `/cperf-server/api/v2/documents/{securities,pension-plans}/{accountId}/x-ray` · `/documents/funds/{isin}/x-ray` | radiografía en PDF generada al momento; la web también conoce `/documents/broker/{accountId}/x-ray`, sin uso en la interfaz |
 | GET | `/cperf-server/api/v2/funds?page&limit&sort&mainInputFilter&…` | catálogo paginado desde 0; filtros `category`, `region`, `manager`, `assetsType`, `currency`, `mstarRating`, `currencyHedging`, `responsibleFund`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue`… `type` (lo manda `IAe` en el bundle) responde **400** con cualquier valor (`FONDOS_INDEXADOS`, `FONDOS_INVERSION`, `INDEXED_FUND`…) y `managementType` se ignora: no hay forma conocida de filtrar indexados frente a activos |
-| GET | `/cperf-server/api/v2/funds/{isin}` · `/prices/last` · `/compositions` · `/graphs/{type}` | ficha, último VL |
+| GET | `/cperf-server/api/v2/funds/{isin}` · `/prices/last` · `/compositions` | ficha, último VL |
 | GET | `/cperf-server/api/v2/masters/{funds,pension-plans}/searcher/filters/{categories,managers,currencies,assets-type,regions}` · `/masters/funds/searcher/filters/types` | valores de los filtros del buscador: lista de textos (algunas categorías con espacios o tabuladores delante; `regions` incluye un `null`). `/masters/funds/searcher/filters/types` da `["FONDOS_INDEXADOS","FONDOS_INVERSION"]`, pero no sirve como filtro: son las opciones `fundsType` de un formulario de la web |
 | GET | `/cperf-server/api/v2/pension-plans?page&limit&sort&mainInputFilter&…` | catálogo de planes, paginado **desde 1**: `{dgsCode, name, managingEntity, morningstarRating, currency, ter, category, annualizedProfitability, cumulativeProfitability, passedProfitability}`; filtros `manager`, `assetsType`, `mstarRating`, `terMinValue`/`terTopValue`, `riskMinValue`/`riskTopValue` |
+| GET | `/cperf-server/api/v2/funds/{isin}/graphs/INIT_GRAPH` | VL desde el inicio del fondo: `{investmentPositionValueList: [{positionDate, marketValue (el VL), profit (igual que marketValue)}]}`, espaciado irregular; cualquier otro `graphType` (`ONE_YEAR`, `MAX`, `THREE_YEARS`, `FIVE_YEARS`) → 400 |
 | GET | `/feed/api/feed/self` | `text/event-stream` con un evento `data:{…}` |
 
 ### Servicio `/read-only/api/v1`

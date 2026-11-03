@@ -139,6 +139,7 @@ CATALOG_ROW = {
     "ter": 0.12,
     "riskRating": 4,
     "liquidationValue": 89.15,
+    "currency": "EUR",
     "annualizedProfitability": {"ytd": 9.1, "oneYear": 12.3},
 }
 PLAN_CATALOG_ROW = {
@@ -156,6 +157,7 @@ SHEET = {
     "geoZone": "GLOBAL",
     "category": "RV Global",
     "ter": 0.12,
+    "currency": {"code": "EUR", "symbol": "€"},  # the real shape: an object
 }
 
 # a periodic transfer already emitted once and still running, so every key of `transfers` is filled
@@ -234,6 +236,9 @@ def full_api(mock_api: respx.MockRouter, _monkeypatch: pytest.MonkeyPatch) -> No
     for path in ("categories", "managers", "currencies", "assets-type", "regions"):
         mock_api.get(f"{CPERF}/v2/masters/funds/searcher/filters/{path}").respond(200, json=ok(["\t Valor", None]))
     mock_api.get(f"{CPERF}/v2/pension-plans").respond(200, json=ok([PLAN_CATALOG_ROW], pagination={"totalElements": 1}))
+    mock_api.get(f"{CPERF}/v2/funds/{FUND}/graphs/INIT_GRAPH").respond(
+        200, json=ok({"investmentPositionValueList": [{"positionDate": "2026-11-02", "marketValue": 89.15}]})
+    )
     mock_api.get(f"{CPERF}/v2/funds/{FUND}/prices/last").respond(
         200, json=ok({"date": "2026-11-02", "price": 89.15, "currency": "EUR", "dayProfitPercentage": 0.2})
     )
@@ -375,6 +380,7 @@ CASES = (
     Case("funds", "", ("funds",)),
     Case("fund-filters", "", ("fund-filters",)),
     Case("pension-plans", "", ("pension-plans",)),
+    Case("fund-history", "", ("fund-history", FUND)),
     Case("feed", "", ("feed",)),
     Case("internal-transfers", "", ("internal-transfers", "--unmatched")),
     Case("upcoming", "", ("upcoming",), setup=upcoming_api),

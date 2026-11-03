@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from myinvestor.models import CashAccount, Flow, Ownership, stable_ids
+import pytest
+
+from myinvestor.models import CashAccount, Flow, FundSheet, Ownership, stable_ids
 from tests.conftest import CASH_UUID, cash_account, flow
 
 
@@ -105,3 +107,20 @@ def test_account_of_someone_else_is_other() -> None:
     assert account.ownership is Ownership.other
     assert account.main_holder is not None and account.main_holder.name == "Luis"
     assert CashAccount.model_validate(cash_account(1, holders=[])).ownership is Ownership.other
+
+
+@pytest.mark.parametrize(
+    ("currency", "expected"),
+    [
+        ({"code": "USD", "symbol": "$"}, "USD"),  # the real shape of the fund detail
+        ("EUR", "EUR"),
+        ({"symbol": "€"}, None),
+        ({"code": ""}, None),
+        (None, None),
+        (7, None),
+    ],
+)
+def test_fund_sheet_currency_is_the_code_of_the_currency_object(currency: object, expected: str | None) -> None:
+    sheet = FundSheet.model_validate({"isinCode": "IE0000000001", "ter": 0.12, "currency": currency})
+
+    assert (sheet.currency, sheet.ter) == (expected, Decimal("0.12"))
