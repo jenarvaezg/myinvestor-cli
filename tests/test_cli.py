@@ -350,6 +350,16 @@ def test_history_for_pension_code(mock_api: respx.MockRouter, store: MemorySessi
     assert route.calls.last.request.url.params["groupType"] == "ONE_YEAR"
 
 
+def test_history_period_all_asks_since_the_beginning(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
+    """`--period all` is the web's «desde el inicio»: one request, no extra year for the fiscal cost."""
+    route = pension_history(mock_api, "2024-03-01", "2026-10-01")
+
+    rows = json.loads(invoke("history", "N0001", "--period", "all", "-f", "json").stdout)
+
+    assert [r["fecha"] for r in rows] == ["2024-03-01", "2026-10-01"]
+    assert [c.request.url.params["groupType"] for c in route.calls] == ["SINCE_BEGINNING"]
+
+
 def test_fund_summary_adds_price(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:
     mock_api.get(f"{CPERF}/v2/funds/IE0000000001").respond(
         200, json=ok({"name": "Global", "isinCode": "IE0000000001", "ter": 0.1, "fundData": {"managingEntity": "Gest"}})
@@ -374,7 +384,14 @@ def pension_history(mock_api: respx.MockRouter, *days: str) -> respx.Route:
 
 
 @pytest.mark.parametrize(
-    ("days", "group"), [("20", "ONE_MONTH"), ("89", "THREE_MONTHS"), ("120", "SIX_MONTHS"), ("300", "ONE_YEAR")]
+    ("days", "group"),
+    [
+        ("20", "ONE_MONTH"),
+        ("89", "THREE_MONTHS"),
+        ("120", "SIX_MONTHS"),
+        ("300", "ONE_YEAR"),
+        ("400", "SINCE_BEGINNING"),
+    ],
 )
 def test_history_days_asks_for_the_shortest_period_and_trims(
     mock_api: respx.MockRouter, store: MemorySessionStore, days: str, group: str
@@ -390,7 +407,7 @@ def test_history_days_asks_for_the_shortest_period_and_trims(
     assert route.calls[0].request.url.params["groupType"] == group  # then ONE_YEAR for the fiscal cost (#73)
 
 
-def test_history_from_to_trims_and_rejects_period_or_more_than_a_year(
+def test_history_from_to_trims_and_rejects_period_with_dates(
     mock_api: respx.MockRouter, store: MemorySessionStore
 ) -> None:
     start = date.today() - timedelta(days=60)
@@ -400,8 +417,8 @@ def test_history_from_to_trims_and_rejects_period_or_more_than_a_year(
     rows = json.loads(invoke("history", "--from", days[1], "--to", days[2], "-f", "json").stdout)
 
     assert [r["fecha"] for r in rows] == days[1:3]
-    for args in (["--days", "10", "--period", "year"], ["--days", "400"]):
-        assert isinstance(runner.invoke(app, ["history", *args]).exception, InputError), args
+    result = runner.invoke(app, ["history", "--days", "10", "--period", "year"])
+    assert isinstance(result.exception, InputError)
 
 
 def test_balance_history_days_and_to(mock_api: respx.MockRouter, store: MemorySessionStore) -> None:

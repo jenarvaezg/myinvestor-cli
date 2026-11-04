@@ -88,7 +88,7 @@ Un total o un grupo (`position`, `allocation`, las cuentas de `snapshot`) solo t
 
 Límites, documentados porque el resultado no es fiable en estos casos:
 
-- El histórico llega a **un año** como mucho: un plan que ya existía el primer día empieza con el `invertido` de MyInvestor, así que una movilización de hace más de un año no se ve (su `coste_fiscal` es `invertido`).
+- Se reconstruye con **un año** de histórico: un plan que ya existía el primer día empieza con el `invertido` de MyInvestor, así que una movilización de hace más de un año no se ve (su `coste_fiscal` es `invertido`). En `history --period all` (o con `--from` de más de un año) se reconstruye con la serie entera.
 - Una movilización **desde otra entidad** no tiene origen en la cuenta: cuenta como aportación del dinero recibido. Una movilización que coincide el mismo día con una aportación al destino tampoco cuadra por importe y cuenta como aportación.
 - Un plan sin histórico (recién contratado hoy) o con un día sin participaciones o sin `invertido` tiene `coste_fiscal` `null` desde ese día.
 

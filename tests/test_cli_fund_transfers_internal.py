@@ -252,7 +252,7 @@ def test_a_mobilisation_only_in_the_history_is_deduced(
 
 @pytest.mark.parametrize(
     ("days_back", "period"),
-    [(20, "ONE_MONTH"), (60, "THREE_MONTHS"), (120, "SIX_MONTHS"), (300, "ONE_YEAR"), (900, "ONE_YEAR")],
+    [(20, "ONE_MONTH"), (60, "THREE_MONTHS"), (120, "SIX_MONTHS"), (300, "ONE_YEAR"), (900, "SINCE_BEGINNING")],
 )
 def test_the_history_period_reaches_since(
     mock_api: respx.MockRouter, store: MemorySessionStore, days_back: int, period: str
